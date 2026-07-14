@@ -132,3 +132,30 @@ Implement work from `AIREVIEW-PLAN-001` in dependency order. Update the active p
 - **Notes**: Created a master roadmap and fourteen implementation plans with dependencies, file lists, TDD checks, risks, and independent exit gates.
 
 ---
+
+## [LRN-20260714-005] best_practice
+
+**Logged**: 2026-07-14T20:10:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: docs
+
+### Summary
+The project README should connect the Chongming mythology to concrete system mechanisms while clearly separating product vision from implemented capability.
+
+### Details
+The double-pupil metaphor maps naturally to role-specific contexts and multi-perspective review, while the guardian metaphor maps to evidence validation and the human-controlled Gate. Because the repository is still at the framework-spike stage, the README must label planned architecture and MVP boundaries explicitly instead of presenting roadmap items as released features.
+
+### Suggested Action
+Keep the README's current-status section synchronized with the numbered implementation plans. Promote capabilities from planned to available only after their plan exit criteria and verification evidence are complete.
+
+### Metadata
+- Source: conversation
+- Related Files: README.md, docs/AIREVIEW-PLAN-001-总体实施路线图.md
+- Tags: readme, brand-story, implementation-status, documentation
+
+### Resolution
+- **Resolved**: 2026-07-14T20:10:00+08:00
+- **Notes**: Added a README that ties the Chongming story to evidence-driven debate, documents the planned architecture, and states the current implementation stage.
+
+---
