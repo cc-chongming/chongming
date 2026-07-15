@@ -262,3 +262,29 @@ Use `NoopSnapshotSpec` whenever `REVIEW_AGENTSCOPE_INITIALIZE_SCHEMA=false`; ena
 - Tags: agentscope, mysql, snapshot, ddl, migration, production-safety
 
 ---
+
+## [LRN-20260715-005] behavior
+
+**Logged**: 2026-07-15T18:32:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+Markdown intake explicitly rejects a zero-byte upload with `EMPTY_MARKDOWN` (HTTP 422); empty-file coverage must verify rejection rather than an empty-content hash.
+
+### Details
+
+The validator checks `sourceByteCount == 0` before producing normalized staging files. A later PLAN-005 coverage test initially assumed that empty UTF-8 Markdown was accepted, and the full verification exposed the existing contract. The intended behavior is now covered directly and no workspace snapshot is created for empty input.
+
+### Suggested Action
+
+Keep `EMPTY_MARKDOWN` in the public intake error contract and include it whenever client validation or API documentation lists rejected Markdown content.
+
+### Metadata
+- Source: clean_verify
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/document/MarkdownRequirementValidator.java, src/test/java/ai/cc/chongming/review/document/MarkdownRequirementValidatorTests.java
+- Tags: markdown, validation, empty-file, api-contract
+
+---

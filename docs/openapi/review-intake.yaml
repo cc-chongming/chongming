@@ -1,0 +1,109 @@
+openapi: 3.1.0
+info:
+  title: Chongming Review Intake API
+  version: 0.1.0
+  description: Creates an asynchronous Markdown review intake and its immutable workspace snapshot.
+paths:
+  /api/reviews:
+    post:
+      summary: Submit a Markdown requirement for review
+      operationId: createReview
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [requirementFile, repositoryPath, submitter]
+              properties:
+                requirementFile:
+                  type: string
+                  format: binary
+                  description: UTF-8 Markdown file whose filename ends in .md.
+                repositoryPath:
+                  type: string
+                branch:
+                  type: string
+                commit:
+                  type: string
+                submitter:
+                  type: string
+                forceNewAttempt:
+                  type: boolean
+                  default: false
+                  description: Creates the next immutable attempt instead of replaying a matching intake.
+      responses:
+        '202':
+          description: Intake accepted. The `reused` flag identifies an idempotent replay.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateReviewResponse'
+        '400':
+          description: A required multipart part or request parameter is missing, or the upload cannot be read.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Intake was cancelled before its snapshot was published.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: The deployment's multipart request-size limit was exceeded.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The filename, extension, UTF-8 encoding, or text content is invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: An unexpected server failure occurred while accepting the request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  schemas:
+    CreateReviewResponse:
+      type: object
+      required: [reviewId, attempt, snapshotHash, statusUrl, reused]
+      properties:
+        reviewId:
+          type: string
+          format: uuid
+        attempt:
+          type: integer
+          minimum: 1
+        snapshotHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        statusUrl:
+          type: string
+          format: uri-reference
+        reused:
+          type: boolean
+    Problem:
+      type: object
+      required: [type, title, status, detail, code]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
