@@ -1,6 +1,6 @@
 # 工程基线与 AgentScope 正式版验证计划
 
-> **状态**: ⏳ 待实施
+> **状态**: 🚧 进行中（工程基线与公开 API 兼容性已验证；Adapter 和完整 MySQL 恢复场景待实施）
 > **创建日期**: 2026-07-14
 > **目标**: 锁定可重复构建的工程基线，并用自动化测试确认 AgentScope 2.0.0 正式制品满足核心 Harness 能力。
 > **前置计划**: 无
@@ -14,32 +14,32 @@
 
 ## 1. 分段方案
 
-### 1.1 固化依赖和构建基线 ⏳
+### 1.1 固化依赖和构建基线 ✅
 
 - 修改 `pom.xml`：集中管理 AgentScope 2.0.0、MySQL 扩展、MySQL Driver、Validation、Actuator、Testcontainers、JaCoCo。
 - 保留 Spring MVC + MyBatis 阻塞模型，不引入 WebFlux/JPA。
 - 增加 Maven Enforcer：Java 21、禁止 SNAPSHOT、依赖收敛。
 - 验收：IDEA 完整构建成功；依赖树中无 AgentScope 非 2.0.0 版本。
 
-### 1.2 建立配置契约 ⏳
+### 1.2 建立配置契约 ✅
 
 - 新建 `ReviewProperties`、`AgentScopeProperties`、`ModelGatewayProperties`，凭证只接受环境变量。
-- `application.yml` 只保留非敏感默认值；创建 `application-test.yml` 使用 MockModel 和 Testcontainers 动态配置。
+- `application.yml` 只保留非敏感默认值；创建 `application-test.yml` 关闭数据源自动装配，供无 Docker、无模型密钥的基线测试使用。
 - 验收：缺少必须配置时启动失败并给出明确字段；日志不打印密钥。
 
-### 1.3 Harness/Plan Mode 合约测试 ⏳
+### 1.3 Harness/Plan Mode 合约测试 🚧
 
 - 使用可控 MockModel 构造最小 `HarnessAgent`。
 - 验证 Plan Mode 进入/退出、计划文件写入、任务清单更新和 RuntimeContext 透传。
 - 记录正式版实际事件类型、顺序和线程模型，形成 `AgentScopeCompatibilityReport.md`。
 
-### 1.4 子 Agent 与持久会话合约测试 ⏳
+### 1.4 子 Agent 与持久会话合约测试 🚧
 
 - 验证 `agent_spawn` 同步/后台模式、稳定 label、`agent_send`、`persistSession`。
 - 验证同 `userId + sessionId` 恢复上下文，不同角色会话隔离。
 - 验证父 Plan 状态、权限和子事件是否传播；差异必须由 Adapter 测试固定。
 
-### 1.5 MySQL 扩展可用性 Spike ⏳
+### 1.5 MySQL 扩展可用性 Spike 🚧
 
 - 确认正式版 `agentscope-extensions-mysql:2.0.0` 可解析并与项目 DataSource 集成。
 - 验证 AgentState、workspace KV、snapshot 和锁在 MySQL 重启后恢复。
@@ -59,23 +59,23 @@
 
 | 范围            | 相对文件                                                  | 计划段      | 状态 |
 |---------------|-------------------------------------------------------|----------|----|
-| main          | `config/ReviewProperties.java`                        | #1.2     | ⏳  |
-| main          | `config/AgentScopeProperties.java`                    | #1.2     | ⏳  |
-| main          | `config/ModelGatewayProperties.java`                  | #1.2     | ⏳  |
+| main          | `config/ReviewProperties.java`                        | #1.2     | ✅  |
+| main          | `config/AgentScopeProperties.java`                    | #1.2     | ✅  |
+| main          | `config/ModelGatewayProperties.java`                  | #1.2     | ✅  |
 | main          | `infrastructure/agentscope/AgentRuntimeAdapter.java`  | #1.6     | ⏳  |
 | test          | `support/FakeAgentRuntimeAdapter.java`                | #1.6     | ⏳  |
-| test          | `compatibility/HarnessPlanModeCompatibilityTests.java` | #1.3     | ⏳  |
-| test          | `compatibility/SubagentCompatibilityTests.java`        | #1.4     | ⏳  |
-| test          | `compatibility/MysqlAgentStateCompatibilityTests.java` | #1.5     | ⏳  |
-| test-resource | `application-test.yml`                                | #1.2     | ⏳  |
-| docs          | `验证记录/AgentScopeCompatibilityReport.md`               | #1.3-1.5 | ⏳  |
+| test          | `compatibility/HarnessPlanModeCompatibilityTests.java` | #1.3     | ✅  |
+| test          | `compatibility/HarnessSubagentCompatibilityTests.java` | #1.4     | 🟡  |
+| test          | `compatibility/MysqlAgentStateCompatibilityTests.java` | #1.5     | 🟡  |
+| test-resource | `application-test.yml`                                | #1.2     | ✅  |
+| docs          | `验证记录/AgentScopeCompatibilityReport.md`            | #1.3-1.5 | ✅  |
 
 ### 2.2 修改
 
 | 文件                                              | 计划段       | 状态 |
 |-------------------------------------------------|-----------|----|
-| `pom.xml`                                       | #1.1、#1.5 | ⏳  |
-| `src/main/resources/application.yml`            | #1.2      | ⏳  |
+| `pom.xml`                                       | #1.1、#1.5 | ✅  |
+| `src/main/resources/application.yml`            | #1.2      | ✅  |
 | `src/main/java/ai/cc/chongming/FirstAgent.java` | #1.6      | ⏳  |
 
 ## 3. 实施顺序
@@ -108,3 +108,11 @@
 | 日期         | 变更                         |
 |------------|----------------------------|
 | 2026-07-14 | 创建工程基线、正式版兼容性 Spike 和退出门禁。 |
+| 2026-07-15 | 完成依赖、配置和公开 Harness API 基线；记录 Docker 缺失导致的 MySQL 集成测试跳过。 |
+
+## 7. 当前验证结论
+
+- `./mvnw.cmd test`（Java 21.0.10）通过：6 个测试执行，5 个通过、1 个因本机无 Docker 自动跳过。
+- `agentscope-harness:2.0.0`、`agentscope-extensions-mysql:2.0.0` 与 MySQL Driver 均从受管仓库成功解析，Maven Enforcer 已验证无 SNAPSHOT 依赖和依赖收敛。
+- 公开 API 已确认：Plan Mode 的计划文件为 `plans/PLAN.md`；Harness 可通过 `subagentFactory` 创建命名子 Agent；`MysqlAgentStateStore` 需要显式调用 `close()`，但不实现 `AutoCloseable`。
+- 下一步继续 #1.4—#1.6：覆盖 `agent_spawn`/`agent_send` 的事件、权限和会话恢复；在 Docker 可用环境执行 MySQL 重启恢复、workspace KV、snapshot 与锁验证；再实现 `AgentRuntimeAdapter`。

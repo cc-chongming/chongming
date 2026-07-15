@@ -1,0 +1,15 @@
+review:
+  workspace-root: ${java.io.tmpdir}/chongming-test-workspace
+  max-agents: 8
+  max-debate-rounds: 2
+  agentscope:
+    persist-session: false
+    state-home: ${java.io.tmpdir}/chongming-test-state
+  model-gateway:
+    enabled: false
+    api-key-environment-variable: CHONGMING_TEST_API_KEY
+
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration

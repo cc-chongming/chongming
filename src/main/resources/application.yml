@@ -1,3 +1,16 @@
 spring:
   application:
     name: chongming
+
+review:
+  workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}
+  max-agents: 8
+  max-debate-rounds: 2
+  agentscope:
+    persist-session: true
+    state-home: ${AGENTSCOPE_STATE_HOME:.agentscope/state}
+  model-gateway:
+    enabled: ${REVIEW_MODEL_GATEWAY_ENABLED:false}
+    base-url: ${REVIEW_MODEL_GATEWAY_BASE_URL:}
+    model-name: ${REVIEW_MODEL_GATEWAY_MODEL_NAME:}
+    api-key-environment-variable: ${REVIEW_MODEL_GATEWAY_API_KEY_ENV:DASHSCOPE_API_KEY}
