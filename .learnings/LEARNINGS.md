@@ -185,3 +185,55 @@ AgentScope 2.0.0 的 `MysqlAgentStateStore` 必须显式关闭，不能作为 tr
 - Tags: agentscope, mysql, lifecycle, testcontainers
 
 ---
+
+## [LRN-20260715-002] compatibility
+
+**Logged**: 2026-07-15T14:48:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+AgentScope Harness 会按 `userId + sessionId` 恢复状态；固定脚本模型的协议测试必须隔离状态目录，并排除非协议的辅助模型调用。
+
+### Details
+
+在同一个 JVM 内复用相同 `userId + sessionId` 时，Harness 会从 `agentscope.state.home` 下恢复此前保存的 AgentState，导致测试获得旧上下文。为每个测试设置独立的临时 state home 后，`agent_spawn`、稳定 label 的 `agent_send`、`persistSession=true` 与 child source 事件透传均可重复验证。记忆钩子会额外调用模型；在固定响应序列的协议测试中应使用 `disableMemoryHooks()`，避免辅助调用抢占用于 `agent_send` 的脚本响应。
+
+### Suggested Action
+
+兼容性测试为每个用例隔离 state home，并明确 userId、sessionId 和脚本模型响应序列。仅在验证底层协议时关闭非协议钩子；生产运行时是否启用记忆能力必须由领域编排和成本策略单独决定。
+
+### Metadata
+- Source: compatibility_test
+- Related Files: src/test/java/ai/cc/chongming/review/compatibility/HarnessSubagentEventCompatibilityTests.java, docs/验证记录/AgentScopeCompatibilityReport.md
+- Tags: agentscope, harness, session, persistence, memory-hooks, testing
+
+---
+
+## [LRN-20260715-003] compatibility
+
+**Logged**: 2026-07-15T15:25:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+AgentScope 2.0.0 不会自动将父 Harness 的 Plan 状态或自定义子代理工厂场景下的 DENY Permission 规则传播到子 Harness。
+
+### Details
+
+本地 `agentscope-java` 的 2.0.1-SNAPSHOT 源码已经包含父 Plan 状态和 DENY 规则传播逻辑，但项目锁定的正式制品是 2.0.0。固定脚本模型验证表明：正式版允许父 Agent 在 Plan Mode 中调用 `agent_spawn`，子 Harness 也会被创建和执行，却保持非 Plan 状态；同时，`subagentFactory` 创建的子 Harness 不含父侧 DENY 规则。同步/后台 spawn、child event、稳定 label 的 `agent_send` 和 `persistSession` 均可用。
+
+### Suggested Action
+
+正式 `AgentRuntimeAdapter` 创建子 Harness 时显式应用父 Plan/只读策略和 DENY 规则，并由 `ReviewProtocolGuard` 在业务层重复强制安全边界。不要依据本地 SNAPSHOT 源码推断正式版行为；升级 AgentScope 前先运行该兼容性测试组。
+
+### Metadata
+- Source: compatibility_test
+- Related Files: src/test/java/ai/cc/chongming/review/compatibility/HarnessPlanModeSubagentCompatibilityTests.java, src/test/java/ai/cc/chongming/review/compatibility/HarnessSubagentPropagationCompatibilityTests.java, docs/技术方案/AI需求评审Agent_AgentScope2技术方案.md
+- Tags: agentscope, harness, plan-mode, permission, adapter, compatibility
+
+---

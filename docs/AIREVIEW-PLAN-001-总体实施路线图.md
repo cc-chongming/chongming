@@ -1,13 +1,13 @@
 # AI 需求评审 Agent 总体实施路线图
 
-> **状态**: ⏳ 待实施
+> **状态**: 🚧 进行中
 > **创建日期**: 2026-07-14
 > **目标**: 将技术方案拆分为可独立开发、独立验证、可并行交付的计划单元。
 > **上位方案**: `docs/技术方案/AI需求评审Agent_AgentScope2技术方案.md`
 
 ## 0. 背景与执行规则
 
-当前仓库只有 Spring Boot 骨架、`FirstAgent` 示例和基础依赖，尚未形成评审领域代码。项目采用单体模块，但能力横跨 AgentScope
+当前仓库已完成 Spring Boot 与 AgentScope 2.0.0 兼容性工程基线，包含配置契约、Adapter/Fake 和 Harness 合约测试；尚未形成评审领域代码。项目采用单体模块，但能力横跨 AgentScope
 Harness、
 MySQL、MyBatis、SSE、Vue 3/Vite 前端（静态产物部署）、模型网关和通知 MCP，因此计划统一放在项目根 `docs/` 下。
 

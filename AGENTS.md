@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a single-module Java 21 Spring Boot application built with Maven. Production code lives under `src/main/java/ai/cc/chongming`; `ChongmingApplication` is the web application entry point and `FirstAgent` is the AgentScope example. Runtime configuration belongs in `src/main/resources/application.yml`. Tests mirror the production package under `src/test/java`. Product and design material is kept in `docs/`, while AgentScope runtime state is written beneath `.agentscope/workspace/`. Treat `target/` as generated output and do not commit it.
+This is a single-module Java 21 Spring Boot application built with Maven. Production code lives under `src/main/java/ai/cc/chongming`; `ChongmingApplication` is the web application entry point. AgentScope behavior is covered by compatibility tests under `src/test/java`. Runtime configuration belongs in `src/main/resources/application.yml`. Tests mirror the production package under `src/test/java`. Product and design material is kept in `docs/`, while AgentScope runtime state is written beneath `.agentscope/workspace/`. Treat `target/` as generated output and do not commit it.
 
 ## Build, Test, and Development Commands
 
@@ -17,7 +17,7 @@ On macOS or Linux, replace `mvnw.cmd` with `./mvnw`.
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation, UTF-8, and standard Java naming: `PascalCase` types, `camelCase` methods and variables, and lowercase package names. Keep classes in the `ai.cc.chongming` package tree and favor constructor injection for Spring components. Avoid database queries inside loops; batch-load or join data instead. Never hard-code credentials—`FirstAgent` expects `DASHSCOPE_API_KEY` from the environment.
+Use four-space indentation, UTF-8, and standard Java naming: `PascalCase` types, `camelCase` methods and variables, and lowercase package names. Keep classes in the `ai.cc.chongming` package tree and favor constructor injection for Spring components. Avoid database queries inside loops; batch-load or join data instead. Never hard-code credentials; model gateway credentials must come from environment variables.
 
 ## Testing Guidelines
 

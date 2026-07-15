@@ -59,7 +59,7 @@ Agent，并保留从需求快照、Evidence、Claim、DebateTurn、Judge 到人�
 
 ## 当前状态与路线图
 
-项目目前处于**工程基线与框架验证阶段**：仓库已包含 Spring Boot 骨架、AgentScope 2.0.0 示例、完整技术方案，以及 1 个总体路线图和
+项目目前处于**工程基线与框架验证阶段**：仓库已包含 Spring Boot 骨架、AgentScope 2.0.0 兼容性测试、完整技术方案，以及 1 个总体路线图和
 14 个可独立开发、独立验证的专项计划。业务能力尚未完成，请勿将规划项视为已上线功能。
 
 六周路线依次交付：框架兼容性验证 → 可信输入与代码证据 → 多 Agent 编排 → 对抗辩论与 Gate → 人工审核与通知 →
@@ -67,11 +67,9 @@ Agent，并保留从需求快照、Evidence、Claim、DebateTurn、Judge 到人�
 
 ## 本地开发
 
-环境要求：JDK 21、可用的 Maven Wrapper，以及兼容 OpenAI API 的模型凭证。当前 `FirstAgent` 示例使用 `DASHSCOPE_API_KEY`
-，密钥必须通过环境变量提供。
+环境要求：JDK 21 和可用的 Maven Wrapper。当前工程基线与兼容性测试不连接模型服务；后续接入模型网关时，密钥只可通过环境变量提供。
 
 ```powershell
-$env:DASHSCOPE_API_KEY = "your-api-key"
 .\mvnw.cmd clean verify
 .\mvnw.cmd spring-boot:run
 ```

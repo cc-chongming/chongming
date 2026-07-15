@@ -95,7 +95,13 @@ MVP 跑通以下闭环：
 `streamEvents()` 是否转发子事件”存在口径差异。本地源码只用于理解实现，不作为项目依赖；运行行为以 AgentScope `2.0.0`
 正式制品和自动化兼容测试为准。
 
-即使锁定版本已实现父子 Plan 传播，所有子 Agent 仍需显式配置只读工具白名单、工作区根目录和 Permission 规则，在文件工具层再次禁止写入和目录逃逸。
+截至 2026-07-15，正式版 `2.0.0` 的兼容性测试结论如下：
+
+- 同步 `agent_spawn`、稳定 label 的 `agent_send`、`persistSession`、同步 child 事件透传和 `timeout_seconds=0` 后台任务均可用。
+- 父 Harness 处于 Plan Mode 时仍可 spawn 子 Harness，但子 Harness **不会**继承 Plan 状态。
+- 通过自定义 `subagentFactory` 创建的子 Harness **不会**自动复制父侧 DENY Permission 规则。
+
+因此，所有子 Agent 都必须由 `AgentRuntimeAdapter` 显式应用只读/Plan 策略、DENY 规则、工作区根目录和工具白名单；不得将本地 `2.0.1-SNAPSHOT` 的自动传播实现当作正式版能力。文件工具层仍须禁止写入和目录逃逸。
 
 ### 3.3 版本策略
 
@@ -105,7 +111,7 @@ MVP 跑通以下闭环：
 - Plan Mode 与计划文件；
 - `agent_spawn`、`agent_send` 和 `persistSession`；
 - 同步子 Agent 事件来源和顺序；
-- 父 Plan 状态向子 Harness 的传播；
+- 父 Plan 状态和 DENY Permission 规则向子 Harness 的传播差异；
 - 状态恢复、权限、任务取消和 MCP 注册。
 
 若正式版行为与本地源码或在线文档不同，优先通过 `AgentRuntimeAdapter` 和项目业务层兼容，不切换到内部制品；同时保存兼容性测试结果，作为后续升级依据。
