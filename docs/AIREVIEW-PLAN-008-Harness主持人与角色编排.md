@@ -21,7 +21,7 @@
 
 ### 1.2 Workspace 布局 ⏳
 
-- 固定 `reviews/{reviewId}/{attempt}/input|snapshot|plans|evidence|claims|debates|reports`。
+- 固定 `reviews/{reviewId}/input|snapshot`，以及 `reviews/{reviewId}/attempts/{attempt}/plans|evidence|claims|debates|reports`。
 - Agent 只可写自己的计划/公开协作文件；业务事实必须通过强类型工具落库。
 - workspace 文件包含 schemaVersion 和 hash，不作为最终状态源。
 
@@ -74,9 +74,9 @@
 | `src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java`                 | #1.3-1.7 | ⏳  |
 | `src/main/java/ai/cc/chongming/review/application/RoleActivationService.java`                      | #1.5     | ⏳  |
 | `src/main/java/ai/cc/chongming/review/application/ReviewRecoveryService.java`                      | #1.7     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/agentscope/ReviewDirectorHarnessTest.java`                   | #1.1-1.3 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/agentscope/RoleSubagentIsolationTest.java`                   | #1.4-1.6 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/agentscope/ReviewOrchestrationRecoveryIntegrationTest.java`  | #1.7-1.8 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/agentscope/ReviewDirectorHarnessTests.java`                   | #1.1-1.3 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/agentscope/RoleSubagentIsolationTests.java`                   | #1.4-1.6 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/agentscope/ReviewOrchestrationRecoveryIntegrationTests.java`  | #1.7-1.8 | ⏳  |
 
 ### 2.2 修改
 

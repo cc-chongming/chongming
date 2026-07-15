@@ -64,9 +64,9 @@
 | main          | `config/ModelGatewayProperties.java`                  | #1.2     | ⏳  |
 | main          | `infrastructure/agentscope/AgentRuntimeAdapter.java`  | #1.6     | ⏳  |
 | test          | `support/FakeAgentRuntimeAdapter.java`                | #1.6     | ⏳  |
-| test          | `compatibility/HarnessPlanModeCompatibilityTest.java` | #1.3     | ⏳  |
-| test          | `compatibility/SubagentCompatibilityTest.java`        | #1.4     | ⏳  |
-| test          | `compatibility/MysqlAgentStateCompatibilityTest.java` | #1.5     | ⏳  |
+| test          | `compatibility/HarnessPlanModeCompatibilityTests.java` | #1.3     | ⏳  |
+| test          | `compatibility/SubagentCompatibilityTests.java`        | #1.4     | ⏳  |
+| test          | `compatibility/MysqlAgentStateCompatibilityTests.java` | #1.5     | ⏳  |
 | test-resource | `application-test.yml`                                | #1.2     | ⏳  |
 | docs          | `验证记录/AgentScopeCompatibilityReport.md`               | #1.3-1.5 | ⏳  |
 

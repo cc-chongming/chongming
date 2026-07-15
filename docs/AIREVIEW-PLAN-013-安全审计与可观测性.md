@@ -79,10 +79,10 @@
 | `src/main/java/ai/cc/chongming/review/infrastructure/security/PromptInjectionGuard.java` | #1.4      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/audit/AuditService.java`            | #1.7      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/observability/ReviewMetrics.java`   | #1.8      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/security/InputOutputSecurityTest.java`             | #1.2      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/security/AgentToolPermissionTest.java`             | #1.3-1.4  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/security/HumanReviewAuthorizationTest.java`        | #1.5      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/audit/AuditAppendOnlyIntegrationTest.java`         | #1.7      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/security/InputOutputSecurityTests.java`             | #1.2      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/security/AgentToolPermissionTests.java`             | #1.3-1.4  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/security/HumanReviewAuthorizationTests.java`        | #1.5      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/audit/AuditAppendOnlyIntegrationTests.java`         | #1.7      | ⏳  |
 | `docs/运维/ReviewAgentRunbook.md`                                                          | #1.9      | ⏳  |
 
 ### 2.2 修改

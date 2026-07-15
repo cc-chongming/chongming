@@ -1,7 +1,7 @@
 # 多智能体对抗式需求评审与门禁系统技术方案
 
 > 基于 AgentScope Java 2.0 正式版、Spring Boot 4、MyBatis、`agentscope-extensions-mysql` 的两人 AI-native 团队 MVP 方案  
-> 需求来源：`E:\aicode\chongming\docs\需求文档\AI需求评审Agent_团队赛道项目方案V2.md:1`
+> 需求来源：`docs\需求文档\AI需求评审Agent_团队赛道项目方案V2.md:1`
 
 ## 1. 结论
 
@@ -62,32 +62,32 @@ MVP 跑通以下闭环：
 ### 3.1 已核实的本地源码能力
 
 - Harness 集成 filesystem、sandbox、subagent、skill、Plan Mode 和 MCP 编排：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:129`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:129`。
 - `HarnessAgent.Builder` 原生支持 Plan Mode：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:1794`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:1794`。
 - Harness 可启用任务清单：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:1430`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:1430`。
 - Harness 可注册自定义子 Agent 工厂：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:1633`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:1633`。
 - 子 Agent 支持持久会话，适合多轮辩论保持角色上下文：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\subagent\SubagentDeclaration.java:463`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\subagent\SubagentDeclaration.java:463`。
 - `agent_spawn` 支持同步或后台创建子 Agent：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:66`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:66`。
 - `agent_send` 可向已创建的子 Agent 追加质询：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:67`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:67`。
 - Harness 支持带 `RuntimeContext` 的 `streamEvents()`：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:750`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:750`。
 - 当前本地源码会转发同步 `agent_spawn/agent_send` 的子 Agent 事件：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:761`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\HarnessAgent.java:761`。
 - 当前本地源码在父 Agent 处于 Plan Mode 时检测该状态：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:299`
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:299`
   ，并让 Harness 子 Agent 进入 Plan Mode：
-  `E:\aicode\agentscope-java\agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:301`。
+  `<agentscope-java>/agentscope-harness\src\main\java\io\agentscope\harness\agent\tool\AgentSpawnTool.java:301`。
 - `ReActAgent` 提供结构化输出能力：
-  `E:\aicode\agentscope-java\agentscope-core\src\main\java\io\agentscope\core\ReActAgent.java:634`。
+  `<agentscope-java>/agentscope-core\src\main\java\io\agentscope\core\ReActAgent.java:634`。
 - Agent 状态可按 `userId + sessionId` 保存与恢复：
-  `E:\aicode\agentscope-java\docs\v2\zh\docs\building-blocks\agent.md:444`。
-- 工具权限可暂停并产生人工确认事件：`E:\aicode\agentscope-java\docs\v2\zh\docs\building-blocks\permission-system.md:347`。
+  `<agentscope-java>/docs\v2\zh\docs\building-blocks\agent.md:444`。
+- 工具权限可暂停并产生人工确认事件：`<agentscope-java>/docs\v2\zh\docs\building-blocks\permission-system.md:347`。
 
 ### 3.2 文档与源码差异
 
@@ -99,7 +99,7 @@ MVP 跑通以下闭环：
 
 ### 3.3 版本策略
 
-项目统一锁定 AgentScope 正式版 `2.0.0`：`E:\aicode\chongming\pom.xml:31`。不使用本地 `2.0.1-SNAPSHOT`、浮动版本或内部修复制品。
+项目统一锁定 AgentScope 正式版 `2.0.0`：`pom.xml:31`。不使用本地 `2.0.1-SNAPSHOT`、浮动版本或内部修复制品。
 第 1 周必须完成正式版兼容性 Spike，验证以下能力在 `2.0.0` 中的实际行为：
 
 - Plan Mode 与计划文件；
@@ -181,6 +181,9 @@ ai.cc.chongming.review
 └── config
 ```
 
+上述 `agent` 是逻辑分组；AgentScope 的 Adapter、Harness、工具和事件适配实现统一放在
+`infrastructure/agentscope/`，与专项计划中的文件清单保持一致，不额外创建平行的 `agent/` 源码根。
+
 ## 6. 上下文与工作区设计
 
 ### 6.1 共享事实，隔离推理
@@ -197,14 +200,16 @@ Claim、相关证据和已公开回合。
 reviews/{reviewId}/
 ├── input/requirement.md
 ├── snapshot/manifest.json
-├── plans/PLAN.md
-├── plans/history/plan-{version}.md
-├── evidence/evidence.jsonl
-├── claims/{roleCode}.jsonl
-├── debates/{topicId}/round-{round}.jsonl
-└── reports/draft.md
+└── attempts/{attempt}/
+    ├── plans/PLAN.md
+    ├── plans/history/plan-{version}.md
+    ├── evidence/evidence.jsonl
+    ├── claims/{roleCode}.jsonl
+    ├── debates/{topicId}/round-{round}.jsonl
+    └── reports/draft.md
 ```
 
+需求和快照在同一 `reviewId` 下复用；计划、证据、主张、辩论和报告必须按 `attempt` 隔离，重试不得覆盖历史产物。
 workspace 用于协作和演示，MySQL 用于状态恢复、唯一性、事务和审计。Agent 不得直接修改业务表，只能调用受控工具。
 
 ### 6.3 RolePack
@@ -331,6 +336,10 @@ public interface DebateTools {
 
 任意执行态可进入 `FAILED`；取消经过 `CANCELLING → CANCELLED`。重试创建新的 `attemptNo`，不得覆盖旧 AgentRun、辩论回合或事件。
 
+Gate 契约分为两类：AI 草案使用 `AI_PASS | CONDITIONAL | BLOCK | RETURN | HUMAN_REQUIRED`；人工最终决定使用
+`PASS | CONDITIONAL | BLOCK | RETURN | OVERRIDE`。`HUMAN_REQUIRED` 不是 ReviewStage，产生同名事件并转入
+`WAITING_HUMAN`。
+
 每个动作使用幂等键：
 
 `reviewId:topicId:round:actorRole:turnType`
@@ -411,6 +420,7 @@ excerpt, excerptHash, fileHash, createdAt
 | `judge_decision`       | Judge 对争议的采信结论、依据和人工升级建议         |
 | `gate_decision`        | AI 草案、规则命中、人工决定、override         |
 | `review_event`         | 可重放领域事件，`reviewId + sequence` 唯一 |
+| `human_review_item`    | 人工审核草稿、引用、动作与版本                   |
 | `audit_event`          | 只追加的操作与状态审计                      |
 | `model_call_log`       | 模型调用元数据和失败信息                     |
 | `notification_outbox`  | 通知命令、幂等键、重试和结果                   |
@@ -428,7 +438,9 @@ excerpt, excerptHash, fileHash, createdAt
 - `GET /api/reviews/{id}/events`：SSE，支持 `Last-Event-ID`。
 - `GET /api/reviews/{id}/plans`：计划及版本历史。
 - `GET /api/reviews/{id}/debates`：辩题、回合和立场变化。
-- `GET /api/reviews/{id}/report`：角色报告、裁决和 Gate 草案。
+- `GET /api/reviews/{id}/evidence/{evidenceId}`：单条证据详情，仅按服务端 ID 查询。
+- `GET /api/reviews/{id}/report`：角色报告、裁决和 Gate 草案；支持 `?format=markdown`。
+- `GET /api/reviews/{id}/report/versions`：报告版本历史。
 - `GET /api/reviews/{id}/human-review-items`：查询人工审核条目。
 - `POST /api/reviews/{id}/human-review-items`：新增人工审核条目。
 - `PATCH /api/reviews/{id}/human-review-items/{itemId}`：编辑未提交的人工审核条目。
@@ -439,11 +451,12 @@ excerpt, excerptHash, fileHash, createdAt
 
 ### 11.2 领域事件
 
-AgentScope 原始事件先经 `AgentEventAdapter` 转为项目事件。正式辩论事件只在 DebateTools 成功后产生：
+AgentScope 原始事件先经 `AgentEventAdapter` 转为项目事件。成功的业务工具动作产生正式领域事件；EvidenceValidator
+拒绝证据时产生 `EVIDENCE_REJECTED`，但不会创建有效 Claim 或 DebateTurn：
 
 - `PLAN_CREATED`、`PLAN_REVISED`
 - `ROLE_ACTIVATED`、`ROLE_STARTED`、`ROLE_COMPLETED`、`ROLE_FAILED`
-- `CLAIM_SUBMITTED`、`EVIDENCE_CITED`
+- `CLAIM_SUBMITTED`、`EVIDENCE_CITED`、`EVIDENCE_REJECTED`
 - `DEBATE_OPENED`、`CHALLENGE_SUBMITTED`、`REBUTTAL_SUBMITTED`
 - `POSITION_CHANGED`、`DEBATE_RESOLVED`、`DEBATE_ESCALATED`
 - `JUDGEMENT_SUBMITTED`、`HUMAN_REQUIRED`、`GATE_DECIDED`
@@ -451,12 +464,12 @@ AgentScope 原始事件先经 `AgentEventAdapter` 转为项目事件。正式辩
 统一事件包含：
 
 ```text
-eventId, sequence, reviewId, type, stage,
+eventId, sequence, reviewId, attempt, type, category, stage,
 actorRole, targetRole, topicId, claimId, turnId,
-round, progress, occurredAt, payload
+round, progress, occurredAt, payloadVersion, payload
 ```
 
-当前项目使用 Spring MVC：`E:\aicode\chongming\pom.xml:36`。使用 `SseEmitter` 桥接 AgentScope Flux，不同时引入 WebFlux 和
+当前项目使用 Spring MVC：`pom.xml:36`。使用 `SseEmitter` 桥接 AgentScope Flux，不同时引入 WebFlux 和
 MyBatis 阻塞链路。前端按 sequence 幂等合并，断线后先回放数据库事件再继续实时订阅。
 
 ### 11.3 前端辩论工作台

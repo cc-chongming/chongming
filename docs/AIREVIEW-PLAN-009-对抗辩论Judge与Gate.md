@@ -57,7 +57,8 @@
 ### 1.8 GatePolicy 与草案 ⏳
 
 - 聚合 P0/P1、UNVERIFIED、Judge 结论、核心角色失败和规则命中。
-- 输出 AI_PASS/CONDITIONAL/BLOCK/RETURN/HUMAN_REQUIRED 草案，不形成最终状态。
+- 输出 AI_PASS/CONDITIONAL/BLOCK/RETURN/HUMAN_REQUIRED 草案，不形成最终状态；HUMAN_REQUIRED 触发 WAITING_HUMAN。
+- 人工最终决定使用 PASS/CONDITIONAL/BLOCK/RETURN/OVERRIDE，与 AI 草案枚举分离。
 - P1 默认 Gate 与 override 权限做配置策略；未确认前默认 HUMAN_REQUIRED。
 
 ## 2. DebateTools 接口草案
@@ -85,12 +86,12 @@ submitJudgement(command) -> JudgeDecisionResult
 | `src/main/java/ai/cc/chongming/review/domain/gate/GatePolicy.java`                            | #1.8     | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/DebateTools.java`        | #1.3     | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/DebateToolCommands.java` | #1.3     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/debate/ClaimServiceTest.java`                           | #1.1     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/debate/ConflictDetectorTest.java`                       | #1.2     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/debate/DebateToolsContractTest.java`                    | #1.3-1.6 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/debate/JudgeServiceTest.java`                           | #1.7     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/debate/GatePolicyTest.java`                             | #1.8     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/debate/DebateGoldenPathIntegrationTest.java`            | #1.1-1.8 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/debate/ClaimServiceTests.java`                           | #1.1     | ⏳  |
+| `src/test/java/ai/cc/chongming/review/debate/ConflictDetectorTests.java`                       | #1.2     | ⏳  |
+| `src/test/java/ai/cc/chongming/review/debate/DebateToolsContractTests.java`                    | #1.3-1.6 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/debate/JudgeServiceTests.java`                           | #1.7     | ⏳  |
+| `src/test/java/ai/cc/chongming/review/debate/GatePolicyTests.java`                             | #1.8     | ⏳  |
+| `src/test/java/ai/cc/chongming/review/debate/DebateGoldenPathIntegrationTests.java`            | #1.1-1.8 | ⏳  |
 
 ### 3.2 修改
 

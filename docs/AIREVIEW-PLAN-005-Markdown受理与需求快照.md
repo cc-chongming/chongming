@@ -60,9 +60,9 @@ MVP 只接收 UTF-8 `.md` 文件，不解析 Word/PDF。当前不设置业务文
 | `src/main/java/ai/cc/chongming/review/infrastructure/document/MarkdownRequirementValidator.java` | #1.2      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/document/MarkdownRequirementParser.java`    | #1.4      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/document/RequirementSnapshotStore.java`     | #1.5      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/api/ReviewCommandControllerTest.java`                      | #1.1、#1.6 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/document/MarkdownRequirementValidatorTest.java`            | #1.2-1.4  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/document/ReviewIntakeIntegrationTest.java`                 | #1.5-1.6  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/api/ReviewCommandControllerTests.java`                      | #1.1、#1.6 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/document/MarkdownRequirementValidatorTests.java`            | #1.2-1.4  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/document/ReviewIntakeIntegrationTests.java`                 | #1.5-1.6  | ⏳  |
 
 ### 2.2 修改
 

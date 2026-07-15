@@ -15,23 +15,21 @@ sequence，
 
 ### 1.1 统一事件信封 ⏳
 
--
+字段：eventId、sequence、reviewId、attempt、type、category、stage、actorRole、targetRole、topicId、claimId、turnId、round、progress、occurredAt、payloadVersion、payload。
 
-字段：eventId、sequence、reviewId、attempt、type、stage、actorRole、targetRole、topicId、claimId、turnId、round、occurredAt、payloadVersion。
-
-- 事件类型初始冻结：PLAN、ROLE、CLAIM、EVIDENCE、DEBATE、JUDGEMENT、HUMAN、GATE、NOTIFICATION、ERROR。
+- type 使用 PLAN_CREATED、ROLE_ACTIVATED 等具体事件名；category 初始冻结为 PLAN、ROLE、CLAIM、EVIDENCE、DEBATE、JUDGEMENT、HUMAN、GATE、NOTIFICATION、ERROR。
 - payload 版本化，未知字段向后兼容。
 
 ### 1.2 事务事件写入 ⏳
 
 - 领域命令成功后同事务写状态和 `review_event`。
-- sequence 按 review+attempt 单调递增；唯一索引处理并发。
+- sequence 按 review 全局单调递增，重试 attempt 不重置；`review_id + sequence` 唯一索引处理并发。
 - 事件只追加，不提供修改/删除；审计事件独立记录操作者。
 
 ### 1.3 读模型与查询 API ⏳
 
 - `GET /api/reviews/{id}` 聚合概要、阶段、进度和 Gate 状态。
-- `GET /plans`、`GET /debates` 和 `GET /evidence/{evidenceId}` 使用批量 Repository 装配；Evidence API 只接受服务端
+- `GET /api/reviews/{id}/plans`、`GET /api/reviews/{id}/debates` 和 `GET /api/reviews/{id}/evidence/{evidenceId}` 使用批量 Repository 装配；Evidence API 只接受服务端
   ID，不接受文件路径。
 - 所有时间输出 `yyyy-MM-dd HH:mm:ss`，列表分页或基于 sequence 游标。
 
@@ -80,10 +78,10 @@ sequence，
 | `src/main/java/ai/cc/chongming/review/api/ReviewEventStreamController.java`          | #1.4     | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/sse/ReviewSseRegistry.java`     | #1.4     | ⏳  |
 | `src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java`       | #1.6-1.8 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/event/ReviewEventStoreIntegrationTest.java`    | #1.1-1.2 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/api/ReviewQueryControllerTest.java`            | #1.3     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/sse/ReviewSseReplayIntegrationTest.java`       | #1.4-1.5 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/lifecycle/ReviewLifecycleIntegrationTest.java` | #1.6-1.8 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/event/ReviewEventStoreIntegrationTests.java`    | #1.1-1.2 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/api/ReviewQueryControllerTests.java`            | #1.3     | ⏳  |
+| `src/test/java/ai/cc/chongming/review/sse/ReviewSseReplayIntegrationTests.java`       | #1.4-1.5 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/lifecycle/ReviewLifecycleIntegrationTests.java` | #1.6-1.8 | ⏳  |
 
 ### 2.2 修改
 
@@ -122,3 +120,5 @@ sequence，
 | 日期         | 变更                        |
 |------------|---------------------------|
 | 2026-07-14 | 创建事件信封、SSE 回放、取消、重试和恢复计划。 |
+| 2026-07-15 | sequence 对齐技术方案：重试保留 attempt 字段但不重置同一 review 的事件序号。 |
+| 2026-07-15 | 查询 API 对齐技术方案：统一使用 `/api/reviews/{id}/...` 路径并明确证据详情接口。 |

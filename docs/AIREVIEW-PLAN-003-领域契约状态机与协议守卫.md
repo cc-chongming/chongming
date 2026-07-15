@@ -26,13 +26,13 @@ Harness 可以自主计划，但不能修改强制角色、Agent 上限、辩论
 
 ### 1.3 评审主状态机 ⏳
 
-- 状态建议：CREATED → SNAPSHOTTING → PLANNING → REVIEWING → DEBATING → JUDGING → HUMAN_REVIEW → COMPLETED。
-- 失败分支：FAILED、CANCELLED；重试创建新 attempt，不回写旧 attempt。
+- 状态固定为：PENDING → SNAPSHOTTING → PLANNING → INITIAL_REVIEW → CONFLICT_DETECTION → DEBATE_ROUND_1 → DEBATE_ROUND_2 → JUDGING → WAITING_HUMAN → NOTIFYING → COMPLETED。
+- 任一执行态可进入 FAILED；取消经过 CANCELLING → CANCELLED；重试创建新 attempt，不回写旧 attempt。
 - 每个迁移声明触发者、前置条件、事件和可恢复点。
 
 ### 1.4 辩题状态机 ⏳
 
-- 状态：OPEN → CHALLENGED → REBUTTED → RESOLVED/ESCALATED/CLOSED。
+- 状态：OPEN → CHALLENGED → REBUTTED → RESOLVED/ESCALATED。
 - 每个辩题最多两轮；Challenge 必须引用 `targetClaimId`，回应必须引用 `targetTurnId`。
 - 已收敛可提前结束；无共识、证据不足或超时转人工。
 
@@ -78,9 +78,9 @@ Harness 可以自主计划，但不能修改强制角色、Agent 上限、辩论
 | `src/main/java/ai/cc/chongming/review/domain/protocol/DebateStateMachine.java`     | #1.4      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/domain/exception/ReviewDomainException.java` | #1.1      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/domain/repository/ReviewRepositories.java`   | #1.6      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/domain/ReviewStateMachineTest.java`          | #1.3      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/domain/DebateStateMachineTest.java`          | #1.4      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/domain/ReviewProtocolGuardTest.java`         | #1.5-1.6  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/domain/ReviewStateMachineTests.java`          | #1.3      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/domain/DebateStateMachineTests.java`          | #1.4      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/domain/ReviewProtocolGuardTests.java`         | #1.5-1.6  | ⏳  |
 
 ### 3.2 修改
 
@@ -114,3 +114,4 @@ Harness 可以自主计划，但不能修改强制角色、Agent 上限、辩论
 | 日期         | 变更                       |
 |------------|--------------------------|
 | 2026-07-14 | 创建领域契约、双状态机、协议守卫和幂等规则计划。 |
+| 2026-07-15 | 评审主状态机对齐技术方案：补齐初始评审、冲突检测、分轮辩论、通知与取消状态。 |

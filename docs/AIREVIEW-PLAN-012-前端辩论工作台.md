@@ -7,8 +7,7 @@
 
 ## 0. 背景与边界
 
-核心界面不是“多个角色报告页”，而是辩论时间线。仓库当前没有独立前端工程，MVP 默认使用 Spring Boot `static/` 下的 HTML、CSS 和
-ES Module JavaScript，避免新增 Node 构建链；若后续确定 Vue/React，本计划的页面契约与状态模型保持不变，仅调整文件清单。
+核心界面不是“多个角色报告页”，而是辩论时间线。MVP 采用技术方案确定的 Vue 3 工作台：前端源码位于 `frontend/`，通过 Vite 开发和构建；生产构建产物由 Spring Boot 的静态资源目录托管。页面契约与状态模型保持独立，后续如调整构建方式不得改变 API、SSE 或事件语义。
 
 ## 1. 分段方案
 
@@ -27,7 +26,7 @@ ES Module JavaScript，避免新增 Node 构建链；若后续确定 Vue/React�
 ### 1.3 API Client 与本地 Store ⏳
 
 - 封装 reviews、plans、debates、report、human-review-items API。
-- Store 以 reviewId+attempt+sequence 幂等合并，不直接用 DOM 作为状态源。
+- Store 以 reviewId+sequence 幂等合并；attempt 用于展示与筛选，不作为事件去重键；不直接用 DOM 作为状态源。
 - 类型/字段契约保存在 JSON 样本，后端变更需同步更新。
 
 ### 1.4 SSE 连接与恢复 ⏳
@@ -70,7 +69,7 @@ ES Module JavaScript，避免新增 Node 构建链；若后续确定 Vue/React�
 
 - 中文专业界面、空状态、加载骨架、错误边界、键盘可操作和基础响应式。
 - 颜色不是唯一状态信号；P0/P1、立场变化和人工介入有文本/图标。
-- 固定 Demo 模式关闭随机动画，保证 6～8 分钟讲解节奏。
+- 固定 Demo 模式关闭随机动画，保证现场 6～8 分钟讲解节奏；五分钟录制视频遵循需求文档的独立脚本。
 
 ## 2. 文件清单
 
@@ -78,33 +77,37 @@ ES Module JavaScript，避免新增 Node 构建链；若后续确定 Vue/React�
 
 | 文件                                                                    | 计划段           | 状态 |
 |-----------------------------------------------------------------------|---------------|----|
-| `src/main/resources/static/review/index.html`                         | #1.1-1.2      | ⏳  |
-| `src/main/resources/static/review/workbench.html`                     | #1.1、#1.5-1.9 | ⏳  |
-| `src/main/resources/static/review/report.html`                        | #1.1、#1.9     | ⏳  |
-| `src/main/resources/static/review/css/review.css`                     | #1.1、#1.10    | ⏳  |
-| `src/main/resources/static/review/js/review-api.js`                   | #1.3          | ⏳  |
-| `src/main/resources/static/review/js/review-store.js`                 | #1.3-1.4      | ⏳  |
-| `src/main/resources/static/review/js/review-create.js`                | #1.2          | ⏳  |
-| `src/main/resources/static/review/js/review-sse.js`                   | #1.4          | ⏳  |
-| `src/main/resources/static/review/js/plan-panel.js`                   | #1.5          | ⏳  |
-| `src/main/resources/static/review/js/debate-timeline.js`              | #1.6          | ⏳  |
-| `src/main/resources/static/review/js/evidence-drawer.js`              | #1.7          | ⏳  |
-| `src/main/resources/static/review/js/human-review.js`                 | #1.8          | ⏳  |
-| `src/main/resources/static/review/js/report-view.js`                  | #1.9          | ⏳  |
-| `src/test/resources/ui/events-golden.json`                            | #1.3-1.6      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/ui/ReviewWorkbenchE2ETest.java` | #1.2-1.10     | ⏳  |
+| `frontend/package.json`                                               | #1.1、#1.10    | ⏳  |
+| `frontend/vite.config.js`                                             | #1.1          | ⏳  |
+| `frontend/index.html`                                                 | #1.1          | ⏳  |
+| `frontend/src/main.js`                                                | #1.1          | ⏳  |
+| `frontend/src/App.vue`                                                | #1.1          | ⏳  |
+| `frontend/src/router/index.js`                                        | #1.1          | ⏳  |
+| `frontend/src/styles/review.css`                                      | #1.1、#1.10    | ⏳  |
+| `frontend/src/api/review-api.js`                                      | #1.3          | ⏳  |
+| `frontend/src/stores/review-store.js`                                 | #1.3-1.4      | ⏳  |
+| `frontend/src/views/ReviewCreateView.vue`                             | #1.2          | ⏳  |
+| `frontend/src/views/ReviewWorkbenchView.vue`                          | #1.1、#1.5-1.9 | ⏳  |
+| `frontend/src/views/ReviewReportView.vue`                             | #1.1、#1.9     | ⏳  |
+| `frontend/src/components/PlanPanel.vue`                               | #1.5          | ⏳  |
+| `frontend/src/components/DebateTimeline.vue`                          | #1.6          | ⏳  |
+| `frontend/src/components/EvidenceDrawer.vue`                          | #1.7          | ⏳  |
+| `frontend/src/components/HumanReviewPanel.vue`                        | #1.8          | ⏳  |
+| `frontend/src/services/review-sse.js`                                 | #1.4          | ⏳  |
+| `frontend/src/test/events-golden.json`                                | #1.3-1.6      | ⏳  |
+| `frontend/tests/review-workbench.e2e.js`                              | #1.2-1.10     | ⏳  |
 
 ### 2.2 修改
 
 | 文件                                   | 计划段   | 状态 |
 |--------------------------------------|-------|----|
-| `pom.xml`                            | #1.10 | ⏳  |
 | `src/main/resources/application.yml` | #1.1  | ⏳  |
+| `src/main/resources/static/review/`  | #1.10 | ⏳  |
 
 ## 3. 实施顺序
 
-1. **步骤 1**：冻结页面线框、API/SSE 黄金样本和 Store 测试场景。
-2. **步骤 2**：实现创建页、API Client、Store 和 SSE 恢复。
+1. **步骤 1**：初始化 Vue 3/Vite 工程，冻结页面线框、API/SSE 黄金样本和 Store 测试场景。
+2. **步骤 2**：实现 Vue 创建页、API Client、Store 和 SSE 恢复。
 3. **步骤 3**：实现 Plan/角色面板、辩论时间线和 Evidence 抽屉。
 4. **步骤 4**：实现人工审核、报告和通知状态。
 5. **步骤 5**：执行浏览器 E2E、断线、刷新、安全渲染和可用性检查。
@@ -123,11 +126,13 @@ ES Module JavaScript，避免新增 Node 构建链；若后续确定 Vue/React�
 | 风险         | 应对                                    |
 |------------|---------------------------------------|
 | 事件类型持续变化   | 以 versioned fixture 驱动 Store，未知事件降级显示 |
-| 原生 JS 规模失控 | 按功能 ES Module 拆分，状态集中在 Store，不全局挂载    |
+| Vue 组件状态分散 | 按页面与组件边界拆分，状态集中在 Store，不在组件间隐式传递 |
 | 展示“思维链”风险  | 只渲染公开字段，后端 DTO 也不返回隐藏推理               |
 
 ## 6. 变更记录
 
 | 日期         | 变更                                   |
 |------------|--------------------------------------|
-| 2026-07-14 | 创建静态前端、SSE Store、辩论时间线、人工审核和 E2E 计划。 |
+| 2026-07-14 | 创建前端工作台、SSE Store、辩论时间线、人工审核和 E2E 计划。 |
+| 2026-07-15 | 前端实现方案对齐技术方案：采用 Vue 3/Vite，并更新源码、构建与 E2E 文件清单。 |
+| 2026-07-15 | SSE 去重键对齐技术方案：使用 reviewId+sequence，重试 attempt 不重置 sequence。 |

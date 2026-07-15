@@ -34,12 +34,13 @@
 
 - 网络错误/429 指数退避最多两次；业务校验失败不盲目重试。
 - 按需角色失败可部分完成；核心角色失败禁止 AI_PASS；Judge 失败交给确定性 Gate 草案。
-- 全部模型不可用时只返回证据与规则结果，状态转 HUMAN_REQUIRED。
+- 全部模型不可用时只返回证据与规则结果，生成 HUMAN_REQUIRED Gate 草案并进入 WAITING_HUMAN。
 
 ### 1.5 RolePack 规范 ⏳
 
 - 四核心：product、project、frontend、backend。
-- 三按需：security、data、test/ops 中按需求选择；角色库可扩展但单场上限由 Guard 控制。
+- 三按需：security、architecture、test 中按需求选择；角色库可扩展但单场上限由 Guard 控制。
+- MVP 只实现上述三个按需角色；其余角色模板保留契约，不进入首期交付范围。
 - Judge 只读取已落库 Claim/Evidence/Turn，不重新浏览仓库或编造新事实。
 - 每个 RolePack 包含职责、关注点、允许工具、输入视图、输出 schema、promptVersion。
 
@@ -73,12 +74,12 @@
 | `src/main/resources/roles/frontend.yml`                                                  | #1.5          | ⏳  |
 | `src/main/resources/roles/backend.yml`                                                   | #1.5          | ⏳  |
 | `src/main/resources/roles/security.yml`                                                  | #1.5          | ⏳  |
-| `src/main/resources/roles/data.yml`                                                      | #1.5          | ⏳  |
-| `src/main/resources/roles/test-ops.yml`                                                  | #1.5          | ⏳  |
+| `src/main/resources/roles/architecture.yml`                                              | #1.5          | ⏳  |
+| `src/main/resources/roles/test.yml`                                                      | #1.5          | ⏳  |
 | `src/main/resources/roles/judge.yml`                                                     | #1.5          | ⏳  |
-| `src/test/java/ai/cc/chongming/review/model/StructuredOutputDecoderTest.java`            | #1.3          | ⏳  |
-| `src/test/java/ai/cc/chongming/review/model/ModelGatewayContractTest.java`               | #1.2-1.4、#1.7 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/role/RolePackContractTest.java`                    | #1.5-1.6      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/model/StructuredOutputDecoderTests.java`            | #1.3          | ⏳  |
+| `src/test/java/ai/cc/chongming/review/model/ModelGatewayContractTests.java`               | #1.2-1.4、#1.7 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/role/RolePackContractTests.java`                    | #1.5-1.6      | ⏳  |
 
 ### 2.2 修改
 
@@ -116,3 +117,4 @@
 | 日期         | 变更                                            |
 |------------|-----------------------------------------------|
 | 2026-07-14 | 创建模型 Profile、Gateway、结构化输出、RolePack 和上下文隔离计划。 |
+| 2026-07-15 | MVP 按需角色对齐需求文档：security、architecture、test。 |

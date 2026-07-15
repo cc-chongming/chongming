@@ -46,7 +46,7 @@ Agent 需要读取代码并给出绝对路径和单行号，但不得执行仓�
 
 - Evidence 只追加，重复哈希去重并保留引用者关系。
 - 提供按 evidenceIds 批量加载和一次性校验，禁止 Claim 循环逐条查库。
-- 产生 EVIDENCE_CITED/REJECTED 领域事件和详细拒绝原因。
+- 证据采信产生 `EVIDENCE_CITED`；EvidenceValidator 拒绝时产生 `EVIDENCE_REJECTED` 并记录详细拒绝原因。
 
 ### 1.7 安全与性能测试 ⏳
 
@@ -68,9 +68,9 @@ Agent 需要读取代码并给出绝对路径和单行号，但不得执行仓�
 | `src/main/java/ai/cc/chongming/review/infrastructure/repository/RepositorySearchIndex.java`        | #1.3      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/ReadOnlyRepositoryTools.java` | #1.4      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/EvidenceTools.java`           | #1.4-1.6  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/repository/RepositoryBoundaryGuardTest.java`                 | #1.1、#1.7 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/repository/RepositorySnapshotIntegrationTest.java`           | #1.2-1.3  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/evidence/EvidenceLedgerIntegrationTest.java`                 | #1.5-1.7  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/repository/RepositoryBoundaryGuardTests.java`                 | #1.1、#1.7 | ⏳  |
+| `src/test/java/ai/cc/chongming/review/repository/RepositorySnapshotIntegrationTests.java`           | #1.2-1.3  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/evidence/EvidenceLedgerIntegrationTests.java`                 | #1.5-1.7  | ⏳  |
 
 ### 2.2 修改
 
@@ -108,3 +108,4 @@ Agent 需要读取代码并给出绝对路径和单行号，但不得执行仓�
 | 日期         | 变更                          |
 |------------|-----------------------------|
 | 2026-07-14 | 创建仓库边界、只读工具、快照、证据哈希与批量校验计划。 |
+| 2026-07-15 | 证据拒绝事件对齐技术方案：统一使用 `EVIDENCE_REJECTED`，不创建有效 Claim 或 DebateTurn。 |

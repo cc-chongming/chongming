@@ -16,12 +16,12 @@ Agent 验证，
 ### 1.1 人工审核草稿模型 ⏳
 
 - 审核条目字段：itemId、type、severity、title、content、claim/evidence 引用、action、version。
-- 仅 HUMAN_REVIEW 阶段允许新增、编辑、删除草稿；查询支持状态和严重度过滤。
+- 仅 WAITING_HUMAN 阶段允许新增、编辑、删除草稿；查询支持状态和严重度过滤。
 - 每次 CRUD 写 audit_event，删除采用草稿状态删除，不删除审计记录。
 
 ### 1.2 草稿 CRUD API ⏳
 
-- GET/POST `/human-review-items`，PATCH/DELETE `/{itemId}`。
+- GET/POST `/api/reviews/{id}/human-review-items`，PATCH/DELETE `/api/reviews/{id}/human-review-items/{itemId}`。
 - expectedVersion 防并发覆盖；错误返回 404、409、422。
 - ReviewerIdentity 由可替换接口提供；未接认证时只允许本地 Demo profile。
 
@@ -36,7 +36,7 @@ Agent 验证，
 - 结构化 JSON 与 Markdown 同步生成，包含 Plan、角色、Claim、Evidence、Debate、Judge、Gate、人工决定。
 - 每个结论可反向链接到单行证据；不展示隐藏思维链。
 - 报告生成失败不回滚人工决定，可重试并保留版本。
-- 提供 `GET /api/reviews/{id}/report`、`GET /report/versions` 和 `GET /report?format=markdown`；使用 golden-file 固定
+- 提供 `GET /api/reviews/{id}/report`、`GET /api/reviews/{id}/report/versions` 和 `GET /api/reviews/{id}/report?format=markdown`；使用 golden-file 固定
   Markdown 格式。
 
 ### 1.5 Notification Outbox ⏳
@@ -74,12 +74,12 @@ Agent 验证，
 | `src/main/java/ai/cc/chongming/review/infrastructure/notification/NotificationOutboxWorker.java`   | #1.5-1.6  | ⏳  |
 | `docs/集成/学习通通知MCP契约.md`                                                                            | #1.6      | ⏳  |
 | `src/test/resources/contracts/learning-platform-notification.json`                                 | #1.6      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/human/HumanReviewServiceTest.java`                           | #1.1-1.3  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/api/HumanReviewControllerTest.java`                          | #1.2-1.3  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/report/ReviewReportIntegrationTest.java`                     | #1.4      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/human/HumanReviewServiceTests.java`                           | #1.1-1.3  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/api/HumanReviewControllerTests.java`                          | #1.2-1.3  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/report/ReviewReportIntegrationTests.java`                     | #1.4      | ⏳  |
 | `src/test/resources/golden/review-report.md`                                                       | #1.4      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/notification/NotificationOutboxIntegrationTest.java`         | #1.5      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/notification/LearningPlatformMcpContractTest.java`           | #1.6      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/notification/NotificationOutboxIntegrationTests.java`         | #1.5      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/notification/LearningPlatformMcpContractTests.java`           | #1.6      | ⏳  |
 
 ### 2.2 修改
 
@@ -117,3 +117,5 @@ Agent 验证，
 | 日期         | 变更                                     |
 |------------|----------------------------------------|
 | 2026-07-14 | 创建人工草稿、版本化 Gate、报告、Outbox 和学习通 MCP 计划。 |
+| 2026-07-15 | 人工审核阶段名称对齐技术方案：WAITING_HUMAN。 |
+| 2026-07-15 | 人工审核与报告 API 对齐技术方案：统一使用 `/api/reviews/{id}/...` 路径。 |

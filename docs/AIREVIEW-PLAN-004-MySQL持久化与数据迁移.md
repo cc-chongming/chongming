@@ -16,13 +16,13 @@ AgentScope 运行态使用 `agentscope-extensions-mysql` 保存 AgentState、wor
 
 - 接入 MySQL Driver、连接池和 Flyway；凭证来自环境变量。
 - 生产关闭 AgentScope 自动建表时需有明确初始化方案；测试可按正式 API选择自动初始化。
-- 表统一 `review_` 业务前缀；AgentScope 表使用扩展默认或配置前缀。
+- 业务表名称以技术方案的数据模型表清单为准，不额外施加统一 `review_` 前缀；AgentScope 表使用扩展默认或配置前缀。
 
 ### 1.2 核心评审表迁移 ⏳
 
-- 创建 request、plan、requirement_snapshot、repository_snapshot、role_activation、agent_run。
+- 创建 review_request、review_plan、requirement_snapshot、repository_snapshot、role_activation、agent_run。
 - 所有表含 created_at、updated_at、version；只追加表不提供 update/delete Mapper。
-- 对 `review_id + attempt`、`review_id + sequence`、session/label 建唯一索引。
+- attempt 范围数据使用 `review_id + attempt`；`review_event` 使用 `review_id + sequence` 唯一索引；session/label 建唯一约束。
 
 ### 1.3 论点、辩论与 Gate 表迁移 ⏳
 
@@ -33,7 +33,7 @@ AgentScope 运行态使用 `agentscope-extensions-mysql` 保存 AgentState、wor
 ### 1.4 审计、事件、报告和通知表 ⏳
 
 - 创建 review_event、audit_event、model_call_log、notification_outbox、review_report、human_review_item。
-- 事件 sequence 在同 review/attempt 内单调递增；Outbox 使用状态、next_retry_at、attempt_count。
+- 事件 sequence 在同一 review 内全局单调递增，重试 attempt 不重置；Outbox 使用状态、next_retry_at、attempt_count。
 - 不保存隐藏思维链；模型日志只存元数据、公开输出哈希和失败摘要。
 
 ### 1.5 MyBatis DO、Mapper 与 Repository ⏳
@@ -67,9 +67,9 @@ AgentScope 运行态使用 `agentscope-extensions-mysql` 保存 AgentState、wor
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/dataobject/`                  | #1.5      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/`                      | #1.5      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/`                  | #1.5      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/persistence/MySqlMigrationIntegrationTest.java`          | #1.1-1.4  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/persistence/ReviewRepositoryIntegrationTest.java`        | #1.5      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/persistence/AgentScopeMysqlRecoveryIntegrationTest.java` | #1.6-1.7  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/persistence/MySqlMigrationIntegrationTests.java`          | #1.1-1.4  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/persistence/ReviewRepositoryIntegrationTests.java`        | #1.5      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/persistence/AgentScopeMysqlRecoveryIntegrationTests.java` | #1.6-1.7  | ⏳  |
 
 ### 2.2 修改
 
@@ -109,3 +109,4 @@ AgentScope 运行态使用 `agentscope-extensions-mysql` 保存 AgentState、wor
 | 日期         | 变更                                |
 |------------|-----------------------------------|
 | 2026-07-14 | 创建双层 MySQL、迁移、Repository、事务与恢复计划。 |
+| 2026-07-15 | 事件 sequence 对齐技术方案：在 review 范围全局递增，attempt 仅用于隔离业务产物。 |

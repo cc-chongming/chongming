@@ -17,7 +17,7 @@ On macOS or Linux, replace `mvnw.cmd` with `./mvnw`.
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation, UTF-8, and standard Java naming: `PascalCase` types, `camelCase` methods and variables, and lowercase package names. Keep classes in the `ai.cc.chongming` package tree and favor constructor injection for Spring components. All new Java type Javadocs must use `@author zyj`. Avoid database queries inside loops; batch-load or join data instead. Never hard-code credentials—`FirstAgent` expects `DASHSCOPE_API_KEY` from the environment.
+Use four-space indentation, UTF-8, and standard Java naming: `PascalCase` types, `camelCase` methods and variables, and lowercase package names. Keep classes in the `ai.cc.chongming` package tree and favor constructor injection for Spring components. Avoid database queries inside loops; batch-load or join data instead. Never hard-code credentials—`FirstAgent` expects `DASHSCOPE_API_KEY` from the environment.
 
 ## Testing Guidelines
 

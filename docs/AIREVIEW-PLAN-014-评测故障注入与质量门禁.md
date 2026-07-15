@@ -79,9 +79,9 @@ Agent
 |---------------------------------------------------------------------------------------|-----------|----|
 | `src/test/java/ai/cc/chongming/review/support/MockModelFixture.java`                  | #1.1      | ⏳  |
 | `src/test/java/ai/cc/chongming/review/support/ReviewFixtureFactory.java`              | #1.1      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/e2e/ReviewGoldenPathE2ETest.java`               | #1.1-1.2  | ⏳  |
-| `src/test/java/ai/cc/chongming/review/performance/ReviewPerformanceBaselineTest.java` | #1.3      | ⏳  |
-| `src/test/java/ai/cc/chongming/review/fault/ReviewFaultInjectionTest.java`            | #1.4      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/e2e/ReviewGoldenPathE2ETests.java`               | #1.1-1.2  | ⏳  |
+| `src/test/java/ai/cc/chongming/review/performance/ReviewPerformanceBaselineTests.java` | #1.3      | ⏳  |
+| `src/test/java/ai/cc/chongming/review/fault/ReviewFaultInjectionTests.java`            | #1.4      | ⏳  |
 | `src/test/resources/evaluation/dataset-manifest.yml`                                  | #1.5      | ⏳  |
 | `src/test/resources/evaluation/cases/`                                                | #1.5      | ⏳  |
 | `src/test/java/ai/cc/chongming/review/evaluation/ReviewEvaluationRunner.java`         | #1.6-1.7  | ⏳  |
