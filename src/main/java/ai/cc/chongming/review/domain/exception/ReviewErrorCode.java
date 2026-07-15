@@ -1,0 +1,22 @@
+package ai.cc.chongming.review.domain.exception;
+
+/**
+ * [AIREVIEW-PLAN-003#1.1] Supplies stable domain errors to API, Agent Tool and persistence adapters.
+ *
+ * @author wangli
+ */
+public enum ReviewErrorCode {
+    ILLEGAL_STATE_TRANSITION,
+    DUPLICATE_SUBMISSION,
+    INVALID_EVIDENCE,
+    DEBATE_ROUND_EXCEEDED,
+    UNAUTHORIZED_ROLE,
+    VERSION_CONFLICT,
+    AGENT_LIMIT_EXCEEDED,
+    CORE_ROLE_INITIAL_REVIEW_REQUIRED,
+    TARGET_CLAIM_REQUIRED,
+    TARGET_TURN_REQUIRED,
+    FINAL_GATE_REQUIRES_HUMAN,
+    REVIEW_ID_MISMATCH
+}
+

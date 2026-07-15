@@ -15,7 +15,7 @@ MySQL、MyBatis、SSE、Vue 3/Vite 前端（静态产物部署）、模型网关
 
 - 每个专项计划是一个最小交付单元，建议对应一个分支或 PR；分支名使用 `codex/aireview-plan-xxx`。
 - 开始专项前确认其前置计划已达到退出标准；允许使用已冻结接口 Mock 并行开发。
-- 新建或修改 Java 类必须包含 `[AIREVIEW-PLAN-XXX#段号]` 来源标记和 `@author zyj`。
+- 新建或修改 Java 类必须包含 `[AIREVIEW-PLAN-XXX#段号]` 来源标记和 `@author wangli`。
 - 每个功能遵循测试先行：先提交失败测试，再实现，再重构；单元与集成覆盖率目标不低于 80%。
 - 每完成一段，同步更新计划段状态、文件清单、变更记录和实际偏差。
 - Java 编辑、构建、测试和问题检查优先使用 IDEA MCP；禁止在循环中逐条查询数据库。
@@ -111,7 +111,7 @@ flowchart LR
 每个专项计划只有同时满足以下条件才能标记完成：
 
 1. 计划中所有必做段为 ✅，文件清单与实际一致。
-2. 代码含正确计划引用和 `@author zyj`。
+2. 代码含正确计划引用和 `@author wangli`。
 3. IDEA 构建 `isSuccess=true`，文件 problems 无 ERROR。
 4. 新增测试先失败后通过；单元、Web、MySQL 集成或合约测试与风险匹配。
 5. 无明文密钥，无目录逃逸，无绕过 ProtocolGuard 的业务写入。
