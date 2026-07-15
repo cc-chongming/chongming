@@ -237,3 +237,28 @@ AgentScope 2.0.0 不会自动将父 Harness 的 Plan 状态或自定义子代理
 - Tags: agentscope, harness, plan-mode, permission, adapter, compatibility
 
 ---
+## [LRN-20260715-004] compatibility
+
+**Logged**: 2026-07-15T17:20:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+AgentScope 2.0.0 `JdbcSnapshotSpec` always enables schema initialization; unlike `JdbcStore`, it exposes no public constructor or builder flag to suppress constructor-side DDL.
+
+### Details
+
+`MysqlAgentStateStore` and `JdbcStore` both support a production-safe `initializeSchema=false` mode. In contrast, both public `JdbcSnapshotSpec` constructors create `JdbcRemoteSnapshotClient(..., true)`. Building it against a shared production DataSource would therefore perform AgentScope snapshot auto-DDL even when the application's persistence bootstrap flag is false.
+
+### Suggested Action
+
+Use `NoopSnapshotSpec` whenever `REVIEW_AGENTSCOPE_INITIALIZE_SCHEMA=false`; enable `JdbcSnapshotSpec` only during a controlled bootstrap or after upgrading AgentScope to an API that separates snapshot construction from schema initialization. Keep business Flyway migrations independent from all AgentScope-owned tables.
+
+### Metadata
+- Source: local_agentscope_source
+- Related Files: src/main/java/ai/cc/chongming/review/config/ReviewPersistenceConfiguration.java, D:/GitCode/agentscope-java/agentscope-extensions/agentscope-extensions-mysql/src/main/java/io/agentscope/extensions/mysql/snapshot/JdbcSnapshotSpec.java
+- Tags: agentscope, mysql, snapshot, ddl, migration, production-safety
+
+---

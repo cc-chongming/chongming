@@ -36,6 +36,22 @@ public final class Review {
         return new Review(reviewId, ReviewStage.PENDING, 1, 0L);
     }
 
+    /**
+     * Rehydrates an aggregate from its persistence snapshot without replaying domain commands.
+     */
+    public static Review restore(
+            ReviewId reviewId,
+            ReviewStage stage,
+            int attemptNo,
+            long version,
+            List<RoleActivation> roleActivations,
+            Map<IdempotencyKey, String> commandResults) {
+        Review review = new Review(reviewId, stage, attemptNo, version);
+        review.roleActivations.addAll(List.copyOf(roleActivations));
+        review.commandResults.putAll(Map.copyOf(commandResults));
+        return review;
+    }
+
     public ReviewId id() {
         return id;
     }
@@ -54,6 +70,10 @@ public final class Review {
 
     public List<RoleActivation> roleActivations() {
         return List.copyOf(roleActivations);
+    }
+
+    public Map<IdempotencyKey, String> commandResults() {
+        return Map.copyOf(commandResults);
     }
 
     public void transitionTo(ReviewStateMachine stateMachine, ReviewStage nextStage) {

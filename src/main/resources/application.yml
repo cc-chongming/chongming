@@ -1,6 +1,8 @@
 spring:
   application:
     name: chongming
+  flyway:
+    enabled: false
 
 review:
   workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}
@@ -14,3 +16,17 @@ review:
     base-url: ${REVIEW_MODEL_GATEWAY_BASE_URL:}
     model-name: ${REVIEW_MODEL_GATEWAY_MODEL_NAME:}
     api-key-environment-variable: ${REVIEW_MODEL_GATEWAY_API_KEY_ENV:DASHSCOPE_API_KEY}
+  persistence:
+    # Disabled by default. Override these placeholders in the deployment environment.
+    enabled: ${REVIEW_PERSISTENCE_ENABLED:false}
+    jdbc-url: ${REVIEW_DB_URL:jdbc:mysql://127.0.0.1:3306/chongming_placeholder?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${REVIEW_DB_USERNAME:chongming_placeholder}
+    password: ${REVIEW_DB_PASSWORD:}
+    maximum-pool-size: ${REVIEW_DB_MAXIMUM_POOL_SIZE:8}
+    agentscope:
+      database-name: ${REVIEW_AGENTSCOPE_DATABASE:chongming_placeholder}
+      state-table-name: ${REVIEW_AGENTSCOPE_STATE_TABLE:chongming_agentscope_state}
+      workspace-table-name: ${REVIEW_AGENTSCOPE_WORKSPACE_TABLE:chongming_agentscope_workspace}
+      snapshot-table-name: ${REVIEW_AGENTSCOPE_SNAPSHOT_TABLE:chongming_agentscope_snapshot}
+      lock-key-prefix: ${REVIEW_AGENTSCOPE_LOCK_KEY_PREFIX:chongming:agentscope:lock:}
+      initialize-schema: ${REVIEW_AGENTSCOPE_INITIALIZE_SCHEMA:false}
