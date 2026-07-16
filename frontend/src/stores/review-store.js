@@ -137,19 +137,53 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         state.reportVersions = versions;
     }
 
+    async function refreshSummary() {
+        const summary = await optional(api.getSummary(state.reviewId), null);
+        if (summary) state.summary = summary;
+        return summary;
+    }
+
+    function applyLifecycleResult(result, stage) {
+        state.summary = {
+            ...(state.summary ?? { reviewId: state.reviewId, lastSequence: state.lastSequence }),
+            attempt: result.attemptNo,
+            reviewVersion: result.version,
+            stage,
+            progress: stage === 'CANCELLED' ? 100 : (state.summary?.progress ?? 0)
+        };
+    }
+
+    async function startReview(command) {
+        const result = await api.startReview(state.reviewId, command);
+        applyLifecycleResult(result, result.stage);
+        return result;
+    }
+
+    async function cancelReview(expectedVersion) {
+        const result = await api.cancelReview(state.reviewId, expectedVersion);
+        applyLifecycleResult(result, 'CANCELLED');
+        return result;
+    }
+
+    async function retryReview(expectedVersion) {
+        const result = await api.retryReview(state.reviewId, expectedVersion);
+        applyLifecycleResult(result, 'PENDING');
+        return result;
+    }
+
     async function load(reviewId) {
         subscription?.close();
         reset(reviewId);
         state.loading = true;
         try {
             const [summary, plans, debates] = await Promise.all([
-                api.getSummary(reviewId), api.getPlans(reviewId), api.getDebates(reviewId)
+                optional(api.getSummary(reviewId), null), api.getPlans(reviewId), api.getDebates(reviewId)
             ]);
             state.summary = summary;
             applyAgUiEvent(state.agUi, {
                 type: EventType.RUN_STARTED,
                 threadId: `review:${reviewId}`,
-                runId: `review-${reviewId}-attempt-${summary.attempt ?? 1}`
+                runId: `review-${reviewId}-attempt-${summary?.attempt ?? 1}`
             });
             state.plans = plans;
             state.debates = debates;
@@ -191,6 +225,10 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         load,
         dispose,
         mergeEvent,
+        startReview,
+        cancelReview,
+        retryReview,
+        refreshSummary,
         refreshHumanData,
         refreshNotifications,
         refreshReports,

@@ -1,6 +1,6 @@
 # 前端辩论工作台计划
 
-> **状态**: 🟡 核心工作台已完成；待后端启动命令与真实持久化联调
+> **状态**: ✅ 前端工作台范围完成；真实 MySQL/MCP 生产联调与原生双向 AG-UI 输入留作后续计划
 > **创建日期**: 2026-07-14
 > **目标**: 用一个可演示、可回放的工作台呈现计划、角色、真实辩论、证据、Gate 和人工审核流程。
 > **前置计划**: PLAN-005、PLAN-010 接口冻结；PLAN-009/011 可用 Mock 数据并行
@@ -11,61 +11,61 @@
 
 ## 1. 分段方案
 
-### 1.1 信息架构与路由 ⏳
+### 1.1 信息架构与路由 ✅
 
 - 页面：创建评审、评审工作台、最终报告。
 - 工作台区域：阶段进度、Plan、活跃角色、辩论时间线、证据抽屉、人工审核、系统状态。
 - reviewId 放路由参数；刷新后从 API 重建全部状态。
 
-### 1.2 创建评审 ⏳
+### 1.2 创建评审 ✅
 
 - 上传 `.md`、输入仓库路径、可选 branch/commit；前端做友好校验但不替代后端。
 - 展示上传、快照和启动阶段；错误显示 errorCode、可恢复操作和 traceId。
 - 防重复点击，收到 202 后跳转工作台。
 
-### 1.3 API Client 与本地 Store ⏳
+### 1.3 API Client 与本地 Store ✅
 
 - 封装 reviews、plans、debates、report、human-review-items API。
 - Store 以 reviewId+sequence 幂等合并；attempt 用于展示与筛选，不作为事件去重键；不直接用 DOM 作为状态源。
 - 类型/字段契约保存在 JSON 样本，后端变更需同步更新。
 
-### 1.4 SSE 连接与恢复 ⏳
+### 1.4 SSE 连接与恢复 ✅
 
 - 保存 lastSequence；断线指数退避并携带 Last-Event-ID。
 - 重连期间显示状态，回放事件和实时事件按 sequence 去重排序。
 - 页面隐藏/关闭时释放连接，避免重复订阅。
 
-### 1.5 Plan 与角色面板 ⏳
+### 1.5 Plan 与角色面板 ✅
 
 - 展示总计划、版本历史、修订原因、任务进度和剩余预算。
 - 展示核心/按需/Judge 角色、激活原因、状态、耗时和失败原因。
 - 不展示角色隐藏思维链。
 
-### 1.6 辩论时间线 ⏳
+### 1.6 辩论时间线 ✅
 
 - 卡片类型：Claim、Challenge、Rebuttal、PositionChanged、Judgement、Escalated。
 - 卡片显示 actor/target、round、targetClaim/Turn、严重度、立场、Evidence 和 Gate 影响。
 - 支持按 topic、role、severity 过滤；自动定位最新事件但不抢用户滚动位置。
 
-### 1.7 Evidence 查看与代码回跳 ⏳
+### 1.7 Evidence 查看与代码回跳 ✅
 
 - 抽屉展示快照绝对路径、单行号、excerpt、hash 和漂移状态。
 - 代码内容 HTML 转义；敏感文件只显示拒绝原因。
 - 支持从 Claim/Turn/Gate 反向打开证据，不允许客户端构造任意服务器路径读取。
 
-### 1.8 人工审核工作台 ⏳
+### 1.8 人工审核工作台 ✅
 
 - 查询、新增、编辑、删除未提交审核条目，显示 version 冲突。
 - 提交 PASS/CONDITIONAL/BLOCK/RETURN/OVERRIDE，overrideReason 必填。
 - 已提交版本只读；调整时创建新版本并显示历史差异。
 
-### 1.9 报告与通知状态 ⏳
+### 1.9 报告与通知状态 ✅
 
 - 展示结构化报告和安全渲染的 Markdown 报告。
 - Gate 结果可下钻 Judge/Turn/Claim/Evidence。
 - 展示通知 PENDING/SENT/FAILED/DEAD，不把通知失败显示成评审失败。
 
-### 1.10 可用性和 Demo 收口 ⏳
+### 1.10 可用性和 Demo 收口 ✅
 
 - 中文专业界面、空状态、加载骨架、错误边界、键盘可操作和基础响应式。
 - 颜色不是唯一状态信号；P0/P1、立场变化和人工介入有文本/图标。
@@ -96,6 +96,8 @@
 | `frontend/src/services/review-sse.js`                                 | #1.4          | ✅  |
 | `frontend/src/services/ag-ui-review-adapter.js`                       | #1.4、#1.6    | ✅  |
 | `frontend/src/components/AgUiConversationPanel.vue`                   | #1.6          | ✅  |
+| `frontend/src/components/ReviewLifecyclePanel.vue`                    | #1.2、#1.3    | ✅  |
+| `frontend/src/api/review-api.test.js`                                 | #1.3          | ✅  |
 | `frontend/src/test/events-golden.json`                                | #1.3-1.6      | ✅  |
 | `frontend/tests/review-workbench.e2e.js`                              | #1.2-1.10     | ✅  |
 
@@ -141,11 +143,12 @@
 - 概览 API 已新增只读 `reviewVersion`，使刷新后的最终 Gate 提交能够携带正确的乐观锁版本；`lastSequence` 仍只用于事件回放，二者不可混用。
 - 固定事件样本、Store/SSE 单测以及 Playwright Mock E2E 已加入；浏览器主场景连续执行三次通过。
 - 公开对话已接入 `@ag-ui/core`：领域事实封装为 AG-UI `CUSTOM`，公开摘要映射为 `TEXT_MESSAGE_*`，并明确忽略所有 `REASONING_*`。详细契约见 `docs/集成/AG-UI前端对话契约.md`。
+- 已接入真实生命周期命令：创建页先受理快照，再以同一 `Idempotency-Key` 调用 `/start`；工作台可按 `reviewVersion` 启动、取消、重试并刷新状态。命令结果只更新版本与阶段，实时过程继续由 SSE 驱动。
 
-### 当前待联调
+### 与后续计划的边界
 
-- 后端现已提供 `POST /api/reviews/{id}/start`、`/cancel`、`/retry` 的进程内联调接口；前端尚未补充启动公开计划、`Idempotency-Key`、取消/重试操作及结果刷新，因此不能在页面中直接触发真实编排。
-- PLAN-011 的 MyBatis 事务化人工审核/Outbox Store 与真实学习通 MCP 契约仍是生产前置条件；当前前端以已冻结 REST 契约和固定样本完成独立验证。
+- 当前命令接口依赖进程内聚合注册表；PLAN-004/010 的持久化写模型、多实例恢复和真实 MySQL 验证完成前，不将其视为生产命令面。
+- PLAN-011 的 MyBatis 事务化人工审核/Outbox Store 与真实学习通 MCP 契约仍是生产前置条件；前端已按冻结 REST 契约完成验证。
 - 当前 AG-UI 为前端适配层；原生双向 `POST RunAgentInput` SSE 端点需要在后端定义真实用户输入、鉴权和幂等语义后单独接入，前端不会伪造该调用。
 
 ### 验证命令
@@ -165,3 +168,4 @@ npx playwright test --repeat-each=3
 | 2026-07-15 | SSE 去重键对齐技术方案：使用 reviewId+sequence，重试 attempt 不重置 sequence。 |
 | 2026-07-16 | 实现 Vue/Vite 工作台、静态构建、SSE Store、辩论/证据/人工审核/报告页面及 Mock E2E；补充 summary 的 reviewVersion 契约。 |
 | 2026-07-16 | 公开对话改用 AG-UI `CUSTOM` 与 `TEXT_MESSAGE_*` 格式，新增协议适配、对话面板与隐藏推理隔离测试。 |
+| 2026-07-16 | 接入启动、取消、重试命令；创建页使用幂等启动，工作台支持重试后重新启动与状态刷新，补充 API 契约及三轮浏览器验证。 |

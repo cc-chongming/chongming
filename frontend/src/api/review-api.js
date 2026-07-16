@@ -83,6 +83,35 @@ export const reviewApi = {
         return request('/api/reviews', { method: 'POST', body: form });
     },
 
+    startReview(reviewId, {
+        expectedVersion,
+        idempotencyKey,
+        userId,
+        publicTasks,
+        changeReason,
+        initialMessage,
+        traceId
+    }) {
+        const payload = jsonBody({ expectedVersion, userId, publicTasks, changeReason, initialMessage });
+        return request(`/api/reviews/${reviewId}/start`, {
+            method: 'POST',
+            body: payload.body,
+            headers: {
+                ...payload.headers,
+                'Idempotency-Key': idempotencyKey,
+                ...(traceId ? { 'X-Trace-Id': traceId } : {})
+            }
+        });
+    },
+
+    cancelReview(reviewId, expectedVersion) {
+        return request(withQuery(`/api/reviews/${reviewId}/cancel`, { expectedVersion }), { method: 'POST' });
+    },
+
+    retryReview(reviewId, expectedVersion) {
+        return request(withQuery(`/api/reviews/${reviewId}/retry`, { expectedVersion }), { method: 'POST' });
+    },
+
     getSummary(reviewId) {
         return request(`/api/reviews/${reviewId}`);
     },

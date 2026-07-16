@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onUnmounted, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import AgUiConversationPanel from '../components/AgUiConversationPanel.vue';
 import DebateTimeline from '../components/DebateTimeline.vue';
 import EvidenceDrawer from '../components/EvidenceDrawer.vue';
 import HumanReviewPanel from '../components/HumanReviewPanel.vue';
+import ReviewLifecyclePanel from '../components/ReviewLifecyclePanel.vue';
 import PlanPanel from '../components/PlanPanel.vue';
 import { formatApiError, reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
@@ -12,6 +13,8 @@ import { createReviewStore } from '../stores/review-store';
 const props = defineProps({ reviewId: { type: String, required: true } });
 const store = createReviewStore();
 const state = store.state;
+const commandBusy = ref(false);
+const commandMessage = ref('');
 
 const connectionText = computed(() => ({
     idle: '未连接', connecting: '正在连接', connected: '实时同步中', reconnecting: '正在恢复连接',
@@ -30,6 +33,54 @@ async function retryNotification(entry) {
     try {
         await reviewApi.retryNotification(props.reviewId, entry.notificationId, entry.version);
         await store.refreshNotifications();
+    } catch (error) {
+        showError(error);
+    }
+}
+
+async function startReview(command) {
+    commandBusy.value = true;
+    commandMessage.value = '';
+    try {
+        const result = await store.startReview(command);
+        commandMessage.value = result.replayed ? '启动命令已重放，正在等待服务端事件。' : '启动命令已受理，正在等待服务端事件。';
+    } catch (error) {
+        showError(error);
+    } finally {
+        commandBusy.value = false;
+    }
+}
+
+async function cancelReview() {
+    commandBusy.value = true;
+    commandMessage.value = '';
+    try {
+        const result = await store.cancelReview(state.summary.reviewVersion);
+        commandMessage.value = result.replayed ? '取消命令已重放。' : '评审已取消。';
+    } catch (error) {
+        showError(error);
+    } finally {
+        commandBusy.value = false;
+    }
+}
+
+async function retryReview() {
+    commandBusy.value = true;
+    commandMessage.value = '';
+    try {
+        await store.retryReview(state.summary.reviewVersion);
+        commandMessage.value = '已创建新的评审尝试，请填写公开计划后启动。';
+    } catch (error) {
+        showError(error);
+    } finally {
+        commandBusy.value = false;
+    }
+}
+
+async function refreshSummary() {
+    try {
+        await store.refreshSummary();
+        commandMessage.value = '已从服务端刷新评审状态。';
     } catch (error) {
         showError(error);
     }
@@ -56,6 +107,15 @@ onUnmounted(() => store.dispose());
         <template v-else>
             <div class="workbench-grid">
                 <PlanPanel :summary="state.summary" :plans="state.plans" :roles="store.roles.value" />
+                <ReviewLifecyclePanel
+                    :summary="state.summary"
+                    :busy="commandBusy"
+                    :message="commandMessage"
+                    @start="startReview"
+                    @cancel="cancelReview"
+                    @retry="retryReview"
+                    @refresh="refreshSummary"
+                />
                 <DebateTimeline class="wide-panel" :debates="state.debates" @open-evidence="store.selectEvidence" />
                 <AgUiConversationPanel class="ag-ui-workbench-panel" :conversation="state.agUi" />
                 <HumanReviewPanel

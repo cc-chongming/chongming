@@ -28,3 +28,31 @@ test('renders a replayable debate workbench without executing report content', a
     await expect(page.getByText('<script>window.__xss = true</script>')).toBeVisible();
     await expect(page.locator('pre script')).toHaveCount(0);
 });
+
+test('starts a pending review with its server command contract', async ({ page }) => {
+    const calls = [];
+    await page.route('**/api/reviews/**', async (route) => {
+        const requestUrl = new URL(route.request().url());
+        const path = requestUrl.pathname;
+        const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path.endsWith('/events')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+        if (path === `/api/reviews/${reviewId}/start`) {
+            calls.push({ headers: route.request().headers(), body: route.request().postDataJSON() });
+            return json({ reviewId, attemptNo: 1, version: 3, stage: 'PLANNING', replayed: false }, 202);
+        }
+        if (path === `/api/reviews/${reviewId}`) return json({ reviewId, attempt: 1, stage: 'PENDING', progress: 0, lastSequence: 0, reviewVersion: 0, occurredAt: null, gate: null });
+        if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
+        if (path.endsWith('/debates')) return json([]);
+        if (path.endsWith('/human-review-items') || path.endsWith('/human-gate-decisions') || path.endsWith('/notifications') || path.endsWith('/report/versions')) return json([]);
+        if (path.endsWith('/report')) return json({ title: '报告' }, 404);
+        return json({});
+    });
+
+    await page.goto(`/index.html#/reviews/${reviewId}`);
+    await page.getByRole('button', { name: '开始评审' }).click();
+
+    await expect.poll(() => calls.length).toBe(1);
+    expect(calls[0].headers['idempotency-key']).toBeTruthy();
+    expect(calls[0].body).toMatchObject({ expectedVersion: 0, userId: 'demo-reviewer' });
+    await expect(page.getByText('启动命令已受理，正在等待服务端事件。')).toBeVisible();
+});
