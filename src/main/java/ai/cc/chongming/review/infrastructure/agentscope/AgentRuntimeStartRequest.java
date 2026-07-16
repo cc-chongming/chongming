@@ -1,5 +1,7 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.application.ReviewRuntimeContext;
+
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -11,5 +13,10 @@ public record AgentRuntimeStartRequest(
         @NotBlank String runtimeId,
         @NotBlank String userId,
         @NotBlank String sessionId,
-        @NotBlank String initialMessage) {
+        @NotBlank String initialMessage,
+        ReviewRuntimeContext runtimeContext) {
+
+    public AgentRuntimeStartRequest(String runtimeId, String userId, String sessionId, String initialMessage) {
+        this(runtimeId, userId, sessionId, initialMessage, null);
+    }
 }

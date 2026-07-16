@@ -7,7 +7,10 @@ package ai.cc.chongming.review.infrastructure.agentscope;
  */
 public enum AgentRuntimeEventType {
     STARTED,
+    ROLE_REGISTERED,
     MESSAGE_SENT,
     CANCELLED,
-    RESUMED
+    RESUMED,
+    RAW_EVENT,
+    FAILED
 }

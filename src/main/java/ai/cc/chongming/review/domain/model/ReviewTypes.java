@@ -88,6 +88,7 @@ public final class ReviewTypes {
      * @author wangli
      */
     public enum RoleType {
+        DIRECTOR,
         PRODUCT,
         PROJECT,
         FRONTEND,
@@ -103,7 +104,7 @@ public final class ReviewTypes {
         }
 
         public boolean isOptional() {
-            return !isCore() && this != JUDGE;
+            return !isCore() && this != DIRECTOR && this != JUDGE;
         }
     }
 

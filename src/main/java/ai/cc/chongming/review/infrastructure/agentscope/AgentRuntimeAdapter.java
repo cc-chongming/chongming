@@ -14,6 +14,8 @@ public interface AgentRuntimeAdapter {
 
     Flux<AgentRuntimeEvent> streamEvents(String runtimeId);
 
+    Mono<Void> registerRole(AgentRuntimeRoleRequest request);
+
     Mono<Void> send(String runtimeId, String recipientLabel, String message);
 
     Mono<Void> cancel(String runtimeId);

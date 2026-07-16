@@ -8,6 +8,9 @@ review:
   workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}
   max-agents: 8
   max-debate-rounds: 2
+  orchestration:
+    # Bounds director stage-plan rewrites; deployment may override this environment placeholder.
+    max-plan-revisions: ${REVIEW_MAX_PLAN_REVISIONS:3}
   repositories:
     # Intentionally empty by default. Deployments must map opaque repository IDs to local Git roots.
     allowed: []

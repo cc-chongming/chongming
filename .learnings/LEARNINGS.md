@@ -1,6 +1,28 @@
 # Learnings
 
 Record project-specific corrections, knowledge gaps, and reusable practices here.
+## [LRN-20260716-001] compatibility
+
+**Logged**: 2026-07-16T12:05:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+
+### Summary
+AgentScope Harness 的原始事件可不携带 metadata；启用 Plan Mode 后，模型桥接还必须显式允许 AgentScope 自带的计划工具。
+
+### Details
+真实 Harness 测试显示部分 `AgentEvent` 的 `metadata` 为 null，运行观测适配器若直接取值会中断整条 Agent 流。同时，Plan Mode 会注册 `plan_enter`、`plan_write`、`plan_exit`、`todo_write` 与 `wait_async_results`；若模型桥接只按业务 RolePack 白名单校验，会错误地拒绝这些框架内置、无业务副作用的工具。适配器现对 metadata 做 null-safe 提取，并只将这组内置计划工具加入有效白名单；shell、文件系统与未授权角色工具仍被拒绝。
+
+### Suggested Action
+对 AgentScope 原始事件按前向兼容原则处理，绝不假设可选 metadata 存在。角色白名单与 AgentScope 内置运行时工具应分层维护，并以真实 Harness 测试覆盖两者的交集。
+
+### Metadata
+- Source: compatibility_test
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentEventAdapter.java, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeModelBridge.java
+- Tags: agentscope, harness, plan-mode, events, permissions
+
+---
 
 ## [LRN-20260714-001] architecture
 

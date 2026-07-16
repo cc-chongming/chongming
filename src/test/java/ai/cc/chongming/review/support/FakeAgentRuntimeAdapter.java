@@ -2,6 +2,7 @@ package ai.cc.chongming.review.support;
 
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeEvent;
+import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeRoleRequest;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeEventType;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeSession;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeStartRequest;
@@ -40,6 +41,16 @@ public final class FakeAgentRuntimeAdapter implements AgentRuntimeAdapter {
         return state(runtimeId).events().asFlux();
     }
 
+    @Override
+    public Mono<Void> registerRole(AgentRuntimeRoleRequest request) {
+        return Mono.fromRunnable(() -> {
+            RuntimeState state = state(request.runtimeId());
+            if (state.cancelled().get()) {
+                throw new IllegalStateException("runtime is cancelled: " + request.runtimeId());
+            }
+            state.emit(AgentRuntimeEventType.ROLE_REGISTERED, request.label(), request.roleType().name());
+        });
+    }
     @Override
     public Mono<Void> send(String runtimeId, String recipientLabel, String message) {
         return Mono.fromRunnable(() -> {
