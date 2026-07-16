@@ -8,7 +8,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * Non-sensitive model gateway configuration.
+ * Non-sensitive gateway endpoint and credential-location configuration. Logical model names live in ModelProfilesProperties.
  *
  * @author wangli
  */
@@ -25,11 +25,10 @@ public record ModelGatewayProperties(
      *
      * @return whether the configured gateway can be enabled safely
      */
-    @AssertTrue(message = "enabled model gateway requires baseUrl, modelName, and a configured environment key")
+    @AssertTrue(message = "enabled model gateway requires baseUrl and a configured environment key")
     public boolean isEnabledConfigurationValid() {
         return !enabled
                 || (baseUrl != null
-                && StringUtils.hasText(modelName)
                 && StringUtils.hasText(System.getenv(apiKeyEnvironmentVariable)));
     }
 }

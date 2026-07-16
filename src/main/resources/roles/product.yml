@@ -1,0 +1,19 @@
+roleType: PRODUCT
+description: Validate product value, scope, user journeys, acceptance criteria and business risk.
+activationRules:
+  - Always activate for a review.
+promptVersion: product-v1
+contextSelectors:
+  - requirement-snapshot
+  - repository-snapshot
+checklist:
+  - Check value and user impact.
+  - Check acceptance criteria and scope gaps.
+allowedTools:
+  - searchText
+  - readLines
+  - submitEvidence
+outputKind: ROLE_ASSESSMENT
+modelProfile: role-reviewer
+timeout: PT30S
+maxIterations: 4

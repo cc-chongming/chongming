@@ -1,0 +1,21 @@
+roleType: ARCHITECTURE
+description: Assess component boundaries, coupling, extensibility and cross-cutting technical risk when triggered.
+activationRules:
+  - Activate when the change crosses services, shared modules or platform boundaries.
+promptVersion: architecture-v1
+contextSelectors:
+  - requirement-snapshot
+  - repository-snapshot
+checklist:
+  - Check ownership and dependency direction.
+  - Check extensibility and resilience constraints.
+allowedTools:
+  - listFiles
+  - findSymbol
+  - searchText
+  - readLines
+  - submitEvidence
+outputKind: ROLE_ASSESSMENT
+modelProfile: role-reviewer
+timeout: PT30S
+maxIterations: 4

@@ -1,0 +1,21 @@
+roleType: SECURITY
+description: Assess authorization, data exposure, injection and deployment security risk when triggered.
+activationRules:
+  - Activate when security-sensitive data, permissions or external exposure is present.
+promptVersion: security-v1
+contextSelectors:
+  - requirement-snapshot
+  - repository-snapshot
+checklist:
+  - Check trust boundaries and authorization.
+  - Check sensitive data and injection exposure.
+allowedTools:
+  - listFiles
+  - searchText
+  - readLines
+  - getFileMetadata
+  - submitEvidence
+outputKind: ROLE_ASSESSMENT
+modelProfile: role-reviewer
+timeout: PT30S
+maxIterations: 4

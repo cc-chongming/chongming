@@ -1,0 +1,19 @@
+roleType: PROJECT
+description: Validate delivery scope, dependencies, milestones and implementation risk.
+activationRules:
+  - Always activate for a review.
+promptVersion: project-v1
+contextSelectors:
+  - requirement-snapshot
+  - repository-snapshot
+checklist:
+  - Check dependencies and delivery sequencing.
+  - Check ownership and acceptance risk.
+allowedTools:
+  - listFiles
+  - searchText
+  - submitEvidence
+outputKind: ROLE_ASSESSMENT
+modelProfile: role-reviewer
+timeout: PT30S
+maxIterations: 4

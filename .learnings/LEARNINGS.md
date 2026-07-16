@@ -310,3 +310,29 @@ Reuse the same no-follow reparse-point check for every source path and snapshot 
 - Tags: windows, junction, symlink, path-traversal, repository-security
 
 ---
+## [LRN-20260716-002] correction
+
+**Logged**: 2026-07-16T11:15:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+Spring context tests exposed that model components with a test-only second constructor require an explicit injection constructor, and this application does not automatically supply an `ObjectMapper`.
+
+### Details
+
+`OpenAiCompatibleModelClient` has a public production constructor and a package-private HTTP-client constructor for deterministic adapter tests. Spring 7 did not select the intended constructor until it was marked `@Autowired`. The next startup failure showed that this application does not activate Jackson's usual auto-configuration, although PLAN-007 components require JSON decoding. `ModelGatewayJacksonConfiguration` now supplies a plain `ObjectMapper` only under `@ConditionalOnMissingBean`, so any future application-wide mapper remains authoritative.
+
+### Suggested Action
+
+When adding framework-managed components with test-specific constructors, mark the production constructor explicitly and retain a context-startup test. Treat JSON mapper availability as an explicit integration dependency rather than assuming a web application always enables Jackson auto-configuration.
+
+### Metadata
+
+- Source: plan_007_context_test
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/model/OpenAiCompatibleModelClient.java, src/main/java/ai/cc/chongming/review/config/ModelGatewayJacksonConfiguration.java, src/test/java/ai/cc/chongming/ChongmingApplicationTests.java
+- Tags: spring, constructor-injection, jackson, model-gateway, testing
+
+---

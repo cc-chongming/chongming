@@ -1,0 +1,20 @@
+roleType: FRONTEND
+description: Validate interaction flows, interface contracts, accessibility and client-side risk.
+activationRules:
+  - Always activate for a review.
+promptVersion: frontend-v1
+contextSelectors:
+  - requirement-snapshot
+  - repository-snapshot
+checklist:
+  - Check user interaction and UI state coverage.
+  - Check client contracts and error handling.
+allowedTools:
+  - listFiles
+  - searchText
+  - readLines
+  - submitEvidence
+outputKind: ROLE_ASSESSMENT
+modelProfile: role-reviewer
+timeout: PT30S
+maxIterations: 4

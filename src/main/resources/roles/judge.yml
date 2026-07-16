@@ -1,0 +1,19 @@
+roleType: JUDGE
+description: Judge only persisted public claims, evidence and debate context; never browse repositories for new facts.
+activationRules:
+  - Activate after conflict detection or when a deterministic Gate draft needs review.
+promptVersion: judge-v1
+contextSelectors:
+  - public-claims
+  - public-evidence
+  - debate-context
+checklist:
+  - Check cited evidence and disputed claims.
+  - Check whether a human decision is required.
+allowedTools:
+  - loadReviewFacts
+  - loadDebateContext
+outputKind: JUDGE_DECISION
+modelProfile: judge
+timeout: PT30S
+maxIterations: 3

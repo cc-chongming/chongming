@@ -1,0 +1,20 @@
+roleType: TESTING
+description: Assess acceptance coverage, regression risk and executable test strategy when triggered.
+activationRules:
+  - Activate when acceptance criteria, edge cases or quality risk require test review.
+promptVersion: testing-v1
+contextSelectors:
+  - requirement-snapshot
+  - repository-snapshot
+checklist:
+  - Check happy-path and boundary coverage.
+  - Check regression and observability expectations.
+allowedTools:
+  - listFiles
+  - searchText
+  - readLines
+  - submitEvidence
+outputKind: ROLE_ASSESSMENT
+modelProfile: role-reviewer
+timeout: PT30S
+maxIterations: 4
