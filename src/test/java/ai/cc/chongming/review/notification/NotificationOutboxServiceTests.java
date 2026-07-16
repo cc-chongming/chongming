@@ -1,0 +1,120 @@
+package ai.cc.chongming.review.notification;
+
+import ai.cc.chongming.review.application.NotificationDeliveryException;
+import ai.cc.chongming.review.application.NotificationOutboxService;
+import ai.cc.chongming.review.application.ReviewEventService;
+import ai.cc.chongming.review.config.NotificationOutboxProperties;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.domain.model.HumanGateDecision;
+import ai.cc.chongming.review.domain.model.NotificationDeliveryReceipt;
+import ai.cc.chongming.review.domain.model.NotificationOutboxEntry;
+import ai.cc.chongming.review.domain.model.NotificationOutboxEntry.DeliveryStatus;
+import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewTypes.GateResult;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
+import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
+import ai.cc.chongming.review.infrastructure.event.InMemoryReviewEventStore;
+import ai.cc.chongming.review.infrastructure.human.InMemoryHumanGateDecisionStore;
+import ai.cc.chongming.review.infrastructure.notification.InMemoryNotificationOutboxStore;
+import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * [AIREVIEW-PLAN-011#1.5] Verifies idempotent queueing, retry and terminal failure without rolling back Gate state.
+ *
+ * @author wangli
+ */
+class NotificationOutboxServiceTests {
+
+    private final Instant now = Instant.parse("2026-07-16T08:00:00Z");
+    private final ReviewId reviewId = new ReviewId(UUID.randomUUID());
+    private final InMemoryNotificationOutboxStore outboxStore = new InMemoryNotificationOutboxStore();
+    private final InMemoryHumanGateDecisionStore decisionStore = new InMemoryHumanGateDecisionStore();
+    private final InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+    private final ReviewEventService events = new ReviewEventService(new InMemoryReviewEventStore());
+    private NotificationOutboxService service;
+    private Review review;
+    private HumanGateDecision decision;
+
+    @BeforeEach
+    void setUp() {
+        review = Review.restore(reviewId, ReviewStage.NOTIFYING, 1, 5L, List.of(), Map.of());
+        registry.register(review);
+        decision = new HumanGateDecision(reviewId, 1L, GateResult.CONDITIONAL, "remediate before release",
+                List.of("add authorization"), null, "reviewer-1", null, now);
+        decisionStore.append(decision);
+        service = new NotificationOutboxService(
+                outboxStore,
+                decisionStore,
+                registry,
+                new ReviewStateMachine(),
+                events,
+                new NotificationOutboxProperties(false, false, "learning-platform", "recipient-placeholder",
+                        "MISSING_TEST_TOKEN", 3, Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                Clock.fixed(now, ZoneOffset.UTC));
+    }
+
+    @Test
+    void queuesOnceAndCompletesReviewAfterSuccessfulDelivery() {
+        NotificationOutboxEntry first = service.enqueue(review, decision);
+        NotificationOutboxEntry second = service.enqueue(review, decision);
+
+        assertSame(first, second);
+        assertEquals(1, service.dispatchDue(command -> new NotificationDeliveryReceipt("202", "a".repeat(64)), 10));
+
+        NotificationOutboxEntry delivered = service.findByReview(reviewId).getFirst();
+        assertEquals(DeliveryStatus.SENT, delivered.deliveryStatus());
+        assertEquals(1, delivered.attemptCount());
+        assertEquals(ReviewStage.COMPLETED, review.stage());
+        assertTrue(events.replay(reviewId, 0L, 10).stream().anyMatch(event -> event.type() == ReviewEventType.NOTIFICATION_SENT));
+    }
+
+    @Test
+    void retriesWithSameIdempotencyKeyAndEventuallySends() {
+        NotificationOutboxEntry queued = service.enqueue(review, decision);
+
+        service.dispatchDue(command -> {
+            throw new NotificationDeliveryException("TEMPORARY", true, "temporary outage");
+        }, 10);
+        NotificationOutboxEntry failed = service.findByReview(reviewId).getFirst();
+        assertEquals(DeliveryStatus.FAILED, failed.deliveryStatus());
+        assertEquals(1, failed.attemptCount());
+
+        NotificationOutboxEntry retry = service.retryNow(reviewId, queued.notificationId(), failed.version());
+        service.dispatchDue(command -> new NotificationDeliveryReceipt("200", "b".repeat(64)), 10);
+        NotificationOutboxEntry delivered = service.findByReview(reviewId).getFirst();
+        assertEquals(queued.notificationId(), retry.notificationId());
+        assertEquals(queued.command().idempotencyKey(), delivered.command().idempotencyKey());
+        assertEquals(DeliveryStatus.SENT, delivered.deliveryStatus());
+        assertEquals(2, delivered.attemptCount());
+    }
+
+    @Test
+    void nonRetryableFailureBecomesDeadWithoutChangingFinalGate() {
+        service.enqueue(review, decision);
+
+        service.dispatchDue(command -> {
+            throw new NotificationDeliveryException("MCP_DISABLED", false, "disabled");
+        }, 10);
+
+        NotificationOutboxEntry dead = service.findByReview(reviewId).getFirst();
+        assertEquals(DeliveryStatus.DEAD, dead.deliveryStatus());
+        assertEquals(ReviewStage.NOTIFYING, review.stage());
+        assertEquals(List.of(decision), decisionStore.findVersions(reviewId));
+        assertTrue(events.replay(reviewId, 0L, 10).stream().anyMatch(event -> event.type() == ReviewEventType.NOTIFICATION_DEAD));
+    }
+}

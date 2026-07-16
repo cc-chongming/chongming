@@ -1,7 +1,7 @@
 package ai.cc.chongming.review.domain.event;
 
 /**
- * [AIREVIEW-PLAN-010#1.1] Enumerates immutable business facts, distinct from raw AgentScope telemetry.
+ * [AIREVIEW-PLAN-010#1.1][AIREVIEW-PLAN-011#1.1,#1.5] Enumerates immutable business facts, distinct from raw AgentScope telemetry.
  *
  * @author wangli
  */
@@ -24,6 +24,15 @@ public enum ReviewEventType {
     JUDGEMENT_SUBMITTED(ReviewEventCategory.JUDGEMENT),
     GATE_DRAFTED(ReviewEventCategory.GATE),
     HUMAN_REVIEW_REQUIRED(ReviewEventCategory.HUMAN),
+    HUMAN_REVIEW_ITEM_CREATED(ReviewEventCategory.HUMAN),
+    HUMAN_REVIEW_ITEM_UPDATED(ReviewEventCategory.HUMAN),
+    HUMAN_REVIEW_ITEM_DELETED(ReviewEventCategory.HUMAN),
+    HUMAN_GATE_FINALIZED(ReviewEventCategory.HUMAN),
+    NOTIFICATION_QUEUED(ReviewEventCategory.NOTIFICATION),
+    NOTIFICATION_SENT(ReviewEventCategory.NOTIFICATION),
+    NOTIFICATION_FAILED(ReviewEventCategory.NOTIFICATION),
+    NOTIFICATION_DEAD(ReviewEventCategory.NOTIFICATION),
+    NOTIFICATION_RETRY_REQUESTED(ReviewEventCategory.NOTIFICATION),
     REVIEW_CANCELLED(ReviewEventCategory.ERROR),
     REVIEW_RETRIED(ReviewEventCategory.PLAN),
     REVIEW_RECOVERED(ReviewEventCategory.PLAN),

@@ -1,0 +1,14 @@
+{
+  "fixtureType": "learning-platform-mcp-contract-discovery",
+  "status": "BLOCKED_EXTERNAL_ARTIFACT_MISSING",
+  "verifiedExternalContract": false,
+  "requiredArtifacts": [
+    "tool-name-and-version",
+    "request-and-response-json-schema",
+    "authentication-contract",
+    "idempotency-contract",
+    "error-and-retry-samples",
+    "test-environment-smoke-test-authorization"
+  ],
+  "safetyRule": "No remote tool, endpoint, request field, or authorization format may be inferred from this fixture."
+}

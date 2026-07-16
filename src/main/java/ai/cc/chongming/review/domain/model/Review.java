@@ -12,7 +12,7 @@ import java.util.Objects;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-003#1.2,#1.3,#1.6][AIREVIEW-PLAN-010#1.7] Owns review lifecycle, attempt version and command replay state.
+ * [AIREVIEW-PLAN-003#1.2,#1.3,#1.6][AIREVIEW-PLAN-010#1.7][AIREVIEW-PLAN-011#1.3] Owns review lifecycle, attempt version and command replay state.
  *
  * @author wangli
  */
@@ -126,6 +126,16 @@ public final class Review {
         return resultReference;
     }
 
+    /**
+     * Advances optimistic concurrency for an append-only revision of a final Gate while notification is pending.
+     */
+    public void recordFinalGateRevision() {
+        if (stage != ReviewStage.NOTIFYING) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "a final Gate revision requires a notifying review");
+        }
+        version++;
+    }
     public void startNewAttempt() {
         if (!stage.isTerminal()) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,

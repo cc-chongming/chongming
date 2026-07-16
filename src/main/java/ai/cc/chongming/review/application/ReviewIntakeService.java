@@ -1,8 +1,10 @@
 package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.domain.model.RequirementSnapshot;
+import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot.RequirementDocument;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementParser;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementValidator;
 import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
@@ -13,10 +15,11 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Creates immutable requirement snapshots and applies deterministic intake idempotency.
+ * [AIREVIEW-PLAN-011#1.2] Creates immutable requirement snapshots and applies deterministic intake idempotency.
  *
  * @author wangli
  */
@@ -26,15 +29,26 @@ public class ReviewIntakeService {
     private final MarkdownRequirementValidator validator;
     private final MarkdownRequirementParser parser;
     private final RequirementSnapshotStore snapshotStore;
+    private final ReviewRegistry reviewRegistry;
     private final Map<IntakeKey, ReviewIntakeResult> submissions = new HashMap<>();
 
     public ReviewIntakeService(
             MarkdownRequirementValidator validator,
             MarkdownRequirementParser parser,
             RequirementSnapshotStore snapshotStore) {
+        this(validator, parser, snapshotStore, ReviewRegistry.noop());
+    }
+
+    @Autowired
+    public ReviewIntakeService(
+            MarkdownRequirementValidator validator,
+            MarkdownRequirementParser parser,
+            RequirementSnapshotStore snapshotStore,
+            ReviewRegistry reviewRegistry) {
         this.validator = validator;
         this.parser = parser;
         this.snapshotStore = snapshotStore;
+        this.reviewRegistry = reviewRegistry;
     }
 
     /**
@@ -92,6 +106,9 @@ public class ReviewIntakeService {
                 StoredRequirementSnapshot workspaceSnapshot = snapshotStore.store(
                         snapshot, markdown, request.cancellation());
                 ReviewIntakeResult created = new ReviewIntakeResult(snapshot, workspaceSnapshot, false);
+                if (existing == null) {
+                    reviewRegistry.register(Review.pending(reviewId));
+                }
                 submissions.put(key, created);
                 return created;
             }

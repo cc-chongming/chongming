@@ -6,6 +6,7 @@ import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.EvidenceBlock;
 import ai.cc.chongming.review.domain.model.GateDecision;
+import ai.cc.chongming.review.domain.model.HumanGateDecision;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
 import ai.cc.chongming.review.domain.model.ReviewTypes.EvidenceId;
@@ -14,6 +15,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
+import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -30,7 +32,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * [AIREVIEW-PLAN-010#1.3] Builds public review read models from append-only events and batch domain stores.
+ * [AIREVIEW-PLAN-010#1.3][AIREVIEW-PLAN-011#1.3] Builds public review read models from append-only events and batch domain stores.
  *
  * @author wangli
  */
@@ -45,23 +47,29 @@ public class ReviewQueryService {
     private final ReviewEventStore eventStore;
     private final ReviewDebateStore debateStore;
     private final EvidenceLedgerService evidenceLedgerService;
+    private final HumanGateDecisionStore humanGateDecisionStore;
 
     public ReviewQueryService(
             ReviewEventStore eventStore,
             ReviewDebateStore debateStore,
-            EvidenceLedgerService evidenceLedgerService) {
+            EvidenceLedgerService evidenceLedgerService,
+            HumanGateDecisionStore humanGateDecisionStore) {
         this.eventStore = eventStore;
         this.debateStore = debateStore;
         this.evidenceLedgerService = evidenceLedgerService;
+        this.humanGateDecisionStore = humanGateDecisionStore;
     }
 
     public Optional<ReviewSummary> findSummary(ReviewId reviewId) {
         Optional<ReviewEvent> latestEvent = eventStore.findLatest(reviewId);
         Optional<GateDecision> gate = debateStore.findGateDraft(reviewId);
-        if (latestEvent.isEmpty() && gate.isEmpty()) {
+        Optional<HumanGateDecision> humanGate = humanGateDecisionStore.findLatest(reviewId);
+        if (latestEvent.isEmpty() && gate.isEmpty() && humanGate.isEmpty()) {
             return Optional.empty();
         }
         ReviewEvent event = latestEvent.orElse(null);
+        GateView gateView = humanGate.map(this::toGateView)
+                .orElseGet(() -> gate.map(this::toGateView).orElse(null));
         return Optional.of(new ReviewSummary(
                 reviewId.value(),
                 event == null ? null : event.attemptNo(),
@@ -69,7 +77,7 @@ public class ReviewQueryService {
                 event == null ? null : event.progress(),
                 event == null ? 0L : event.sequence(),
                 event == null ? null : format(event.occurredAt()),
-                gate.map(this::toGateView).orElse(null)));
+                gateView));
     }
 
     /**
@@ -217,6 +225,14 @@ public class ReviewQueryService {
                 format(decision.decidedAt()));
     }
 
+    private GateView toGateView(HumanGateDecision decision) {
+        return new GateView(
+                decision.result().name(),
+                "FINAL",
+                "HUMAN",
+                decision.reason(),
+                format(decision.decidedAt()));
+    }
     private EvidenceView toEvidenceView(EvidenceBlock evidence) {
         return new EvidenceView(
                 evidence.evidenceId().value(),

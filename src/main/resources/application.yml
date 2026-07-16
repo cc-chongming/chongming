@@ -82,3 +82,13 @@ review:
     timeout: ${REVIEW_SSE_TIMEOUT:PT30M}
     heartbeat-interval: ${REVIEW_SSE_HEARTBEAT_INTERVAL:PT15S}
     replay-batch-size: ${REVIEW_SSE_REPLAY_BATCH_SIZE:500}
+  notification:
+    # Delivery is disabled until a verified Learning Platform MCP client and its real contract are supplied.
+    worker-enabled: ${REVIEW_NOTIFICATION_WORKER_ENABLED:false}
+    mcp-enabled: ${REVIEW_LEARNING_PLATFORM_MCP_ENABLED:false}
+    channel: ${REVIEW_NOTIFICATION_CHANNEL:learning-platform}
+    destination: ${REVIEW_NOTIFICATION_DESTINATION:learning-platform-recipient-placeholder}
+    credential-environment-variable: ${REVIEW_LEARNING_PLATFORM_MCP_TOKEN_ENV:REVIEW_LEARNING_PLATFORM_MCP_TOKEN}
+    max-attempts: ${REVIEW_NOTIFICATION_MAX_ATTEMPTS:5}
+    initial-retry-delay: ${REVIEW_NOTIFICATION_INITIAL_RETRY_DELAY:PT30S}
+    worker-delay: ${REVIEW_NOTIFICATION_WORKER_DELAY:PT5S}

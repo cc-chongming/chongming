@@ -1,6 +1,6 @@
 # 人工审核、报告与通知计划
 
-> **状态**: ⏳ 待实施
+> **状态**: 🟡 核心链路已完成；生产持久化与外部 MCP 联调待完成
 > **创建日期**: 2026-07-14
 > **目标**: 提供人工审核草稿 CRUD、不可变版本化决定、可追溯报告和幂等学习通通知闭环。
 > **前置计划**: PLAN-009、PLAN-010
@@ -119,3 +119,25 @@ Agent 验证，
 | 2026-07-14 | 创建人工草稿、版本化 Gate、报告、Outbox 和学习通 MCP 计划。 |
 | 2026-07-15 | 人工审核阶段名称对齐技术方案：WAITING_HUMAN。 |
 | 2026-07-15 | 人工审核与报告 API 对齐技术方案：统一使用 `/api/reviews/{id}/...` 路径。 |
+
+## 7. 当前实施状态（2026-07-16）
+
+### 已完成
+
+- 人工审核条目实现了 `WAITING_HUMAN` 阶段限制、版本冲突控制、软删除、审计事件和本地 Demo 审核人边界。
+- 最终 Gate 支持 PASS、CONDITIONAL、BLOCK、RETURN、OVERRIDE；旧版本不可修改，`NOTIFYING` 阶段的调整会创建带 `supersedesVersion` 的新版本并推进 Review 乐观锁版本。
+- `GET/POST /api/reviews/{id}/report`、`GET /api/reviews/{id}/report/versions` 与 Markdown 格式已实现；报告只含公开 Claim/Turn/Judge 摘要，并提供证据回链。Markdown 由 golden 文件固定。
+- 最终 Gate 事件会自动创建报告与通知 Outbox；Outbox 以 `reviewId:gateVersion:channel` 去重，支持 PENDING/FAILED/SENT/DEAD、指数退避、人工重试、发送结果哈希和通知事件。
+- `GET /api/reviews/{id}/notifications` 与受 `ReviewerIdentityProvider` 控制的 `POST /api/reviews/{id}/notifications/{notificationId}/retry` 已提供。
+- 新增 V7 迁移，为版本化报告与 Outbox 的幂等/请求哈希/响应结果字段预留数据库结构；通知 worker 默认关闭。
+
+### 尚未完成 / 发布门禁
+
+1. **MyBatis 事务化持久化**：当前人工审核、报告和 Outbox 仍使用进程内 Store。V7 只准备了表结构；需要补齐 Mapper、`NotificationOutboxStore` 的数据库实现，并让最终 Gate 与 Outbox 在同一数据库事务提交。
+2. **学习通 MCP 真实联调**：仓库内缺少已验证的工具名、Schema、鉴权与错误码样例。适配器默认 fail-closed，契约交接清单见 `docs/集成/学习通通知MCP契约.md`；在收到权威材料前不得启用 `review.notification.mcp-enabled` 或 worker。
+3. **生产身份与审计扩展**：生产 profile 已默认禁止审核/重试，但真实认证、角色映射、IP、traceId 与访问审计需在 PLAN-013 中接入。
+
+### 本轮验证
+
+- `mvn -Dtest=HumanGateDecisionServiceTests,NotificationOutboxServiceTests,ReviewReportServiceTests,ChongmingApplicationTests test`：10 tests passed。
+- `mvn -Dtest=NotificationOutboxControllerTests test`：2 tests passed。
