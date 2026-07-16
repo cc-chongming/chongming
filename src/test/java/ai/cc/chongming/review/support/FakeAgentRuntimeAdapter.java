@@ -15,7 +15,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 /**
- * Deterministic in-memory runtime adapter for application-layer tests.
+ * [AIREVIEW-PLAN-010#1.6] Deterministic in-memory runtime adapter for application-layer tests.
  *
  * @author wangli
  */
@@ -65,7 +65,10 @@ public final class FakeAgentRuntimeAdapter implements AgentRuntimeAdapter {
     @Override
     public Mono<Void> cancel(String runtimeId) {
         return Mono.fromRunnable(() -> {
-            RuntimeState state = state(runtimeId);
+            RuntimeState state = states.get(runtimeId);
+            if (state == null) {
+                return;
+            }
             if (state.cancelled().compareAndSet(false, true)) {
                 state.emit(AgentRuntimeEventType.CANCELLED, "director", "cancelled");
             }

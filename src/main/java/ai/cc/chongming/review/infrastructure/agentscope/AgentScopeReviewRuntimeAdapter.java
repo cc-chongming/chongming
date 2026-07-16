@@ -18,7 +18,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 /**
- * AgentScope 2.0.0 adapter that owns Harness lifecycle while keeping project governance outside AgentScope.
+ * [AIREVIEW-PLAN-010#1.6] AgentScope 2.0.0 adapter that owns Harness lifecycle while keeping project governance outside AgentScope.
  *
  * @author wangli
  */
@@ -127,7 +127,10 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     @Override
     public Mono<Void> cancel(String runtimeId) {
         return Mono.fromRunnable(() -> {
-            RuntimeState state = state(runtimeId);
+            RuntimeState state = runtimes.get(runtimeId);
+            if (state == null) {
+                return;
+            }
             if (state.cancelled()) {
                 return;
             }

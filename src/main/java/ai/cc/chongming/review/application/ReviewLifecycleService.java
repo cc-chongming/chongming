@@ -11,11 +11,10 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
-import org.springframework.stereotype.Service;
-
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.stereotype.Service;
 
 /**
  * [AIREVIEW-PLAN-010#1.6][AIREVIEW-PLAN-010#1.7] Applies idempotent cancel/retry transitions at safe domain boundaries.
@@ -40,12 +39,12 @@ public class ReviewLifecycleService {
     }
 
     /**
-     * Applies cancellation after the caller has brought its runtime to a safe point. Repeating a completed cancel is safe.
+     * Validates cancellation before an adapter asks active agents to stop at a safe point.
      */
-    public synchronized CancelResult cancel(Review review, long expectedVersion) {
+    public synchronized void validateCancellation(Review review, long expectedVersion) {
         Objects.requireNonNull(review, "review must not be null");
         if (review.stage() == ReviewStage.CANCELLED) {
-            return new CancelResult(review.id().value(), review.attemptNo(), review.version(), true);
+            return;
         }
         rejectCancellationAfterHumanDecision(review);
         requireExpectedVersion(review, expectedVersion);
@@ -53,6 +52,17 @@ public class ReviewLifecycleService {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "a terminal review cannot be cancelled");
         }
+    }
+
+    /**
+     * Applies cancellation after the caller has brought its runtime to a safe point. Repeating a completed cancel is safe.
+     */
+    public synchronized CancelResult cancel(Review review, long expectedVersion) {
+        Objects.requireNonNull(review, "review must not be null");
+        if (review.stage() == ReviewStage.CANCELLED) {
+            return new CancelResult(review.id().value(), review.attemptNo(), review.version(), true);
+        }
+        validateCancellation(review, expectedVersion);
         review.transitionTo(stateMachine, ReviewStage.CANCELLING);
         review.transitionTo(stateMachine, ReviewStage.CANCELLED);
         eventPublisher.publish(ReviewEventDrafts.completedCommand(

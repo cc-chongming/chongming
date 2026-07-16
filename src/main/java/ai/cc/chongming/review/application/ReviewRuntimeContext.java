@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Explicit, per-attempt metadata supplied to every director and role runtime call.
+ * [AIREVIEW-PLAN-010#1.6] Explicit, per-attempt metadata supplied to every director and role runtime call.
  *
  * @author wangli
  */
@@ -31,6 +31,17 @@ public record ReviewRuntimeContext(
      * Stable runtime ID shared by the director and all role agents for one review attempt.
      */
     public String runtimeId() {
+        return runtimeIdFor(reviewId, attemptNo);
+    }
+
+    /**
+     * Derives the attempt runtime key when cancellation occurs before a full runtime context is needed.
+     */
+    public static String runtimeIdFor(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
         return "review-" + reviewId.value() + "-attempt-" + attemptNo;
     }
 

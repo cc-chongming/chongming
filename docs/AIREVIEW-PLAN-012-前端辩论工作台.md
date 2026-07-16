@@ -144,7 +144,7 @@
 
 ### 当前待联调
 
-- 当前后端尚未暴露 `POST /api/reviews/{id}/start`、取消和阶段重试等写端点；创建页会在收到 202 后进入工作台，真实模型编排启动需随 PLAN-010 的 HTTP 命令接口完成后联调。
+- 后端现已提供 `POST /api/reviews/{id}/start`、`/cancel`、`/retry` 的进程内联调接口；前端尚未补充启动公开计划、`Idempotency-Key`、取消/重试操作及结果刷新，因此不能在页面中直接触发真实编排。
 - PLAN-011 的 MyBatis 事务化人工审核/Outbox Store 与真实学习通 MCP 契约仍是生产前置条件；当前前端以已冻结 REST 契约和固定样本完成独立验证。
 - 当前 AG-UI 为前端适配层；原生双向 `POST RunAgentInput` SSE 端点需要在后端定义真实用户输入、鉴权和幂等语义后单独接入，前端不会伪造该调用。
 

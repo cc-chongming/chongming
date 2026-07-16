@@ -2,6 +2,7 @@ package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.config.ReviewOrchestrationProperties;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewPlan;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
@@ -26,7 +27,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * [AIREVIEW-PLAN-010#1.5] Coordinates director planning and role activation while delegating all lifecycle limits to domain guards.
+ * [AIREVIEW-PLAN-010#1.5,#1.6,#1.7] Coordinates director planning and role activation while delegating all lifecycle limits to domain guards.
  *
  * @author wangli
  */
@@ -166,6 +167,18 @@ public class ReviewOrchestrationService {
             review.transitionTo(stateMachine, ReviewStage.CANCELLED);
             emit(context, OrchestrationEventType.CANCELLED, ReviewStage.CANCELLED, "DIRECTOR", review.version());
         });
+    }
+
+    /**
+     * Requests a best-effort runtime safe point without changing aggregate state.
+     * Lifecycle commands own the subsequent version-checked terminal transition.
+     */
+    public Mono<Void> requestRuntimeCancellation(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        return runtimeAdapter.cancel(ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo));
     }
 
     /**

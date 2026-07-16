@@ -1,6 +1,6 @@
 # 领域事件、SSE 与恢复计划
 
-> **状态**: 🟡 核心能力已完成；多实例恢复与 HTTP 写端点待持久化写模型就绪后接入
+> **状态**: 🟡 核心能力与进程内 HTTP 命令接口已完成；持久化写模型和多实例恢复仍待接入
 > **创建日期**: 2026-07-14
 > **目标**: 建立可重放领域事件、Spring MVC SSE、幂等取消/重试和进程恢复能力。
 > **前置计划**: PLAN-003、PLAN-004；可与 PLAN-005 至 009 并行
@@ -46,15 +46,16 @@ sequence，
 - DebateTools 成功后才产生正式 `CHALLENGE_SUBMITTED` 等业务事件。
 - 去重同一工具调用的开始/结束/业务成功事件，保留 parent/agent 来源。
 
-### 1.6 取消与失败 🟡
+### 1.6 启动、取消与失败 🟡
 
-- `POST /api/reviews/{id}/cancel` 幂等并携带 expectedVersion；发取消令牌并等待安全点，最终状态 CANCELLED。
+- `POST /api/reviews/{id}/start` 使用 `Idempotency-Key`、expectedVersion 和公开计划请求体；从 PENDING 预置到 PLANNING 后异步启动编排，并立即返回 202。
+- `POST /api/reviews/{id}/cancel?expectedVersion=...` 幂等；先向运行时发安全停止请求，再写最终状态 CANCELLED。未知的本进程运行时取消为安全空操作。
 - 已完成人工决定的 review 不允许取消；取消不删除历史。
 - 未捕获异常统一写 REVIEW_FAILED，敏感错误只存内部摘要。
 
 ### 1.7 重试与 attempt 隔离 🟡
 
-- `POST /api/reviews/{id}/retry` 指定阶段并创建新 attempt；旧 attempt 全部只读。
+- `POST /api/reviews/{id}/retry?expectedVersion=...` 仅从终态创建新 attempt；旧 attempt 全部只读，新 attempt 保持 PENDING 直到再次调用 `/start`。
 - 输入快照可复用，运行态 session/sequence/idempotency namespace 必须重新生成。
 - 重试不得覆盖旧报告、Gate、事件或通知结果。
 
@@ -71,7 +72,8 @@ sequence，
 - 已完成：SSE 的“先注册缓冲、历史回放、排空、实时”切换，含超时、心跳、断开清理与轻量计数；心跳不写业务事件。
 - 已完成：Claim、DebateTools、Judge/Gate、计划、角色激活和取消/重试仅在命令成功且非幂等重放时发布正式事件；AgentScope 原始事件继续只作为脱敏运行观察。
 - 待部署写模型：现有 Claim/Debate 命令的 MyBatis 写入尚未启用，因而“聚合状态与事件同一数据库事务”只能在该写模型接入后完成端到端验证。
-- 待持久化定位器：取消与重试已由 `ReviewLifecycleService` 实现并有测试；当前没有可保存 Review 聚合的命令仓储/运行时安全点协调器，所以暂不暴露会误导调用方的 `/cancel`、`/retry` HTTP 写端点。
+- 已完成（进程内命令接口）：`ReviewCommandService` 与 `/start`、`/cancel`、`/retry` 端点复用领域状态机、expectedVersion 和事件发布；启动要求 `Idempotency-Key`，返回 202 后由后台编排，取消先请求运行时安全点。404、409、422 使用稳定 ProblemDetail code。
+- 明确边界：接口当前依赖 `InMemoryReviewRegistry`，进程重启后无法定位旧聚合；start 的 userId 仍沿用受理接口的调用方传入约定；状态变更和事件尚不能同 MySQL 事务提交。因此仅适用于本地/演示联调，不能作为多实例生产命令面。
 - 未完成：启动扫描、数据库 lease、多实例恢复、恢复失败转人工，以及基于真实 MySQL 的 1 千/1 万事件回放演练。
 ## 2. 文件清单
 
@@ -87,6 +89,9 @@ sequence，
 | `src/main/java/ai/cc/chongming/review/api/ReviewEventController.java`                | #1.4     | ✅  |
 | `src/main/java/ai/cc/chongming/review/application/ReviewSseRegistry.java`            | #1.4     | ✅  |
 | `src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java`       | #1.6-1.8 | 🟡  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewCommandService.java`         | #1.6-1.7 | ✅（进程内） |
+| `src/main/java/ai/cc/chongming/review/api/ReviewLifecycleCommandController.java`     | #1.6-1.7 | ✅（进程内） |
+| `src/main/java/ai/cc/chongming/review/api/ReviewLifecycleCommandExceptionHandler.java` | #1.6-1.7 | ✅（进程内） |
 | `src/test/java/ai/cc/chongming/review/event/ReviewEventStoreIntegrationTests.java`    | #1.1-1.2 | ✅  |
 | `src/test/java/ai/cc/chongming/review/api/ReviewQueryControllerTests.java`            | #1.3     | ✅  |
 | `src/test/java/ai/cc/chongming/review/sse/ReviewSseReplayIntegrationTests.java`       | #1.4-1.5 | ✅  |
@@ -98,6 +103,10 @@ sequence，
 |-----------------------------------------------------------------------------------------|-----------|----|
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentEventAdapter.java` | #1.5      | ⏳  |
 | `src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java`      | #1.5-1.7  | ✅  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewRuntimeContext.java`           | #1.6       | ✅  |
+| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java` | #1.6 | ✅  |
+| `src/test/java/ai/cc/chongming/review/application/ReviewCommandServiceTests.java`      | #1.6-1.7  | ✅  |
+| `src/test/java/ai/cc/chongming/review/api/ReviewLifecycleCommandControllerTests.java`  | #1.6-1.7  | ✅  |
 | `src/main/resources/application.yml`                                                    | #1.4、#1.8 | ✅  |
 
 ## 3. 实施顺序
