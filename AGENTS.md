@@ -1,32 +1,67 @@
-# Repository Guidelines
+# Chongming Repository Guide
 
-## Project Structure & Module Organization
+## Project Overview
 
-This is a single-module Java 21 Spring Boot application built with Maven. Production code lives under `src/main/java/ai/cc/chongming`; `ChongmingApplication` is the web application entry point. AgentScope behavior is covered by compatibility tests under `src/test/java`. Runtime configuration belongs in `src/main/resources/application.yml`. Tests mirror the production package under `src/test/java`. Product and design material is kept in `docs/`, while AgentScope runtime state is written beneath `.agentscope/workspace/`. Treat `target/` as generated output and do not commit it.
+Chongming is a single-module Java 21 Spring Boot application built with Maven. It contains a Vue 3/Vite review workbench that is built into Spring Boot static resources. The project implements the AIREVIEW workflow with AgentScope-compatible runtime behavior.
 
-## Build, Test, and Development Commands
+## Repository Layout
 
-Use the checked-in Maven wrapper so builds use a consistent Maven version:
+- `src/main/java/ai/cc/chongming/`: production Java code; `ChongmingApplication` is the application entry point.
+- `src/test/java/ai/cc/chongming/`: JUnit 5 tests mirroring production packages.
+- `src/main/resources/application.yml`: runtime configuration. Keep secrets and gateway credentials in environment variables.
+- `src/main/resources/static/review/`: committed production bundle for the review workbench.
+- `frontend/`: Vue 3/Vite source, unit tests, and Playwright E2E tests.
+- `docs/`: product requirements, architecture, implementation plans, and integration contracts.
+- `.agentscope/workspace/`: local AgentScope runtime state; do not commit.
+- `.learnings/`: reusable discoveries and unexpected failure records.
+- `target/`, `frontend/node_modules/`, and frontend test artifacts: generated local output; do not commit.
 
-- `./mvnw.cmd clean verify` — compile, run all tests, and package the application.
-- `./mvnw.cmd test` — run the JUnit test suite only.
-- `./mvnw.cmd spring-boot:run` — start the Spring Boot application locally.
-- `./mvnw.cmd package -DskipTests` — create a local artifact when tests have already passed.
+## Requirement and Design Authority
+
+- Use the MVP role requirements document as the authority for role-facing behavior.
+- Use the technical proposal as the authority for the review state machine.
+- When other documents conflict, follow the technical proposal and update the affected Markdown documents in the same change.
+- Preserve the explicit boundary notes in each `AIREVIEW-PLAN-*.md`; do not mark a dependency on real MySQL, Docker, MCP, or external platforms complete without an executable integration.
+
+## Build, Test, and Run
+
+On Windows, use the checked-in Maven wrapper:
+
+- `./mvnw.cmd test`: run the Java test suite.
+- `./mvnw.cmd clean verify`: compile, test, and package before a pull request.
+- `./mvnw.cmd spring-boot:run`: run the backend locally.
+- `./mvnw.cmd package -DskipTests`: package only after tests have passed.
+
+For the frontend, run commands from `frontend/`:
+
+- `npm test`: run Vitest tests.
+- `npx playwright test`: run the workbench E2E tests.
+- `npm run build`: build the Vite application into `src/main/resources/static/review/`.
 
 On macOS or Linux, replace `mvnw.cmd` with `./mvnw`.
 
-## Coding Style & Naming Conventions
+## Coding and Documentation Rules
 
-Use four-space indentation, UTF-8, and standard Java naming: `PascalCase` types, `camelCase` methods and variables, and lowercase package names. Keep classes in the `ai.cc.chongming` package tree and favor constructor injection for Spring components. Avoid database queries inside loops; batch-load or join data instead. Never hard-code credentials; model gateway credentials must come from environment variables.
+- Use UTF-8 and four-space indentation for Java. Follow standard Java naming: `PascalCase` types, `camelCase` fields and methods, and lowercase package names.
+- Keep production code inside `ai.cc.chongming`; prefer constructor injection for Spring components.
+- Avoid database queries in loops. Batch-load data or use joins instead.
+- Never hard-code credentials, tokens, or gateway configuration.
+- Add `@author wangli` to every newly created Java source file, and include the applicable `[AIREVIEW-PLAN-xxx]` source marker when it exists.
+- Keep frontend API, Store, page, test, and production-bundle changes consistent. If `npm run build` changes review asset hashes, commit the new assets, remove obsolete hashes, and update `static/review/index.html` together.
+- Update the corresponding PLAN document whenever implementation status or deferred scope changes.
 
-## Testing Guidelines
+## Testing Expectations
 
-Tests use JUnit 5 and Spring Boot Test. Name test classes `*Tests` and test methods after observable behavior, such as `contextLoads` or `createsAgentWithConfiguredModel`. Mirror source packages in `src/test/java`. Run `./mvnw.cmd test` before every commit and `clean verify` before opening a pull request. No coverage threshold is currently enforced; new behavior should still include focused tests.
+- Name Java test classes `*Tests` and test methods after observable behavior.
+- Add focused tests for new behavior. For frontend command or state changes, cover the request contract and the user-facing path where practical.
+- Run the smallest relevant suite while developing; run `./mvnw.cmd test` before committing backend changes.
+- Run `./mvnw.cmd clean verify` before opening a pull request. Run frontend unit, E2E, and build commands when frontend sources or static resources change.
+- Clearly record environment-caused skips, such as unavailable Docker/Testcontainers, rather than treating them as passing integration coverage.
 
-## Commit & Pull Request Guidelines
+## Git and Collaboration
 
-History follows Conventional Commits, for example `feat(project): 初始化 AgentScope 项目结构`. Use `type(scope): summary` with concise imperative summaries (`feat`, `fix`, `test`, `docs`, or `refactor`). Pull requests should explain the change and verification performed, link related issues or requirements, and call out configuration changes. Include screenshots only for visible UI changes. Keep generated files, secrets, and local AgentScope state out of commits.
-
-## Agent-Specific Instructions
-
-Record unexpected failures and reusable discoveries in `.learnings/`. Prefer IDEA MCP for Java search, edits, builds, and diagnostics when it is available.
+- Inspect `git status --short` before editing. Preserve unrelated user changes and do not reset, checkout, or delete them without explicit approval.
+- Use Conventional Commits: `type(scope): concise imperative summary`, such as `feat(review-ui): 补齐评审生命周期操作`.
+- Keep generated Java build output, local runtime state, secrets, and frontend dependencies out of commits. The built review bundle under `src/main/resources/static/review/` is the deliberate exception and must be committed with its matching frontend change.
+- Pull requests should state the requirement or plan addressed, key behavior changes, verification performed, configuration changes, and any deferred external dependency.
+- Prefer IDEA MCP for Java search, editing, builds, and diagnostics when it is available. Record reusable failures and discoveries in `.learnings/`.
