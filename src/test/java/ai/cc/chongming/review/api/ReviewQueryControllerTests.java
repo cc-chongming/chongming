@@ -47,6 +47,7 @@ class ReviewQueryControllerTests {
                 "JUDGING",
                 80,
                 16L,
+                4L,
                 "2026-07-16 14:00:00",
                 new ReviewQueryService.GateView("CONDITIONAL", "DRAFT", "AI", "needs review", "2026-07-16 14:00:00"))));
 
@@ -54,6 +55,7 @@ class ReviewQueryControllerTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.attempt").value(2))
                 .andExpect(jsonPath("$.stage").value("JUDGING"))
+                .andExpect(jsonPath("$.reviewVersion").value(4))
                 .andExpect(jsonPath("$.occurredAt").value("2026-07-16 14:00:00"))
                 .andExpect(jsonPath("$.gate.result").value("CONDITIONAL"));
     }

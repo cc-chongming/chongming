@@ -136,7 +136,7 @@ flowchart LR
 | `docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md`       | #1   | ✅  |
 | `docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md`           | #1   | 🟡  |
 | `docs/AIREVIEW-PLAN-011-人工审核报告与通知.md`            | #1   | 🟡  |
-| `docs/AIREVIEW-PLAN-012-前端辩论工作台.md`              | #1   | ⏳  |
+| `docs/AIREVIEW-PLAN-012-前端辩论工作台.md`              | #1   | 🟡  |
 | `docs/AIREVIEW-PLAN-013-安全审计与可观测性.md`            | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-014-评测故障注入与质量门禁.md`          | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-015-Demo答辩与交付证据.md`          | #1   | ⏳  |

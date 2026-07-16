@@ -16,6 +16,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
+import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -32,7 +33,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * [AIREVIEW-PLAN-010#1.3][AIREVIEW-PLAN-011#1.3] Builds public review read models from append-only events and batch domain stores.
+ * [AIREVIEW-PLAN-010#1.3][AIREVIEW-PLAN-011#1.3][AIREVIEW-PLAN-012#1.8] Builds public review read models from append-only events and batch domain stores.
  *
  * @author wangli
  */
@@ -48,16 +49,19 @@ public class ReviewQueryService {
     private final ReviewDebateStore debateStore;
     private final EvidenceLedgerService evidenceLedgerService;
     private final HumanGateDecisionStore humanGateDecisionStore;
+    private final ReviewRegistry reviewRegistry;
 
     public ReviewQueryService(
             ReviewEventStore eventStore,
             ReviewDebateStore debateStore,
             EvidenceLedgerService evidenceLedgerService,
-            HumanGateDecisionStore humanGateDecisionStore) {
+            HumanGateDecisionStore humanGateDecisionStore,
+            ReviewRegistry reviewRegistry) {
         this.eventStore = eventStore;
         this.debateStore = debateStore;
         this.evidenceLedgerService = evidenceLedgerService;
         this.humanGateDecisionStore = humanGateDecisionStore;
+        this.reviewRegistry = reviewRegistry;
     }
 
     public Optional<ReviewSummary> findSummary(ReviewId reviewId) {
@@ -68,6 +72,7 @@ public class ReviewQueryService {
             return Optional.empty();
         }
         ReviewEvent event = latestEvent.orElse(null);
+        Long reviewVersion = reviewRegistry.find(reviewId).map(review -> review.version()).orElse(null);
         GateView gateView = humanGate.map(this::toGateView)
                 .orElseGet(() -> gate.map(this::toGateView).orElse(null));
         return Optional.of(new ReviewSummary(
@@ -76,6 +81,7 @@ public class ReviewQueryService {
                 event == null ? null : event.stage().name(),
                 event == null ? null : event.progress(),
                 event == null ? 0L : event.sequence(),
+                reviewVersion,
                 event == null ? null : format(event.occurredAt()),
                 gateView));
     }
@@ -265,6 +271,7 @@ public class ReviewQueryService {
             String stage,
             Integer progress,
             long lastSequence,
+            Long reviewVersion,
             String occurredAt,
             GateView gate) {
     }

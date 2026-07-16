@@ -56,7 +56,7 @@ class ReviewReportServiceTests {
                 reviewId, 1L, GateResult.PASS, "approved for release", List.of(), null,
                 "reviewer-1", null, Instant.parse("2026-07-16T08:00:00Z")));
         when(queryService.findSummary(reviewId)).thenReturn(java.util.Optional.of(new ReviewQueryService.ReviewSummary(
-                reviewId.value(), 1, "NOTIFYING", 95, 9L, "2026-07-16 16:00:00",
+                reviewId.value(), 1, "NOTIFYING", 95, 9L, 5L, "2026-07-16 16:00:00",
                 new ReviewQueryService.GateView("PASS", "FINAL", "HUMAN", "approved for release",
                         "2026-07-16 16:00:00"))));
         when(queryService.findPlans(reviewId, 0L, 500)).thenReturn(new ReviewQueryService.EventPage(List.of(), null));

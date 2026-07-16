@@ -1,0 +1,74 @@
+<script setup>
+import { reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { formatApiError, reviewApi } from '../api/review-api';
+
+const router = useRouter();
+const requirementFile = ref(null);
+const submitting = ref(false);
+const error = ref('');
+const form = reactive({
+    repositoryPath: '',
+    branch: '',
+    commit: '',
+    submitter: 'demo-reviewer',
+    forceNewAttempt: false
+});
+
+function onFileChange(event) {
+    requirementFile.value = event.target.files?.[0] ?? null;
+}
+
+async function submit() {
+    error.value = '';
+    if (!requirementFile.value) {
+        error.value = '请选择一个 .md 需求文件。';
+        return;
+    }
+    if (!requirementFile.value.name.toLowerCase().endsWith('.md')) {
+        error.value = '需求文件必须使用 .md 扩展名。';
+        return;
+    }
+    if (!form.repositoryPath.trim() || !form.submitter.trim()) {
+        error.value = '请填写仓库路径和提交人。';
+        return;
+    }
+    submitting.value = true;
+    try {
+        const accepted = await reviewApi.createReview({
+            requirementFile: requirementFile.value,
+            repositoryPath: form.repositoryPath.trim(),
+            branch: form.branch.trim(),
+            commit: form.commit.trim(),
+            submitter: form.submitter.trim(),
+            forceNewAttempt: form.forceNewAttempt
+        });
+        await router.push({ name: 'review-workbench', params: { reviewId: accepted.reviewId } });
+    } catch (requestError) {
+        error.value = formatApiError(requestError);
+    } finally {
+        submitting.value = false;
+    }
+}
+</script>
+
+<template>
+    <section class="create-page">
+        <div class="hero">
+            <p class="eyebrow">可回放 · 可追溯 · 人工 Gate</p>
+            <h1>创建一场需求评审</h1>
+            <p>上传 Markdown 需求、选择已受服务端白名单保护的仓库标识，然后进入实时辩论工作台。</p>
+        </div>
+        <form class="review-form create-form" @submit.prevent="submit">
+            <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
+            <label class="full">需求文档（.md）<input type="file" accept=".md,text/markdown" required @change="onFileChange" /></label>
+            <label class="full">仓库路径或已配置仓库标识<input v-model="form.repositoryPath" required placeholder="由服务端白名单映射的仓库路径" /></label>
+            <label>分支（可选）<input v-model="form.branch" placeholder="main" /></label>
+            <label>Commit（可选）<input v-model="form.commit" placeholder="40 位 SHA" /></label>
+            <label class="full">提交人<input v-model="form.submitter" maxlength="128" required /></label>
+            <label class="checkbox full"><input v-model="form.forceNewAttempt" type="checkbox" />即使快照相同也创建新的评审尝试</label>
+            <p class="muted full">提交后服务端返回 202，工作台将通过评审 ID 恢复状态。前端校验不会替代服务端权限与路径校验。</p>
+            <div class="form-actions full"><button class="button" type="submit" :disabled="submitting">{{ submitting ? '正在提交…' : '创建评审' }}</button></div>
+        </form>
+    </section>
+</template>
