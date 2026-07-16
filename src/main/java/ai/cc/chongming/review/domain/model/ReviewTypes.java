@@ -148,6 +148,7 @@ public final class ReviewTypes {
         REBUTTAL,
         CONCESSION,
         POSITION_CHANGE,
+        EVIDENCE_REQUEST,
         JUDGEMENT
     }
 
@@ -319,11 +320,19 @@ public final class ReviewTypes {
     /**
      * @author wangli
      */
-    public record JudgeDecision(TopicId topicId, GateResult result, String publicReasonSummary, Instant createdAt) {
+    public record JudgeDecision(
+            TopicId topicId,
+            GateResult result,
+            String publicReasonSummary,
+            List<ClaimId> acceptedClaimIds,
+            List<ClaimId> rejectedClaimIds,
+            Instant createdAt) {
         public JudgeDecision {
             Objects.requireNonNull(topicId, "topicId must not be null");
             Objects.requireNonNull(result, "result must not be null");
             requireText(publicReasonSummary, "publicReasonSummary");
+            acceptedClaimIds = List.copyOf(acceptedClaimIds);
+            rejectedClaimIds = List.copyOf(rejectedClaimIds);
             Objects.requireNonNull(createdAt, "createdAt must not be null");
         }
     }

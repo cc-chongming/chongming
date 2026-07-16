@@ -86,6 +86,26 @@ public final class Review {
         version++;
     }
 
+    /**
+     * Marks an activated role's independent initial review as complete without changing its immutable identity.
+     */
+    public void completeInitialReview(RoleType roleType) {
+        Objects.requireNonNull(roleType, "roleType must not be null");
+        for (int index = 0; index < roleActivations.size(); index++) {
+            RoleActivation activation = roleActivations.get(index);
+            if (activation.roleType() == roleType) {
+                if (!activation.initialReviewCompleted()) {
+                    roleActivations.set(index, new RoleActivation(
+                            activation.roleType(), activation.agentLabel(), true));
+                    version++;
+                }
+                return;
+            }
+        }
+        throw new ReviewDomainException(ReviewErrorCode.UNAUTHORIZED_ROLE,
+                "only an activated role can complete an initial review");
+    }
+
     public String recordCommand(ReviewCommandMetadata metadata, String resultReference) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         requireText(resultReference, "resultReference");

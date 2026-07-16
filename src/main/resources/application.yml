@@ -8,6 +8,9 @@ review:
   workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}
   max-agents: 8
   max-debate-rounds: 2
+  gate:
+    # A verified P1 opposing Claim is never silently passed; deployments may select another non-final AI result.
+    p1-oppose-result: ${REVIEW_GATE_P1_OPPOSE_RESULT:CONDITIONAL}
   orchestration:
     # Bounds director stage-plan rewrites; deployment may override this environment placeholder.
     max-plan-revisions: ${REVIEW_MAX_PLAN_REVISIONS:3}

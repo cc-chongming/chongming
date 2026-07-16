@@ -133,7 +133,7 @@ flowchart LR
 | `docs/AIREVIEW-PLAN-006-仓库快照与证据账本.md`            | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-007-模型网关与角色包.md`             | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-008-Harness主持人与角色编排.md`      | #1   | ⏳  |
-| `docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md`       | #1   | ⏳  |
+| `docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md`       | #1   | ✅  |
 | `docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md`           | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-011-人工审核报告与通知.md`            | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-012-前端辩论工作台.md`              | #1   | ⏳  |
