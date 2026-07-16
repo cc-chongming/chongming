@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * Applies bounded, reference-safe debate turns while the review aggregate owns idempotency and versions.
+ * [AIREVIEW-PLAN-010#1.5] Applies bounded, reference-safe debate turns while the review aggregate owns idempotency and versions.
  *
  * @author wangli
  */
@@ -32,12 +32,13 @@ public class DebateService {
     private final EvidenceLedgerService evidenceLedgerService;
     private final DebateStateMachine debateStateMachine;
     private final ReviewProtocolGuard protocolGuard;
+    private final ReviewEventPublisher eventPublisher;
 
     public DebateService(
             ReviewDebateStore debateStore,
             EvidenceLedgerService evidenceLedgerService,
             DebateStateMachine debateStateMachine) {
-        this(debateStore, evidenceLedgerService, debateStateMachine, new ReviewProtocolGuard());
+        this(debateStore, evidenceLedgerService, debateStateMachine, new ReviewProtocolGuard(), ReviewEventPublisher.noop());
     }
 
     @Autowired
@@ -45,11 +46,13 @@ public class DebateService {
             ReviewDebateStore debateStore,
             EvidenceLedgerService evidenceLedgerService,
             DebateStateMachine debateStateMachine,
-            ReviewProtocolGuard protocolGuard) {
+            ReviewProtocolGuard protocolGuard,
+            ReviewEventPublisher eventPublisher) {
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.evidenceLedgerService = Objects.requireNonNull(evidenceLedgerService, "evidenceLedgerService must not be null");
         this.debateStateMachine = Objects.requireNonNull(debateStateMachine, "debateStateMachine must not be null");
         this.protocolGuard = Objects.requireNonNull(protocolGuard, "protocolGuard must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
     }
 
     /** Opens a topic from at least two existing Claims in the conflict-detection stage. */
@@ -78,8 +81,19 @@ public class DebateService {
         }
         DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), command.subjectKey(), command.claimIds());
         debateStore.saveTopic(topic);
-        review.recordCommand(command.metadata(), topic.id().value().toString());
+review.recordCommand(command.metadata(), topic.id().value().toString());
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_1);
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_TOPIC_OPENED,
+                RoleType.DIRECTOR,
+                null,
+                topic.id(),
+                null,
+                null,
+                1,
+                60,
+                Map.of("subjectKey", topic.subjectKey())));
         return new TopicResult(topic, false);
     }
 
@@ -104,6 +118,7 @@ public class DebateService {
         topic.addChallenge(debateStateMachine, turn);
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
+        publishTurn(review, turn);
         return new TurnResult(turn, false);
     }
 
@@ -130,6 +145,7 @@ public class DebateService {
         topic.addRebuttal(debateStateMachine, turn);
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
+        publishTurn(review, turn);
         return new TurnResult(turn, false);
     }
 
@@ -156,6 +172,7 @@ public class DebateService {
                 validateEvidence(review.id(), command.evidenceIds()), claim.position(), command.stanceAfter(), Instant.now());
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
+        publishTurn(review, turn);
         return new TurnResult(turn, false);
     }
 
@@ -180,6 +197,7 @@ public class DebateService {
                 command.publicContent(), List.of(), null, null, Instant.now());
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
+        publishTurn(review, turn);
         return new TurnResult(turn, false);
     }
 
@@ -219,11 +237,42 @@ public class DebateService {
                     "a debate topic can be closed only during an active debate round");
         }
         requireVersion(review, command.metadata());
-        topic.close(debateStateMachine, command.status(), command.publicResolution(), Instant.now());
+topic.close(debateStateMachine, command.status(), command.publicResolution(), Instant.now());
         review.recordCommand(command.metadata(), topic.id().value().toString());
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_TOPIC_CLOSED,
+                RoleType.DIRECTOR,
+                null,
+                topic.id(),
+                null,
+                null,
+                topic.currentRound(),
+                review.stage() == ReviewStage.DEBATE_ROUND_1 ? 60 : 70,
+                Map.of("status", topic.status().name())));
         return new TopicResult(topic, false);
     }
 
+    private void publishTurn(Review review, DebateTurn turn) {
+        ai.cc.chongming.review.domain.event.ReviewEventType type = switch (turn.turnType()) {
+            case CHALLENGE -> ai.cc.chongming.review.domain.event.ReviewEventType.CHALLENGE_SUBMITTED;
+            case REBUTTAL -> ai.cc.chongming.review.domain.event.ReviewEventType.REBUTTAL_SUBMITTED;
+            case POSITION_CHANGE -> ai.cc.chongming.review.domain.event.ReviewEventType.POSITION_CHANGED;
+            case EVIDENCE_REQUEST -> ai.cc.chongming.review.domain.event.ReviewEventType.EVIDENCE_REQUESTED;
+            default -> throw new IllegalStateException("unsupported persisted debate turn type: " + turn.turnType());
+        };
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                type,
+                turn.actorRole(),
+                turn.targetRole(),
+                turn.topicId(),
+                turn.targetClaimId(),
+                turn.turnId(),
+                turn.round(),
+                review.stage() == ReviewStage.DEBATE_ROUND_1 ? 60 : 70,
+                Map.of("turnType", turn.turnType().name())));
+    }
     private DebateTopic requireTopic(Review review, ReviewCommandMetadata metadata, TopicId topicId) {
         requireReview(review, metadata);
         return debateStore.findTopic(review.id(), topicId)

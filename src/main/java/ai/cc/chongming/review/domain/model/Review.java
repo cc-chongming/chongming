@@ -12,7 +12,7 @@ import java.util.Objects;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-003#1.2,#1.3,#1.6] Owns review lifecycle, attempt version and command replay state.
+ * [AIREVIEW-PLAN-003#1.2,#1.3,#1.6][AIREVIEW-PLAN-010#1.7] Owns review lifecycle, attempt version and command replay state.
  *
  * @author wangli
  */
@@ -133,6 +133,9 @@ public final class Review {
         }
         attemptNo++;
         stage = ReviewStage.PENDING;
+        // The previous attempt remains in durable history; this aggregate now owns only the fresh runtime namespace.
+        roleActivations.clear();
+        commandResults.clear();
         version++;
     }
 

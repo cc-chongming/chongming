@@ -1,6 +1,6 @@
 # 领域事件、SSE 与恢复计划
 
-> **状态**: ⏳ 待实施
+> **状态**: 🟡 核心能力已完成；多实例恢复与 HTTP 写端点待持久化写模型就绪后接入
 > **创建日期**: 2026-07-14
 > **目标**: 建立可重放领域事件、Spring MVC SSE、幂等取消/重试和进程恢复能力。
 > **前置计划**: PLAN-003、PLAN-004；可与 PLAN-005 至 009 并行
@@ -13,46 +13,46 @@ sequence，
 
 ## 1. 分段方案
 
-### 1.1 统一事件信封 ⏳
+### 1.1 统一事件信封 ✅
 
 字段：eventId、sequence、reviewId、attempt、type、category、stage、actorRole、targetRole、topicId、claimId、turnId、round、progress、occurredAt、payloadVersion、payload。
 
 - type 使用 PLAN_CREATED、ROLE_ACTIVATED 等具体事件名；category 初始冻结为 PLAN、ROLE、CLAIM、EVIDENCE、DEBATE、JUDGEMENT、HUMAN、GATE、NOTIFICATION、ERROR。
 - payload 版本化，未知字段向后兼容。
 
-### 1.2 事务事件写入 ⏳
+### 1.2 事务事件写入 🟡
 
 - 领域命令成功后同事务写状态和 `review_event`。
 - sequence 按 review 全局单调递增，重试 attempt 不重置；`review_id + sequence` 唯一索引处理并发。
 - 事件只追加，不提供修改/删除；审计事件独立记录操作者。
 
-### 1.3 读模型与查询 API ⏳
+### 1.3 读模型与查询 API ✅
 
 - `GET /api/reviews/{id}` 聚合概要、阶段、进度和 Gate 状态。
 - `GET /api/reviews/{id}/plans`、`GET /api/reviews/{id}/debates` 和 `GET /api/reviews/{id}/evidence/{evidenceId}` 使用批量 Repository 装配；Evidence API 只接受服务端
   ID，不接受文件路径。
 - 所有时间输出 `yyyy-MM-dd HH:mm:ss`，列表分页或基于 sequence 游标。
 
-### 1.4 SSE 会话管理 ⏳
+### 1.4 SSE 会话管理 ✅
 
 - `GET /api/reviews/{id}/events` 接受 `Last-Event-ID` 或 `afterSequence`。
 - 采用“注册缓冲订阅者 → 查询并顺序发送历史 → 排空缓冲 → 切换实时”的流程，避免回放/订阅窗口丢事件。
 - 心跳、超时、客户端断开和 emitter 清理均有指标。
 - 心跳不占用业务 sequence，不写 `review_event`。
 
-### 1.5 AgentScope 原始事件桥接 ⏳
+### 1.5 AgentScope 原始事件桥接 ✅
 
 - 原始事件经 Adapter 转运行观察事件，可选择不持久化详细 payload。
 - DebateTools 成功后才产生正式 `CHALLENGE_SUBMITTED` 等业务事件。
 - 去重同一工具调用的开始/结束/业务成功事件，保留 parent/agent 来源。
 
-### 1.6 取消与失败 ⏳
+### 1.6 取消与失败 🟡
 
 - `POST /api/reviews/{id}/cancel` 幂等并携带 expectedVersion；发取消令牌并等待安全点，最终状态 CANCELLED。
 - 已完成人工决定的 review 不允许取消；取消不删除历史。
 - 未捕获异常统一写 REVIEW_FAILED，敏感错误只存内部摘要。
 
-### 1.7 重试与 attempt 隔离 ⏳
+### 1.7 重试与 attempt 隔离 🟡
 
 - `POST /api/reviews/{id}/retry` 指定阶段并创建新 attempt；旧 attempt 全部只读。
 - 输入快照可复用，运行态 session/sequence/idempotency namespace 必须重新生成。
@@ -64,32 +64,41 @@ sequence，
 - 从已提交阶段重新驱动，不重放未提交的内存动作。
 - 恢复成功/失败写事件；连续失败转人工而非无限重试。
 
+## 1.9 当前实现与部署边界
+
+- 已完成：版本化事件信封、同一 review 的全局 sequence、默认内存存储，以及在 `review.persistence.enabled=true` 时启用的 MyBatis `review_event` 追加存储；V6 迁移补齐了完整事件列。
+- 已完成：`GET /api/reviews/{id}`、`/plans`、`/debates`、`/evidence/{evidenceId}` 查询，所有对外时间统一为 `yyyy-MM-dd HH:mm:ss`；证据详情只接受服务端 ID。
+- 已完成：SSE 的“先注册缓冲、历史回放、排空、实时”切换，含超时、心跳、断开清理与轻量计数；心跳不写业务事件。
+- 已完成：Claim、DebateTools、Judge/Gate、计划、角色激活和取消/重试仅在命令成功且非幂等重放时发布正式事件；AgentScope 原始事件继续只作为脱敏运行观察。
+- 待部署写模型：现有 Claim/Debate 命令的 MyBatis 写入尚未启用，因而“聚合状态与事件同一数据库事务”只能在该写模型接入后完成端到端验证。
+- 待持久化定位器：取消与重试已由 `ReviewLifecycleService` 实现并有测试；当前没有可保存 Review 聚合的命令仓储/运行时安全点协调器，所以暂不暴露会误导调用方的 `/cancel`、`/retry` HTTP 写端点。
+- 未完成：启动扫描、数据库 lease、多实例恢复、恢复失败转人工，以及基于真实 MySQL 的 1 千/1 万事件回放演练。
 ## 2. 文件清单
 
 ### 2.1 新建
 
 | 文件                                                                                   | 计划段      | 状态 |
 |--------------------------------------------------------------------------------------|----------|----|
-| `src/main/java/ai/cc/chongming/review/domain/event/ReviewEvent.java`                 | #1.1     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/domain/event/ReviewEventType.java`             | #1.1     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/application/ReviewEventService.java`           | #1.2     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java`           | #1.3     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/api/ReviewQueryController.java`                | #1.3     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/api/ReviewEventStreamController.java`          | #1.4     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/infrastructure/sse/ReviewSseRegistry.java`     | #1.4     | ⏳  |
-| `src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java`       | #1.6-1.8 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/event/ReviewEventStoreIntegrationTests.java`    | #1.1-1.2 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/api/ReviewQueryControllerTests.java`            | #1.3     | ⏳  |
-| `src/test/java/ai/cc/chongming/review/sse/ReviewSseReplayIntegrationTests.java`       | #1.4-1.5 | ⏳  |
-| `src/test/java/ai/cc/chongming/review/lifecycle/ReviewLifecycleIntegrationTests.java` | #1.6-1.8 | ⏳  |
+| `src/main/java/ai/cc/chongming/review/domain/event/ReviewEvent.java`                 | #1.1     | ✅  |
+| `src/main/java/ai/cc/chongming/review/domain/event/ReviewEventType.java`             | #1.1     | ✅  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewEventService.java`           | #1.2     | ✅  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java`           | #1.3     | ✅  |
+| `src/main/java/ai/cc/chongming/review/api/ReviewQueryController.java`                | #1.3     | ✅  |
+| `src/main/java/ai/cc/chongming/review/api/ReviewEventController.java`                | #1.4     | ✅  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewSseRegistry.java`            | #1.4     | ✅  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java`       | #1.6-1.8 | 🟡  |
+| `src/test/java/ai/cc/chongming/review/event/ReviewEventStoreIntegrationTests.java`    | #1.1-1.2 | ✅  |
+| `src/test/java/ai/cc/chongming/review/api/ReviewQueryControllerTests.java`            | #1.3     | ✅  |
+| `src/test/java/ai/cc/chongming/review/sse/ReviewSseReplayIntegrationTests.java`       | #1.4-1.5 | ✅  |
+| `src/test/java/ai/cc/chongming/review/lifecycle/ReviewLifecycleIntegrationTests.java` | #1.6-1.8 | ✅  |
 
 ### 2.2 修改
 
 | 文件                                                                                      | 计划段       | 状态 |
 |-----------------------------------------------------------------------------------------|-----------|----|
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentEventAdapter.java` | #1.5      | ⏳  |
-| `src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java`      | #1.6-1.8  | ⏳  |
-| `src/main/resources/application.yml`                                                    | #1.4、#1.8 | ⏳  |
+| `src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java`      | #1.5-1.7  | ✅  |
+| `src/main/resources/application.yml`                                                    | #1.4、#1.8 | ✅  |
 
 ## 3. 实施顺序
 
@@ -122,3 +131,4 @@ sequence，
 | 2026-07-14 | 创建事件信封、SSE 回放、取消、重试和恢复计划。 |
 | 2026-07-15 | sequence 对齐技术方案：重试保留 attempt 字段但不重置同一 review 的事件序号。 |
 | 2026-07-15 | 查询 API 对齐技术方案：统一使用 `/api/reviews/{id}/...` 路径并明确证据详情接口。 |
+| 2026-07-16 | 实现事件信封、内存/MyBatis 事件存储、查询 API、SSE 回放、正式命令事件和取消/重试服务；明确多实例恢复及 HTTP 写端点依赖持久化写模型，尚未完成。 |

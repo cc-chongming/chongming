@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Repository;
 
 /**
- * Deterministic process-local implementation used until the MyBatis command writer is enabled.
+ * [AIREVIEW-PLAN-010#1.3] Deterministic process-local implementation used until the MyBatis command writer is enabled.
  *
  * @author wangli
  */
@@ -89,6 +89,14 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
     }
 
     @Override
+    public List<DebateTurn> findTurns(ReviewId reviewId) {
+        return turns.getOrDefault(reviewId, Map.of()).values().stream()
+                .sorted(Comparator.comparing(DebateTurn::topicId, Comparator.comparing(TopicId::value))
+                        .thenComparingInt(DebateTurn::round)
+                        .thenComparing(turn -> turn.turnId().value()))
+                .toList();
+    }
+    @Override
     public void saveJudgeDecision(ReviewId reviewId, JudgeDecision decision) {
         judgeDecisions.computeIfAbsent(reviewId, ignored -> new ConcurrentHashMap<>()).putIfAbsent(decision.topicId(), decision);
     }
@@ -98,6 +106,10 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
         return Optional.ofNullable(judgeDecisions.getOrDefault(reviewId, Map.of()).get(topicId));
     }
 
+    @Override
+    public Map<TopicId, JudgeDecision> findJudgeDecisions(ReviewId reviewId) {
+        return Map.copyOf(judgeDecisions.getOrDefault(reviewId, Map.of()));
+    }
     @Override
     public void saveGateDraft(GateDecision decision) {
         gateDrafts.putIfAbsent(decision.reviewId(), decision);

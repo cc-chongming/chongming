@@ -12,12 +12,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * Accepts role-authored public Claims only after evidence ownership, lifecycle and idempotency checks.
+ * [AIREVIEW-PLAN-010#1.5] Accepts role-authored public Claims only after evidence ownership, lifecycle and idempotency checks.
  *
  * @author wangli
  */
@@ -27,14 +28,25 @@ public class ClaimService {
     private final EvidenceLedgerService evidenceLedgerService;
     private final ReviewDebateStore debateStore;
     private final ReviewProtocolGuard protocolGuard;
+    private final ReviewEventPublisher eventPublisher;
 
     public ClaimService(
             EvidenceLedgerService evidenceLedgerService,
             ReviewDebateStore debateStore,
             ReviewProtocolGuard protocolGuard) {
+        this(evidenceLedgerService, debateStore, protocolGuard, ReviewEventPublisher.noop());
+    }
+
+    @Autowired
+    public ClaimService(
+            EvidenceLedgerService evidenceLedgerService,
+            ReviewDebateStore debateStore,
+            ReviewProtocolGuard protocolGuard,
+            ReviewEventPublisher eventPublisher) {
         this.evidenceLedgerService = Objects.requireNonNull(evidenceLedgerService, "evidenceLedgerService must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.protocolGuard = Objects.requireNonNull(protocolGuard, "protocolGuard must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
     }
 
     /**
@@ -64,7 +76,18 @@ public class ClaimService {
                 references));
         debateStore.saveClaim(claim);
         review.recordCommand(submission.metadata(), claim.claimId().value().toString());
-        review.completeInitialReview(submission.actorRole());
+review.completeInitialReview(submission.actorRole());
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.CLAIM_SUBMITTED,
+                submission.actorRole(),
+                null,
+                null,
+                claim.claimId(),
+                null,
+                null,
+                40,
+                Map.of("subjectKey", claim.subjectKey(), "severity", claim.severity().name())));
         return new ClaimSubmissionResult(claim, false);
     }
 

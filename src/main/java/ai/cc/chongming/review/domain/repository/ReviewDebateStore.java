@@ -10,10 +10,11 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TurnId;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
- * Stores immutable Claim/Turn facts and mutable topic state behind the debate application boundary.
+ * [AIREVIEW-PLAN-010#1.3] Stores immutable Claim/Turn facts and mutable topic state behind the debate application boundary.
  *
  * @author wangli
  */
@@ -37,9 +38,19 @@ public interface ReviewDebateStore {
 
     List<DebateTurn> findTurns(ReviewId reviewId, TopicId topicId);
 
+    /**
+     * Batch-loads every turn of one review for read-model assembly.
+     */
+    List<DebateTurn> findTurns(ReviewId reviewId);
+
     void saveJudgeDecision(ReviewId reviewId, JudgeDecision decision);
 
     Optional<JudgeDecision> findJudgeDecision(ReviewId reviewId, TopicId topicId);
+
+    /**
+     * Batch-loads judge decisions keyed by topic for read-model assembly.
+     */
+    Map<TopicId, JudgeDecision> findJudgeDecisions(ReviewId reviewId);
 
     void saveGateDraft(GateDecision decision);
 

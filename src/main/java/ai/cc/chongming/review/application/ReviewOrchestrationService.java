@@ -20,12 +20,13 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * Coordinates director planning and role activation while delegating all lifecycle limits to domain guards.
+ * [AIREVIEW-PLAN-010#1.5] Coordinates director planning and role activation while delegating all lifecycle limits to domain guards.
  *
  * @author wangli
  */
@@ -40,6 +41,7 @@ public class ReviewOrchestrationService {
     private final RoleActivationService roleActivationService;
     private final ReviewStateMachine stateMachine;
     private final ReviewOrchestrationProperties properties;
+    private final ReviewEventPublisher eventPublisher;
     private final ConcurrentMap<String, List<ReviewPlan>> plansByRuntime = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<OrchestrationEvent>> eventsByRuntime = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AtomicLong> eventSequences = new ConcurrentHashMap<>();
@@ -50,11 +52,23 @@ public class ReviewOrchestrationService {
             RoleActivationService roleActivationService,
             ReviewStateMachine stateMachine,
             ReviewOrchestrationProperties properties) {
+        this(runtimeAdapter, workspaceLayout, roleActivationService, stateMachine, properties, ReviewEventPublisher.noop());
+    }
+
+    @Autowired
+    public ReviewOrchestrationService(
+            AgentRuntimeAdapter runtimeAdapter,
+            ReviewWorkspaceLayout workspaceLayout,
+            RoleActivationService roleActivationService,
+            ReviewStateMachine stateMachine,
+            ReviewOrchestrationProperties properties,
+            ReviewEventPublisher eventPublisher) {
         this.runtimeAdapter = Objects.requireNonNull(runtimeAdapter, "runtimeAdapter must not be null");
         this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
         this.roleActivationService = Objects.requireNonNull(roleActivationService, "roleActivationService must not be null");
         this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
     }
 
     /**
@@ -211,6 +225,39 @@ public class ReviewOrchestrationService {
         long sequence = eventSequences.computeIfAbsent(context.runtimeId(), ignored -> new AtomicLong()).incrementAndGet();
         events.add(new OrchestrationEvent(sequence, type, context.reviewId().value().toString(), context.attemptNo(),
                 stage, actor, referenceVersion, Instant.now()));
+        eventPublisher.publish(new ai.cc.chongming.review.domain.event.ReviewEventDraft(
+                context.reviewId(),
+                context.attemptNo(),
+                toBusinessEventType(type),
+                stage,
+                RoleType.valueOf(actor),
+                null,
+                null,
+                null,
+                null,
+                null,
+                progressFor(stage),
+                null,
+                1,
+                Map.of("referenceVersion", Long.toString(referenceVersion))));
+    }
+
+    private ai.cc.chongming.review.domain.event.ReviewEventType toBusinessEventType(OrchestrationEventType type) {
+        return switch (type) {
+            case PLAN_CREATED -> ai.cc.chongming.review.domain.event.ReviewEventType.PLAN_CREATED;
+            case PLAN_REVISED -> ai.cc.chongming.review.domain.event.ReviewEventType.PLAN_REVISED;
+            case ROLE_ACTIVATED -> ai.cc.chongming.review.domain.event.ReviewEventType.ROLE_ACTIVATED;
+            case CANCELLED -> ai.cc.chongming.review.domain.event.ReviewEventType.REVIEW_CANCELLED;
+        };
+    }
+
+    private Integer progressFor(ReviewStage stage) {
+        return switch (stage) {
+            case PLANNING -> 20;
+            case INITIAL_REVIEW -> 40;
+            case CANCELLED -> 100;
+            default -> null;
+        };
     }
 
     private void requirePlanningReview(Review review, ReviewRuntimeContext context) {

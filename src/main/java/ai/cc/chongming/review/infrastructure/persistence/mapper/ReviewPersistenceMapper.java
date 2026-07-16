@@ -134,6 +134,84 @@ public interface ReviewPersistenceMapper {
     List<TurnEvidenceRow> findEvidenceByTurnIds(@Param("turnIds") Set<String> turnIds);
 
     /**
+     * Locks the review parent row before allocating the next review-global event sequence.
+     */
+    @Select("SELECT review_id FROM review_request WHERE review_id = #{reviewId} FOR UPDATE")
+    String lockReviewForEventSequence(@Param("reviewId") String reviewId);
+
+    @Select("SELECT COALESCE(MAX(event_sequence), 0) + 1 FROM review_event WHERE review_id = #{reviewId}")
+    long nextReviewEventSequence(@Param("reviewId") String reviewId);
+
+    @Insert("""
+            INSERT INTO review_event
+                (event_id, review_id, attempt_no, event_sequence, event_type, actor_type, payload_json, created_at,
+                 event_category, stage, actor_role, target_role, topic_id, claim_id, turn_id, debate_round,
+                 progress, payload_version, occurred_at)
+            VALUES
+                (#{eventId}, #{reviewId}, #{attemptNo}, #{sequence}, #{eventType}, #{actorType}, #{payloadJson},
+                 #{occurredAt}, #{eventCategory}, #{stage}, #{actorRole}, #{targetRole}, #{topicId}, #{claimId},
+                 #{turnId}, #{round}, #{progress}, #{payloadVersion}, #{occurredAt})
+            """)
+    int insertReviewEvent(ReviewEventRow row);
+
+    @Select("""
+            SELECT event_id AS eventId, review_id AS reviewId, attempt_no AS attemptNo,
+                   event_sequence AS sequence, event_type AS eventType, event_category AS eventCategory,
+                   stage, actor_role AS actorRole, target_role AS targetRole, topic_id AS topicId,
+                   claim_id AS claimId, turn_id AS turnId, debate_round AS round, progress,
+                   payload_version AS payloadVersion, payload_json AS payloadJson, occurred_at AS occurredAt
+            FROM review_event
+            WHERE review_id = #{reviewId} AND event_sequence > #{afterSequence}
+            ORDER BY event_sequence
+            LIMIT #{limit}
+            """)
+    List<ReviewEventRow> findReviewEventsAfter(
+            @Param("reviewId") String reviewId,
+            @Param("afterSequence") long afterSequence,
+            @Param("limit") int limit);
+
+    @Select("""
+            SELECT event_id AS eventId, review_id AS reviewId, attempt_no AS attemptNo,
+                   event_sequence AS sequence, event_type AS eventType, event_category AS eventCategory,
+                   stage, actor_role AS actorRole, target_role AS targetRole, topic_id AS topicId,
+                   claim_id AS claimId, turn_id AS turnId, debate_round AS round, progress,
+                   payload_version AS payloadVersion, payload_json AS payloadJson, occurred_at AS occurredAt
+            FROM review_event
+            WHERE review_id = #{reviewId}
+            ORDER BY event_sequence DESC
+            LIMIT 1
+            """)
+    ReviewEventRow findLatestReviewEvent(@Param("reviewId") String reviewId);
+
+    /**
+     * [AIREVIEW-PLAN-010#1.2] Row for the complete, append-only event envelope.
+     *
+     * @author wangli
+     */
+    record ReviewEventRow(
+            String eventId,
+            String reviewId,
+            int attemptNo,
+            long sequence,
+            String eventType,
+            String eventCategory,
+            String stage,
+            String actorRole,
+            String targetRole,
+            String topicId,
+            String claimId,
+            String turnId,
+            Integer round,
+            Integer progress,
+            int payloadVersion,
+            String payloadJson,
+            LocalDateTime occurredAt) {
+
+        String actorType() {
+            return actorRole == null ? "SYSTEM" : actorRole;
+        }
+    }
+    /**
      * Row for the mutable review root.
      *
      * @author wangli

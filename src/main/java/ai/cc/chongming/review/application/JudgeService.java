@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * Accepts a Judge conclusion that may select existing facts but never introduce a Claim, Evidence or final Gate result.
+ * [AIREVIEW-PLAN-010#1.5] Accepts a Judge conclusion that may select existing facts but never introduce a Claim, Evidence or final Gate result.
  *
  * @author wangli
  */
@@ -29,15 +29,17 @@ public class JudgeService {
 
     private final ReviewDebateStore debateStore;
     private final GatePolicy gatePolicy;
+    private final ReviewEventPublisher eventPublisher;
 
     public JudgeService(ReviewDebateStore debateStore) {
-        this(debateStore, new GatePolicy());
+        this(debateStore, new GatePolicy(), ReviewEventPublisher.noop());
     }
 
     @Autowired
-    public JudgeService(ReviewDebateStore debateStore, GatePolicy gatePolicy) {
+    public JudgeService(ReviewDebateStore debateStore, GatePolicy gatePolicy, ReviewEventPublisher eventPublisher) {
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.gatePolicy = Objects.requireNonNull(gatePolicy, "gatePolicy must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
     }
 
     /** Saves one Judge conclusion for a terminal topic and returns an idempotent replay when applicable. */
@@ -73,8 +75,19 @@ public class JudgeService {
         validateTopicClaims(topic, submission.allReferencedClaimIds());
         JudgeDecision decision = new JudgeDecision(topic.id(), submission.proposedGateResult(),
                 submission.publicReasonSummary(), submission.acceptedClaimIds(), submission.rejectedClaimIds(), Instant.now());
-        debateStore.saveJudgeDecision(review.id(), decision);
+debateStore.saveJudgeDecision(review.id(), decision);
         review.recordCommand(submission.metadata(), topic.id().value().toString());
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.JUDGEMENT_SUBMITTED,
+                RoleType.JUDGE,
+                null,
+                topic.id(),
+                null,
+                null,
+                null,
+                80,
+                java.util.Map.of("result", decision.result().name())));
         return new JudgeResult(decision, false);
     }
 
@@ -100,8 +113,33 @@ public class JudgeService {
         }
         GateDecision draft = gatePolicy.draft(review.id(), debateStore.findClaims(review.id()), decisions);
         debateStore.saveGateDraft(draft);
-        if (draft.result() == GateResult.HUMAN_REQUIRED && review.stage() == ReviewStage.JUDGING) {
+        boolean humanReviewRequired = draft.result() == GateResult.HUMAN_REQUIRED && review.stage() == ReviewStage.JUDGING;
+        if (humanReviewRequired) {
             review.transitionTo(new ReviewStateMachine(), ReviewStage.WAITING_HUMAN);
+        }
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.GATE_DRAFTED,
+                RoleType.JUDGE,
+                null,
+                null,
+                null,
+                null,
+                null,
+                90,
+                java.util.Map.of("result", draft.result().name(), "status", draft.status().name())));
+        if (humanReviewRequired) {
+            eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                    review,
+                    ai.cc.chongming.review.domain.event.ReviewEventType.HUMAN_REVIEW_REQUIRED,
+                    RoleType.JUDGE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    90,
+                    java.util.Map.of("reason", draft.publicReasonSummary())));
         }
         return draft;
     }
