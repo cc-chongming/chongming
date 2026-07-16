@@ -288,3 +288,25 @@ Keep `EMPTY_MARKDOWN` in the public intake error contract and include it wheneve
 - Tags: markdown, validation, empty-file, api-contract
 
 ---
+## [LRN-20260716-001] security
+
+**Logged**: 2026-07-16T10:40:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+
+### Summary
+Windows NTFS junctions are not reliably exposed as symbolic links and must be rejected through the DOS reparse-point attribute before canonicalizing a configured repository root.
+
+### Details
+`Files.isSymbolicLink` alone does not cover a `mklink /J` directory junction. `RepositoryBoundaryGuard` now checks `dos:attributes` with `NOFOLLOW_LINKS` for the reparse-point bit while walking the configured root and its ancestors. The regression test creates a real junction on Windows and confirms that an opaque configured repository ID is rejected with `REPOSITORY_PATH_UNSAFE`.
+
+### Suggested Action
+Reuse the same no-follow reparse-point check for every source path and snapshot root. Keep a real Windows junction test in the boundary suite; do not infer junction behavior from symbolic-link tests.
+
+### Metadata
+- Source: repository_boundary_test
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/repository/RepositoryBoundaryGuard.java, src/test/java/ai/cc/chongming/review/repository/RepositoryBoundaryGuardTests.java
+- Tags: windows, junction, symlink, path-traversal, repository-security
+
+---

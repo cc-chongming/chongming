@@ -8,6 +8,9 @@ review:
   workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}
   max-agents: 8
   max-debate-rounds: 2
+  repositories:
+    # Intentionally empty by default. Deployments must map opaque repository IDs to local Git roots.
+    allowed: []
   agentscope:
     persist-session: true
     state-home: ${AGENTSCOPE_STATE_HOME:.agentscope/state}
