@@ -8,6 +8,9 @@ import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.permission.PermissionRule;
+import io.agentscope.core.tool.AgentTool;
+import io.agentscope.core.tool.Toolkit;
+import java.util.List;
 import io.agentscope.harness.agent.DistributedStore;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.util.Objects;
@@ -27,16 +30,28 @@ public class ReviewDirectorHarnessFactory {
     private final ModelGateway modelGateway;
     private final AgentScopeProperties agentScopeProperties;
     private final ObjectProvider<DistributedStore> distributedStoreProvider;
+    private final ReviewDebateToolFactory reviewDebateToolFactory;
 
     public ReviewDirectorHarnessFactory(
             ReviewWorkspaceLayout workspaceLayout,
             ModelGateway modelGateway,
             AgentScopeProperties agentScopeProperties,
             ObjectProvider<DistributedStore> distributedStoreProvider) {
+        this(workspaceLayout, modelGateway, agentScopeProperties, distributedStoreProvider, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewDirectorHarnessFactory(
+            ReviewWorkspaceLayout workspaceLayout,
+            ModelGateway modelGateway,
+            AgentScopeProperties agentScopeProperties,
+            ObjectProvider<DistributedStore> distributedStoreProvider,
+            ReviewDebateToolFactory reviewDebateToolFactory) {
         this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
         this.distributedStoreProvider = Objects.requireNonNull(distributedStoreProvider, "distributedStoreProvider must not be null");
+        this.reviewDebateToolFactory = reviewDebateToolFactory;
     }
 
     /**
@@ -46,6 +61,9 @@ public class ReviewDirectorHarnessFactory {
         Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
         ReviewWorkspaceLayout.ReviewWorkspace workspace = workspaceLayout.open(runtimeContext);
         String prompt = directorPrompt();
+        List<AgentTool> debateTools = reviewDebateToolFactory == null ? List.of() : reviewDebateToolFactory.directorTools(runtimeContext);
+        Toolkit toolkit = new Toolkit();
+        debateTools.forEach(toolkit::registerAgentTool);
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(runtimeContext.directorLabel())
                 .agentId(runtimeContext.directorLabel())
@@ -53,10 +71,11 @@ public class ReviewDirectorHarnessFactory {
                 .defaultSessionId(runtimeContext.directorSessionId())
                 .workspace(workspace.attempt())
                 .model(new AgentScopeModelBridge(
-                        modelGateway, runtimeContext, RoleType.DIRECTOR, "director", prompt, java.util.Set.of()))
+                        modelGateway, runtimeContext, RoleType.DIRECTOR, "director", prompt,
+                        debateTools.stream().map(AgentTool::getName).collect(java.util.stream.Collectors.toSet())))
                 .sysPrompt(prompt)
                 .maxIters(12)
-                .enablePlanMode()
+                .toolkit(toolkit)
                 .enableTaskList()
                 .disableFilesystemTools()
                 .disableShellTool()
@@ -93,7 +112,8 @@ public class ReviewDirectorHarnessFactory {
         return "You are ReviewDirectorHarness. Create and revise public review plans, then request only "
                 + "server-authorized role activation. You do not decide final Gate results, bypass ReviewProtocolGuard, "
                 + "read arbitrary files, run shell commands, access private role sessions, reveal hidden reasoning, "
-                + "or create agents directly. All business facts must be submitted through strongly typed server tools.";
+                + "or create agents directly. When woken after a committed event, advance only through the registered debate stage tools. "
+                + "All business facts must be submitted through strongly typed server tools.";
     }
 
     /**

@@ -204,15 +204,28 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
     /** Advances the review only after round one; the two-round bound remains enforced by DebateStateMachine. */
     public void beginSecondRound(Review review) {
         Objects.requireNonNull(review, "review must not be null");
+        validateBeginSecondRound(review);
+        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_2);
+    }
+
+    /** Validates that the second round can begin without changing aggregate state. */
+    public void validateBeginSecondRound(Review review) {
+        Objects.requireNonNull(review, "review must not be null");
         if (review.stage() != ReviewStage.DEBATE_ROUND_1) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "second debate round can begin only after round one");
         }
-        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_2);
     }
 
     /** Enters judging only when every opened topic reached a terminal resolution or escalation. */
     public void beginJudging(Review review) {
+        Objects.requireNonNull(review, "review must not be null");
+        validateBeginJudging(review);
+        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.JUDGING);
+    }
+
+    /** Validates that judging can begin without changing aggregate state. */
+    public void validateBeginJudging(Review review) {
         Objects.requireNonNull(review, "review must not be null");
         if (review.stage() != ReviewStage.DEBATE_ROUND_2) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
@@ -222,7 +235,6 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "all debate topics must be terminal before judging");
         }
-        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.JUDGING);
     }
 
     /** Closes a topic with a public resolution or escalation reason. */

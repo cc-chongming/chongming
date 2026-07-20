@@ -1,103 +1,172 @@
 # 重明（Chongming）
 
-> **双睛照见，众议成明。** 让多个专业视角发现需求中的冲突、漏洞与不合理之处，让每一个研发 Gate 都有证据可循。
+> **双睛照见，众议成明。** 以协议、证据和人工 Gate 约束多 Agent 需求评审，而不把它做成一次不可追溯的群聊。
 
-## 名字的由来
+重明是一个面向研发需求评审的多智能体工作台。它接收 Markdown 需求与受控的本地仓库标识，让产品、项目、前端、后端等角色独立提出 Claim；冲突进入受限辩论，Judge 只给出 Gate 草案，最终决定始终由人完成。
 
-“重明”出自晋代王嘉《拾遗记》中的重明鸟。相传重明鸟“两目重瞳”，双目如炬，能识破伪装、驱逐邪祟。
+## 为什么不是「多 Agent 群聊」
 
-这与项目的使命天然契合：四个瞳孔象征产品、项目、前端、后端四个核心视角；测试等按需角色在需要时加入。辨伪与守门象征在需求进入研发前，找出被忽略的边界、风险和矛盾。重明不是替某个角色下结论，而是让不同立场在同一事实之上充分交锋，最终把问题照清楚。
+| 常见 Agent Demo | 重明的约束 |
+|---|---|
+| 对话结束即得到结论 | Claim、Challenge、Rebuttal、Judgement 与 Gate 均为强类型领域对象 |
+| Agent 自己选择权限与身份 | 服务端重新绑定 review、attempt、role、版本号和幂等键 |
+| 模型输出直接改变流程 | `ReviewProtocolGuard` 校验状态机、角色和动作后才提交命令 |
+| 只看最终回答 | 业务事件带全局 sequence，可通过 SSE 回放评审过程 |
+| AI 直接放行需求 | AI 仅生成草案；`HUMAN_REQUIRED` 进入人工等待态，人工决定版本化留痕 |
 
-## 项目定位
+这套方向借鉴了开源 Agent 工程的两项成熟实践：AgentScope Java 的受控工具调用、可观测与运行时中断能力，以及 LangGraph 的持久状态、人工介入和可恢复工作流理念。重明不复制它们的通用编排层，而是把这些原则收敛为“研发评审协议”。
 
-重明是一个**多智能体对抗式需求评审与门禁系统**。系统接收 Markdown 需求文档和只读本地代码仓库，由多个专业 Agent
-完成独立评审、交叉质询和证据化辩论，再由 Judge 生成 Gate 建议，交给人工审核后生效。
+## 当前能力
 
-它关注的不是“Agent 会不会聊天”，而是一个结论能否回答：**谁提出了什么主张、依据哪段代码、被谁质疑、如何回应，以及为什么最终放行或退回。
-**
+| 能力 | 当前状态 | 说明 |
+|---|---|---|
+| Markdown 受理与评审工作台 | 已可本地联调 | `POST /api/reviews` 创建评审，工作台入口为 `/review/` |
+| 状态机、角色权限与幂等命令 | 已实现 | 非法阶段、越权角色和重复命令由服务端拒绝或安全重放 |
+| OpenAI 兼容模型网关 | 已实现 | 支持角色模型配置、超时/退避与 Tool Call；须填入实际可用模型名 |
+| 首轮评审 | 已接入运行时 | 四个核心角色提交 Claim 后进入冲突检测 |
+| 辩论、Judge 与 Gate 草案 | 已接入运行时 | Director、角色和 Judge 使用受限工具推进；当前每个 attempt 仅一个活跃辩题 |
+| 领域事件与 SSE | 已实现 | 支持事件序号、历史回放、心跳及断线后的增量订阅 |
+| 人工审核、报告与通知 | 核心链路可用 | 外部通知 MCP 与生产持久化仍需真实契约联调 |
+| MySQL 命令写入与多实例恢复 | 未完成 | 当前评审聚合与运行时调度仍包含进程内边界，不能宣称生产级恢复 |
+| 安全审计、评测与故障演练 | 未完成 | 属于生产发布门禁，不应以本地 Demo 结果替代 |
 
-## 核心流程
+## 评审链路
 
 ```mermaid
 flowchart LR
-    A["Markdown 需求"] --> C["共同事实快照"]
-    B["只读代码仓库"] --> C
-    C --> D["Harness 主持人制定计划"]
-    D --> E["多角色独立评审"]
-    E --> F["冲突检测与两轮定向辩论"]
+    A["Markdown 需求"] --> B["创建 Review / 固化快照"]
+    B --> C["Director 制定计划"]
+    C --> D["核心角色首轮 Claim"]
+    D --> E["冲突检测"]
+    E --> F["受限辩论：质询 / 反驳 / 补证"]
     F --> G["Judge 裁决与 Gate 草案"]
-    G --> H["人工审核与版本留痕"]
-    H --> I["报告与学习通通知"]
+    G --> H["人工审核与版本化决定"]
+
+    D -. "正式领域事件" .-> I["SSE 事件流 / 工作台"]
+    F -. "提交后串行唤醒" .-> C
+    G -. "HUMAN_REQUIRED" .-> H
 ```
 
-## 设计原则
+运行时不依赖模型“自觉遵守流程”：模型只选择已下发的 Tool Schema；每个工具调用都会在服务端验证后再写入领域状态。`ReviewWorkflowDispatcher` 只监听已提交的正式事件，并在单个 review 内串行唤醒下一位 Agent，避免同一 Director 会话并发执行。
 
-- **共同事实，独立视角**：所有角色共享同一需求版本和仓库快照，但拥有不同上下文、检查清单与工具权限。
-- **证据约束结论**：代码证据包含快照、文件路径、单行号、片段哈希和证据 ID；伪造或失效引用不能进入正式报告。
-- **真实论点驱动辩论**：质询必须指向已发布 Claim，反驳必须回应具体 Turn；辩论最多两轮，未收敛问题升级人工。
-- **动态启用角色**：每场固定产品、项目、后端、前端四个核心角色，按需求最多启用架构、测试、安全三个角色，再由 Judge 裁决。
-- **AI 建议，人工定案**：AI 只生成 `AI_PASS`、`CONDITIONAL`、`BLOCK`、`RETURN` 或 `HUMAN_REQUIRED` 草案；`HUMAN_REQUIRED` 会进入 `WAITING_HUMAN`，不是最终状态。人工最终决定使用 `PASS`、`CONDITIONAL`、`BLOCK`、`RETURN` 或 `OVERRIDE`，并全部版本化审计。
-- **Harness 自主编排，协议强约束**：主持人可使用 Plan Mode 拆解任务、调度子 Agent 和恢复会话，但不能绕过状态机与
-  `ReviewProtocolGuard`。
+## 架构
 
-## 技术架构
+| 层次 | 责任 | 当前实现 |
+|---|---|---|
+| 交互层 | 工作台、受理、查询、SSE | Vue 3/Vite 静态资源 + Spring MVC |
+| 领域层 | Review 状态机、Guard、Claim、Debate、Judge、Gate | Java 21、Spring Boot、强类型命令 |
+| Agent 运行时 | Director/角色/Judge Harness、受限工具、运行态调度 | AgentScope Java Harness + 运行时上下文绑定 |
+| 模型适配层 | OpenAI 兼容请求、流式消息、Tool Call、重试 | Model Gateway Adapter |
+| 事件与存储 | sequence 事件、SSE 回放、可选 MyBatis event store | 内存默认实现；MySQL 写模型待完整接入 |
 
-| 层次    | 主要职责                       | 选型                                          |
-|-------|----------------------------|---------------------------------------------|
-| 评审编排  | Plan Mode、子 Agent、工作区、会话恢复 | AgentScope Java 2.0 Harness                 |
-| 业务服务  | 受理、状态机、辩论协议、人工审核、报告        | Java 21、Spring Boot 4                       |
-| 数据与状态 | 领域数据、审计事件、Agent 运行态        | MyBatis、MySQL、`agentscope-extensions-mysql` |
-| 实时交互  | 计划进度、发言时间线、断线回放            | Spring MVC SSE、Vue 3/Vite（构建产物以静态 ES Modules 部署） |
-| 外部集成  | 商业模型切换、最终结果通知              | OpenAI 兼容模型网关、学习通通知 MCP                     |
+## 快速开始
 
-核心链路保持单体架构，优先保证可运行、可验证和可演示；模型、代码理解工具与通知渠道均通过适配器隔离。
+### 前置条件
 
-## MVP 边界
+- JDK 21
+- Maven Wrapper 可用
+- MySQL 5.6+（本项目迁移不使用 JSON 列）
+- 一个支持 OpenAI Chat Completions 与 Tool Calling 的模型兼容接口
 
-首期只接收 `.md` 需求文档，只读分析本地仓库；不自动修改代码，不执行仓库脚本，也不直接阻断真实研发流程。单场最多运行 8 个
-Agent，并保留从需求快照、Evidence、Claim、DebateTurn、Judge 到人工 Gate 的完整追溯链。
+### 本地配置
 
-## 当前状态与路线图
+使用 `src/main/resources/application-local.yml` 填写本机配置；该文件只能用于本地，禁止提交密钥。最小结构如下：
 
-项目目前处于**工程基线与框架验证阶段**：仓库已包含 Spring Boot 骨架、AgentScope 2.0.0 兼容性测试、完整技术方案，以及 1 个总体路线图和
-14 个可独立开发、独立验证的专项计划。业务能力尚未完成，请勿将规划项视为已上线功能。
+```yaml
+review:
+  persistence:
+    enabled: true
+    jdbc-url: jdbc:mysql://127.0.0.1:3306/chongming?characterEncoding=UTF-8
+    username: your_user
+    password: your_password
+  model-gateway:
+    enabled: true
+    base-url: https://your-openai-compatible-endpoint/v1
+    model-name: your_actual_model_name
+    api-key: your_api_key
+    log-conversation: true # 仅限本地排障，完成后关闭
+repositories:
+  allowed:
+    - id: your-repository-id
+      root: E:\\your\\local\\repository
+```
 
-六周路线依次交付：框架兼容性验证 → 可信输入与代码证据 → 多 Agent 编排 → 对抗辩论与 Gate → 人工审核与通知 →
-评测、故障演练和答辩交付。实施入口见 [`AIREVIEW-PLAN-001-总体实施路线图.md`](docs/AIREVIEW-PLAN-001-总体实施路线图.md)。
+`model-name` 不能保留默认的 `chongming-*-placeholder`，否则模型服务会返回 404。启用 `log-conversation` 会记录脱敏前后运行细节，仅应在受控本地调试时短暂开启。
 
-## 本地开发
+如果本地配置文件曾进入版本控制或被共享，请立即移除其中的凭据并轮换数据库、模型网关密钥；README 不应成为复制真实密钥的载体。
 
-环境要求：JDK 21 和可用的 Maven Wrapper。当前工程基线与兼容性测试不连接模型服务；后续接入模型网关时，密钥只可通过环境变量提供。
+### 构建与启动
 
 ```powershell
-.\mvnw.cmd clean verify
+.\mvnw.cmd test
 .\mvnw.cmd spring-boot:run
 ```
 
-常用命令：
+浏览器打开 [http://localhost:8080/review/](http://localhost:8080/review/)。注意入口是 `/review/`，不是根路径或省略末尾斜杠后的静态资源猜测路径。
 
-- `.\mvnw.cmd test`：运行 JUnit 5 测试。
-- `.\mvnw.cmd clean verify`：编译、测试并打包。
-- `.\mvnw.cmd spring-boot:run`：启动本地 Spring Boot 应用。
+前端源码位于 `frontend/`。修改前端后需要重新构建并提交同步后的 `src/main/resources/static/review/` 产物：
+
+```powershell
+Set-Location frontend
+npm test
+npm run build
+```
+
+## 调试一场评审
+
+1. 在工作台创建评审，上传 `.md`，选择已配置的仓库标识。
+2. 使用 `main` 或目标分支；Commit 可为空，填写时必须是 40 位 SHA。
+3. 启动后观察工作台 SSE 状态和服务端日志。模型网关 401/404 首先检查 API Key、`base-url` 和实际模型名。
+4. 评审卡在某阶段时，先查询 `GET /api/reviews/{reviewId}` 与 SSE 事件，不要直接修改数据库状态。
+
+调试接口包括：
+
+- `GET /api/reviews/{reviewId}`：评审聚合状态。
+- `GET /api/reviews/{reviewId}/plans`：计划快照。
+- `GET /api/reviews/{reviewId}/debates`：辩论状态与回合。
+- `GET /api/reviews/{reviewId}/events`：SSE 事件流。
+- `POST /api/reviews/{reviewId}/cancel`、`/retry`：生命周期命令。
+
+## 生产化差距
+
+当前版本适合本地联调、演示和协议验证，**不适合作为多实例生产服务**。以下能力是发布前必须完成的门槛：
+
+- 将 Claim、Debate、Judge、Gate 与领域事件纳入同一个 MySQL 事务。
+- 实现数据库 lease、启动扫描、可恢复 Agent 任务和失败转人工。
+- 支持多个冲突辩题的批量编排，而不是当前的单活跃辩题限制。
+- 接入仓库快照/证据工具的真实只读 scope，并完成模型冒烟与权限审计。
+- 完成真实 MySQL 回放压测、安全审计、故障注入与评测基线。
+
+## 项目文档
+
+- [总体实施路线图](docs/AIREVIEW-PLAN-001-总体实施路线图.md)
+- [Harness 与角色编排](docs/AIREVIEW-PLAN-008-Harness主持人与角色编排.md)
+- [辩论、Judge 与 Gate](docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md)
+- [领域事件、SSE 与恢复](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
+- [人工审核、报告与通知](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
+- [开发约束](AGENTS.md)
+
+## 开源对标
+
+| 项目 | 借鉴点 | 重明的落点 |
+|---|---|---|
+| [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | 受控工具调用、运行时中断、可观测与多 Agent 协作 | 使用 Harness 承载角色，但由 Review 协议和白名单收紧工具边界 |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | 持久执行、人工介入、状态可视化 | 以人工 Gate 和事件回放实现审阅；持久恢复仍是待完成门槛 |
+
+项目不会把“接入了 Agent 框架”当成生产就绪证明。对标开源项目的下一步，是补齐 durable execution、审计和评测，而不是继续堆叠角色数量。
 
 ## 目录结构
 
 ```text
 src/main/java/ai/cc/chongming/   Java 生产代码
-src/main/resources/              应用配置与静态资源
+src/main/resources/              应用配置与内嵌工作台静态资源
 src/test/java/                   单元与集成测试
-docs/需求文档/                    产品方案与需求说明
-docs/技术方案/                    架构与技术决策
-docs/AIREVIEW-PLAN-*.md          分阶段实施与验证计划
+frontend/                        Vue 3/Vite 源码与前端测试
+docs/                            技术方案、集成契约和分阶段计划
 .agentscope/workspace/           本地 Agent 工作区（不提交）
 .learnings/                      错误、需求与经验记录
 ```
 
-## 开发与贡献
+## 贡献
 
-每个专项计划建议对应一个 `codex/aireview-plan-xxx` 分支或 PR。Java 代码使用四空格缩进，新增类型 Javadoc 统一标注
-`@author zyj`；数据库访问优先批量加载，避免在循环中逐条查询。新增行为需要配套测试，完成后更新对应计划状态、验证证据与
-`.learnings/` 记录。
-
-更多约束见 [`AGENTS.md`](AGENTS.md)，完整架构见 [
-`AI需求评审Agent_AgentScope2技术方案.md`](docs/技术方案/AI需求评审Agent_AgentScope2技术方案.md)。
+每项实现应同步更新对应 `AIREVIEW-PLAN-xxx`、测试证据和 `.learnings/`。提交前至少运行与改动范围匹配的测试；前端改动还须重建并同步静态资源。详细规则见 [AGENTS.md](AGENTS.md)。

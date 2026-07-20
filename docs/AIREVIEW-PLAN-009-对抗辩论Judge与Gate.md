@@ -1,6 +1,6 @@
 # 对抗辩论、Judge 与 Gate 计划
 
-> **状态**: ✅ 可提交的领域协议、工具门面与自动化验证已完成；生产 MySQL 命令写入和真实 AgentScope 工具注册待数据库/运行时联调。
+> **状态**: 🟡 可提交的领域协议、工具门面、自动化验证及受限 AgentScope 工具注册已完成；生产 MySQL 命令写入、跨进程恢复和多辩题编排待后续计划。
 > **创建日期**: 2026-07-14
 > **目标**: 把多 Agent 辩论实现为强类型、证据驱动、两轮受限且可回放的领域协议，并产出可人工确认的 Gate 草案。
 > **前置计划**: PLAN-003、PLAN-004、PLAN-006、PLAN-007、PLAN-008
@@ -138,7 +138,7 @@ submitJudgement(command) -> JudgeDecisionResult
 - `ConflictDetector` 对同一 `subjectKey` 的相反立场、相差至少两级的严重度，以及同一 Evidence 被相反立场引用时生成稳定候选及无冲突原因；主持人仍只能以真实 `claimIds` 开题。
 - `DebateTools` 门面包含 Claim、开题、定向质询/反驳、立场变化、补证请求、Judge 和 Gate 草案。第二轮不得原样重复第一轮质询；补证请求只记录缺口，不会伪造 Evidence。
 - `JudgeService` 只能采信或拒绝该终态辩题已有的 Claim；Gate 草案必须等待每个辩题都有 Judge 结论。`HUMAN_REQUIRED` 会使 Review 从 `JUDGING` 进入 `WAITING_HUMAN`，AI 永不写最终 Gate。
-- `InMemoryReviewDebateStore` 是当前假数据库配置下的可测试默认实现。实际部署前必须以 MyBatis 事务实现同一接口，并将 Review 版本、幂等命令、Claim/Turn/Judge/Gate 写入同一事务；首轮的 `submit_claim` 与 `complete_initial_review` 已真实注册到 AgentScope 角色 Harness，后续 Debate/Judge/Gate 的运行时工具注册仍待接入。
+- `InMemoryReviewDebateStore` 是当前假数据库配置下的可测试默认实现。实际部署前必须以 MyBatis 事务实现同一接口，并将 Review 版本、幂等命令、Claim/Turn/Judge/Gate 写入同一事务；首轮以及后续 Debate/Judge/Gate 工具均已真实注册到 AgentScope Harness。`ReviewWorkflowDispatcher` 仅在正式业务事件提交后按运行时串行唤醒 Director、角色或 Judge，不能替代持久化恢复队列。
 - 技术方案的状态机保持 `DEBATE_ROUND_1 → DEBATE_ROUND_2 → JUDGING`。辩题可在第一轮关闭；编排层仍需经过无新 Turn 的第二轮阶段标记后进入 Judge，避免绕过固定状态机。
 
 ## 6.2 验证证据

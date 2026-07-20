@@ -12,6 +12,10 @@ checklist:
 allowedTools:
   - submit_claim
   - complete_initial_review
+  - submit_challenge
+  - submit_rebuttal
+  - change_claim_position
+  - request_additional_evidence
   - listFiles
   - findSymbol
   - searchText

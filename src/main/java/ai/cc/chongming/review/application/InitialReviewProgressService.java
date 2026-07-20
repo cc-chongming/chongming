@@ -105,7 +105,27 @@ public class InitialReviewProgressService {
         return value;
     }
 
-    /** @author wangli */
-    public record CompletionResult(boolean replayed, ReviewStage stage) {
+    /**
+     * Tool completion result returned to the AgentScope adapter.
+     *
+     * @author wangli
+     */
+    public static final class CompletionResult {
+
+        private final boolean replayed;
+        private final ReviewStage stage;
+
+        public CompletionResult(boolean replayed, ReviewStage stage) {
+            this.replayed = replayed;
+            this.stage = Objects.requireNonNull(stage, "stage must not be null");
+        }
+
+        public boolean replayed() {
+            return replayed;
+        }
+
+        public ReviewStage stage() {
+            return stage;
+        }
     }
 }

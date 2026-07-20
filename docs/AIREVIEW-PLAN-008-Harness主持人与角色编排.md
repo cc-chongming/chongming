@@ -1,6 +1,6 @@
 # Harness 主持人与角色编排计划
 
-> **状态**: 🚧 主体实现完成；持久化租约、领域工具和生产模型联调待后续计划
+> **状态**: 🟡 主体实现与受限领域工具已接入；持久化租约、跨进程恢复和生产模型联调待后续计划
 > **创建日期**: 2026-07-14
 > **目标**: 实现 ReviewDirectorHarness 上帝主持人，在 ProtocolGuard 边界内强计划驱动、动态激活并协调持久角色子 Agent。
 > **前置计划**: PLAN-004、PLAN-006、PLAN-007；PLAN-003 已冻结
@@ -75,7 +75,9 @@
 
 - 数据库 lease/多实例抢占、启动扫描恢复、持久化业务事件由 PLAN-010 实现；当前 Adapter 的活动 director 互斥为单 JVM 保护。
 - `ReadOnlyRepositoryTools` 与 `EvidenceTools` 已在 PLAN-006 实现，但 Harness 运行时尚未携带不可变 `RepositorySnapshot`，因此未直接注册给 agent，避免在缺少服务端 snapshot scope 时暴露工具。与 Claim/Debate 强类型工具一起在 PLAN-009 集成。
-- 已接入：角色 Harness 会注册仅绑定当前 review/attempt/role 的 `submit_claim` 与 `complete_initial_review`；ToolSchema 会下传模型兼容网关，模型 Tool Call 回到 AgentScope 后由服务端重新绑定 identity、version 与幂等键。四个核心角色完成后自动进入 `CONFLICT_DETECTION` 并发布正式事件。角色超时降级、仓库只读/证据工具和生产模型 smoke test 仍依赖后续真实 snapshot 与模型配置。
+- 已接入：角色 Harness 会注册仅绑定当前 review/attempt/role 的 `submit_claim`、`complete_initial_review` 以及辩论工具；Director Harness 注册开题、闭题、第二轮和进入裁决工具；Judge 预注册但在 `JUDGING` 前保持待命。ToolSchema 会下传模型兼容网关，模型 Tool Call 回到 AgentScope 后由服务端重新绑定 identity、version 与幂等键。四个核心角色完成后自动进入 `CONFLICT_DETECTION` 并发布正式事件。
+- 已接入：`ReviewWorkflowDispatcher` 只在正式业务事件提交后，按单个 review 的串行队列唤醒 Director、对应核心角色或 Judge；取消和失败会释放该进程内队列。它不是持久化恢复队列，进程重启后的续跑仍依赖 PLAN-010 的数据库恢复能力。
+- 当前边界：`open_debate_topic` 首次开题即进入第一轮，单个 attempt 当前只支持一个活跃辩题；多个冲突的批量编排尚未落地。角色超时降级、仓库只读/证据工具和生产模型 smoke test 仍依赖后续真实 snapshot 与模型配置。
 ## 2. 文件清单
 
 ### 2.1 原计划新增（已实施项已同步）
@@ -143,3 +145,4 @@ eview/config/ReviewProtocolConfiguration.java | ✅ | 将纯领域状态机与�
 |------------|--------------------------------------|
 | 2026-07-14 | 创建 Harness、两级计划、持久子 Agent、动态激活与恢复计划。 |
 | 2026-07-16 | 实现 Harness 主持人、角色隔离、计划/激活编排、取消/恢复适配和原始事件观测；记录 PLAN-009/010 依赖的集成项。 |
+| 2026-07-20 | 接入首轮、辩论、Judge/Gate 的受限运行时工具，以及按正式领域事件串行唤醒角色的进程内调度；明确单辩题和非持久化恢复边界。 |

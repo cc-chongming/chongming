@@ -53,9 +53,9 @@ class ReviewOrchestrationServiceTests {
         ReviewOrchestrationService.StartResult result = service.start(new ReviewOrchestrationService.StartRequest(
                 review, context, List.of("Run mandatory role review"), "Initial total plan", "Begin review")).block();
 
-        assertThat(result.coreActivations()).hasSize(4);
+        assertThat(result.coreActivations()).hasSize(5);
         assertThat(review.stage()).isEqualTo(ReviewStage.INITIAL_REVIEW);
-        assertThat(review.roleActivations()).hasSize(4);
+        assertThat(review.roleActivations()).hasSize(5);
         assertThat(service.revisePlan(context, workspaceLayout.open(context), List.of("Resolve conflict"), "Conflict found")
                 .plan().planVersion()).isEqualTo(2);
 

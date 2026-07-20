@@ -71,6 +71,7 @@ sequence，
 - 已完成：`GET /api/reviews/{id}`、`/plans`、`/debates`、`/evidence/{evidenceId}` 查询，所有对外时间统一为 `yyyy-MM-dd HH:mm:ss`；证据详情只接受服务端 ID。
 - 已完成：SSE 的“先注册缓冲、历史回放、排空、实时”切换，含超时、心跳、断开清理与轻量计数；心跳不写业务事件。
 - 已完成：Claim、DebateTools、Judge/Gate、计划、角色激活和取消/重试仅在命令成功且非幂等重放时发布正式事件；AgentScope 原始事件继续只作为脱敏运行观察。
+- 已完成（进程内运行时调度）：`ReviewWorkflowDispatcher` 监听已提交的正式业务事件，并按 review 串行投递下一阶段的 Director、角色或 Judge 提示；取消、失败会清理对应队列。该机制不写恢复任务，进程重启后不会补发提示。
 - 待部署写模型：现有 Claim/Debate 命令的 MyBatis 写入尚未启用，因而“聚合状态与事件同一数据库事务”只能在该写模型接入后完成端到端验证。
 - 已完成（进程内命令接口）：`ReviewCommandService` 与 `/start`、`/cancel`、`/retry` 端点复用领域状态机、expectedVersion 和事件发布；启动要求 `Idempotency-Key`，返回 202 后由后台编排，取消先请求运行时安全点。404、409、422 使用稳定 ProblemDetail code。
 - 明确边界：接口当前依赖 `InMemoryReviewRegistry`，进程重启后无法定位旧聚合；start 的 userId 仍沿用受理接口的调用方传入约定；状态变更和事件尚不能同 MySQL 事务提交。因此仅适用于本地/演示联调，不能作为多实例生产命令面。
@@ -141,3 +142,4 @@ sequence，
 | 2026-07-15 | sequence 对齐技术方案：重试保留 attempt 字段但不重置同一 review 的事件序号。 |
 | 2026-07-15 | 查询 API 对齐技术方案：统一使用 `/api/reviews/{id}/...` 路径并明确证据详情接口。 |
 | 2026-07-16 | 实现事件信封、内存/MyBatis 事件存储、查询 API、SSE 回放、正式命令事件和取消/重试服务；明确多实例恢复及 HTTP 写端点依赖持久化写模型，尚未完成。 |
+| 2026-07-20 | 记录已提交领域事件驱动的进程内 Agent 唤醒队列，并明确其不能替代持久化恢复任务。 |

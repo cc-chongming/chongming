@@ -98,6 +98,14 @@ public class ReviewOrchestrationService {
                                     RoleActivationService.ActivationSource.PLAN,
                                     "Core first-round review required by protocol",
                                     List.of())))
+                    .concatWith(activateRole(
+                            review,
+                            context,
+                            new RoleActivationService.ActivationRequest(
+                                    RoleType.JUDGE,
+                                    RoleActivationService.ActivationSource.PLAN,
+                                    "Judge is pre-registered and remains idle until all debate topics are terminal",
+                                    List.of())))
                     .collectList()
                     .map(activations -> new StartResult(session, initialPlan, activations));
         });
