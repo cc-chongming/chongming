@@ -55,13 +55,20 @@ public class ClaimService {
     public ClaimSubmissionResult submit(Review review, ClaimSubmission submission) {
         Objects.requireNonNull(review, "review must not be null");
         Objects.requireNonNull(submission, "submission must not be null");
-        validateReviewAndRole(review, submission.metadata(), submission.actorRole());
+        synchronized (review) {
+            return submitSynchronized(review, submission);
+        }
+    }
+
+    private ClaimSubmissionResult submitSynchronized(Review review, ClaimSubmission submission) {
+        validateReviewIdentity(review, submission.metadata());
         String existingReference = review.commandResults().get(submission.metadata().idempotencyKey());
         if (existingReference != null) {
             Claim existing = debateStore.findClaim(review.id(), new ClaimId(UUID.fromString(existingReference)))
                     .orElseThrow(() -> new IllegalStateException("claim idempotency reference cannot be resolved"));
             return new ClaimSubmissionResult(existing, true);
         }
+        validateReviewAndRole(review, submission.actorRole());
         requireExpectedVersion(review, submission.metadata());
         List<EvidenceReference> references = resolveEvidenceReferences(review.id(), submission.evidenceIds());
         Claim claim = protocolGuard.normalizeClaim(new Claim(
@@ -76,7 +83,6 @@ public class ClaimService {
                 references));
         debateStore.saveClaim(claim);
         review.recordCommand(submission.metadata(), claim.claimId().value().toString());
-review.completeInitialReview(submission.actorRole());
         eventPublisher.publish(ReviewEventDrafts.completedCommand(
                 review,
                 ai.cc.chongming.review.domain.event.ReviewEventType.CLAIM_SUBMITTED,
@@ -109,11 +115,14 @@ review.completeInitialReview(submission.actorRole());
                 .toList();
     }
 
-    private void validateReviewAndRole(Review review, ReviewCommandMetadata metadata, RoleType actorRole) {
+    private void validateReviewIdentity(Review review, ReviewCommandMetadata metadata) {
         if (!review.id().equals(metadata.reviewId())) {
             throw new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
                     "claim command reviewId does not match aggregate");
         }
+    }
+
+    private void validateReviewAndRole(Review review, RoleType actorRole) {
         if (review.stage() != ReviewStage.INITIAL_REVIEW) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "claims may be submitted only during initial review");

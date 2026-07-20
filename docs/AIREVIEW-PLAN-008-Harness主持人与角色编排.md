@@ -75,7 +75,7 @@
 
 - 数据库 lease/多实例抢占、启动扫描恢复、持久化业务事件由 PLAN-010 实现；当前 Adapter 的活动 director 互斥为单 JVM 保护。
 - `ReadOnlyRepositoryTools` 与 `EvidenceTools` 已在 PLAN-006 实现，但 Harness 运行时尚未携带不可变 `RepositorySnapshot`，因此未直接注册给 agent，避免在缺少服务端 snapshot scope 时暴露工具。与 Claim/Debate 强类型工具一起在 PLAN-009 集成。
-- `plan_exit` 的人工/Guard 阶段确认、首轮 Claim 提交、角色超时降级和生产模型 smoke test 依赖 PLAN-009/010 业务命令及后续真实模型配置，当前不伪造完成状态。
+- 已接入：角色 Harness 会注册仅绑定当前 review/attempt/role 的 `submit_claim` 与 `complete_initial_review`；ToolSchema 会下传模型兼容网关，模型 Tool Call 回到 AgentScope 后由服务端重新绑定 identity、version 与幂等键。四个核心角色完成后自动进入 `CONFLICT_DETECTION` 并发布正式事件。角色超时降级、仓库只读/证据工具和生产模型 smoke test 仍依赖后续真实 snapshot 与模型配置。
 ## 2. 文件清单
 
 ### 2.1 原计划新增（已实施项已同步）

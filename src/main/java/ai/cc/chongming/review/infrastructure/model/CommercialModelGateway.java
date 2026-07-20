@@ -9,7 +9,6 @@ import ai.cc.chongming.review.domain.gateway.ModelProfile;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -27,7 +26,6 @@ public class CommercialModelGateway implements ModelGateway {
     private final ModelProfileRegistry profileRegistry;
     private final ModelProviderClient providerClient;
     private final ModelCallAuditService auditService;
-    private final Function<String, String> environment;
 
     @Autowired
     public CommercialModelGateway(
@@ -35,23 +33,10 @@ public class CommercialModelGateway implements ModelGateway {
             ModelProfileRegistry profileRegistry,
             ModelProviderClient providerClient,
             ModelCallAuditService auditService) {
-        this(properties, profileRegistry, providerClient, auditService, System::getenv);
-    }
-
-    /**
-     * Constructor for deterministic tests with an injected credential resolver.
-     */
-    public CommercialModelGateway(
-            ModelGatewayProperties properties,
-            ModelProfileRegistry profileRegistry,
-            ModelProviderClient providerClient,
-            ModelCallAuditService auditService,
-            Function<String, String> environment) {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.profileRegistry = Objects.requireNonNull(profileRegistry, "profileRegistry must not be null");
         this.providerClient = Objects.requireNonNull(providerClient, "providerClient must not be null");
         this.auditService = Objects.requireNonNull(auditService, "auditService must not be null");
-        this.environment = Objects.requireNonNull(environment, "environment must not be null");
     }
 
     @Override
@@ -70,7 +55,7 @@ public class CommercialModelGateway implements ModelGateway {
                 throw new ModelGatewayException(Code.MODEL_GATEWAY_DISABLED, "Model gateway is disabled");
             }
             profile = profileRegistry.requireProfile(request.profileId());
-            String apiKey = environment.apply(properties.apiKeyEnvironmentVariable());
+            String apiKey = properties.apiKey();
             if (apiKey == null || apiKey.isBlank() || properties.baseUrl() == null) {
                 throw new ModelGatewayException(Code.MODEL_GATEWAY_DISABLED, "Model gateway is not configured");
             }
@@ -82,7 +67,8 @@ public class CommercialModelGateway implements ModelGateway {
                 checkCancelled(cancellation);
                 try {
                     ModelProviderClient.ProviderResponse response = providerClient.invoke(
-                            new ModelProviderClient.ProviderRequest(properties.baseUrl(), apiKey, profile, request));
+                            new ModelProviderClient.ProviderRequest(
+                                    properties.baseUrl(), apiKey, profile, request, properties.logConversation()));
                     checkCancelled(cancellation);
                     ModelResponse normalized = new ModelResponse(
                             response.responseId(),
@@ -92,6 +78,7 @@ public class CommercialModelGateway implements ModelGateway {
                             response.finishReason(),
                             Duration.between(startedAt, Instant.now()),
                             attempts,
+                            response.toolCalls(),
                             request.traceId());
                     auditService.recordSuccess(request, profile, normalized);
                     return normalized;

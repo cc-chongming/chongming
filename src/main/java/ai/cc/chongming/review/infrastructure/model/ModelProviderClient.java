@@ -29,7 +29,8 @@ public interface ModelProviderClient {
             URI baseUrl,
             String apiKey,
             ModelProfile profile,
-            ModelGateway.ModelRequest request) {
+            ModelGateway.ModelRequest request,
+            boolean logConversation) {
 
         public ProviderRequest {
             Objects.requireNonNull(baseUrl, "baseUrl must not be null");
@@ -50,17 +51,25 @@ public interface ModelProviderClient {
             String responseId,
             String publicText,
             ModelGateway.Usage usage,
-            ModelGateway.FinishReason finishReason) {
+            ModelGateway.FinishReason finishReason,
+            java.util.List<ModelGateway.ToolCall> toolCalls) {
 
         public ProviderResponse {
             if (responseId == null || responseId.isBlank()) {
                 throw new IllegalArgumentException("responseId must not be blank");
             }
-            if (publicText == null || publicText.isBlank()) {
-                throw new IllegalArgumentException("publicText must not be blank");
+            publicText = publicText == null ? "" : publicText;
+            toolCalls = toolCalls == null ? java.util.List.of() : java.util.List.copyOf(toolCalls);
+            if ((publicText == null || publicText.isBlank()) && toolCalls.isEmpty()) {
+                throw new IllegalArgumentException("publicText or toolCalls must not be empty");
             }
             Objects.requireNonNull(usage, "usage must not be null");
             Objects.requireNonNull(finishReason, "finishReason must not be null");
+        }
+
+        public ProviderResponse(String responseId, String publicText, ModelGateway.Usage usage,
+                ModelGateway.FinishReason finishReason) {
+            this(responseId, publicText, usage, finishReason, java.util.List.of());
         }
     }
 }

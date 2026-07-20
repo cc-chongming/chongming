@@ -12,6 +12,7 @@ public enum ReviewEventType {
     ROLE_ACTIVATED(ReviewEventCategory.ROLE),
     ROLE_STARTED(ReviewEventCategory.ROLE),
     ROLE_COMPLETED(ReviewEventCategory.ROLE),
+    INITIAL_REVIEW_COMPLETED(ReviewEventCategory.PLAN),
     ROLE_FAILED(ReviewEventCategory.ERROR),
     EVIDENCE_CAPTURED(ReviewEventCategory.EVIDENCE),
     CLAIM_SUBMITTED(ReviewEventCategory.CLAIM),

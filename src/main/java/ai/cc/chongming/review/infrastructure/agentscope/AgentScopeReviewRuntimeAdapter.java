@@ -90,7 +90,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         return Mono.fromRunnable(() -> {
             Objects.requireNonNull(request, "request must not be null");
             RuntimeState state = state(request.runtimeId());
-            if (!state.context().equals(request.runtimeContext())) {
+            if (!sameRuntimeIdentity(state.context(), request.runtimeContext())) {
                 throw new IllegalArgumentException("role request must use the active runtime context");
             }
             state.cancellation().checkCancelled();
@@ -202,6 +202,16 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             throw new IllegalArgumentException("unknown runtime: " + runtimeId);
         }
         return state;
+    }
+
+    private boolean sameRuntimeIdentity(ReviewRuntimeContext active, ReviewRuntimeContext requested) {
+        if (requested == null) {
+            return false;
+        }
+        return active.reviewId().equals(requested.reviewId())
+                && active.attemptNo() == requested.attemptNo()
+                && active.userId().equals(requested.userId())
+                && active.traceId().equals(requested.traceId());
     }
 
     private static void requireText(String value, String name) {

@@ -138,7 +138,7 @@ submitJudgement(command) -> JudgeDecisionResult
 - `ConflictDetector` 对同一 `subjectKey` 的相反立场、相差至少两级的严重度，以及同一 Evidence 被相反立场引用时生成稳定候选及无冲突原因；主持人仍只能以真实 `claimIds` 开题。
 - `DebateTools` 门面包含 Claim、开题、定向质询/反驳、立场变化、补证请求、Judge 和 Gate 草案。第二轮不得原样重复第一轮质询；补证请求只记录缺口，不会伪造 Evidence。
 - `JudgeService` 只能采信或拒绝该终态辩题已有的 Claim；Gate 草案必须等待每个辩题都有 Judge 结论。`HUMAN_REQUIRED` 会使 Review 从 `JUDGING` 进入 `WAITING_HUMAN`，AI 永不写最终 Gate。
-- `InMemoryReviewDebateStore` 是当前假数据库配置下的可测试默认实现。实际部署前必须以 MyBatis 事务实现同一接口，并将 Review 版本、幂等命令、Claim/Turn/Judge/Gate 写入同一事务；该接入与真实 AgentScope 工具注册不在本轮伪造完成。
+- `InMemoryReviewDebateStore` 是当前假数据库配置下的可测试默认实现。实际部署前必须以 MyBatis 事务实现同一接口，并将 Review 版本、幂等命令、Claim/Turn/Judge/Gate 写入同一事务；首轮的 `submit_claim` 与 `complete_initial_review` 已真实注册到 AgentScope 角色 Harness，后续 Debate/Judge/Gate 的运行时工具注册仍待接入。
 - 技术方案的状态机保持 `DEBATE_ROUND_1 → DEBATE_ROUND_2 → JUDGING`。辩题可在第一轮关闭；编排层仍需经过无新 Turn 的第二轮阶段标记后进入 Judge，避免绕过固定状态机。
 
 ## 6.2 验证证据

@@ -10,6 +10,8 @@ checklist:
   - Check value and user impact.
   - Check acceptance criteria and scope gaps.
 allowedTools:
+  - submit_claim
+  - complete_initial_review
   - searchText
   - readLines
   - submitEvidence

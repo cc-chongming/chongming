@@ -16,7 +16,7 @@
 
 - 定义 `director`、`role-reviewer`、`judge`、`fallback` 四类逻辑 profile。
 - 每个 profile 配置 provider、modelId、temperature、timeout、maxTokens、retryPolicy。
-- 凭证使用环境变量/密钥管理，不进入配置文件、Prompt 或日志。
+- 凭证使用被 Git 忽略的 profile 专属配置或密钥管理，不进入受版本控制的配置文件、Prompt 或日志。
 
 ### 1.2 ModelGateway 抽象 ✅
 
@@ -122,7 +122,7 @@
 
 ### 已完成
 
-- 四类逻辑 Profile 已配置为部署环境可覆盖的占位模型；模型网关默认关闭，凭证仅通过环境变量读取。
+- 四类逻辑 Profile 已配置为部署环境可覆盖的占位模型；模型网关默认关闭，启用时从受控的 `api-key` 配置读取凭证。
 - 已提供厂商无关的 `ModelGateway` 契约和 OpenAI-compatible/DashScope-compatible HTTP 适配器，统一超时、协作取消、traceId、Token、完成原因和最多两次指数退避重试。
 - 已以不可变 Java record 定义 Plan、RoleAssessment、JudgeDecision；Decoder 拒绝未知字段和尾随内容，最多调用一次修复回调，并仅返回公开结果哈希。
 - 已实现核心、按需与 Judge 共八个 RolePack YAML；注册器拒绝未列入服务端白名单的工具。
@@ -131,7 +131,7 @@
 
 ### 明确延后
 
-- 真实商业模型冒烟需部署端提供受控的 Base URL、模型 ID 和环境变量凭证；本计划的测试不访问外部模型。
+- 真实商业模型冒烟需部署端提供受控的 Base URL、模型 ID 和 Git 忽略的 profile 专属凭证；本计划的测试不访问外部模型。
 - 模型调用审计当前为进程内投影；MyBatis 持久化会与后续执行链路、领域事件一并接入。
 - 模型输出转为 Claim/Gate 前的 Evidence、target、状态机再校验，以及 AgentScope 工具注册与 Harness 编排，分别由后续协议守卫和 PLAN-008 执行链路完成。
 
@@ -140,3 +140,5 @@
 | 日期 | 变更 |
 |---|---|
 | 2026-07-16 | 完成逻辑 Profile、商业模型网关、结构化输出、RolePack、上下文隔离、内存审计与失败降级；真实模型冒烟和审计持久化保留为后续环境/执行链路工作。 |
+| 2026-07-20 | 模型网关凭证改为由 Git 忽略的 profile 专属 `api-key` 配置提供，不再依赖环境变量名称解析；四个逻辑 Profile 默认复用顶层 `model-name`，避免本地直配模型时回落至占位模型；补齐配置绑定与网关契约测试。 |
+| 2026-07-20 | 增加仅限本机调试的 `log-conversation` 开关；默认关闭，local Profile 可开启后记录模型请求与响应正文，但仍不记录 API Key 或 Authorization。 |

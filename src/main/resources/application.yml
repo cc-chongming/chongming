@@ -1,4 +1,6 @@
 spring:
+  profiles:
+    active: local
   application:
     name: chongming
   flyway:
@@ -14,6 +16,9 @@ review:
   orchestration:
     # Bounds director stage-plan rewrites; deployment may override this environment placeholder.
     max-plan-revisions: ${REVIEW_MAX_PLAN_REVISIONS:3}
+  diagnostics:
+    # Only enables a redacted startup-failure summary in server logs; keep disabled outside a controlled local debugging session.
+    log-startup-failure-stack: false
   repositories:
     # Intentionally empty by default. Deployments must map opaque repository IDs to local Git roots.
     allowed: []
@@ -24,12 +29,15 @@ review:
     enabled: ${REVIEW_MODEL_GATEWAY_ENABLED:false}
     base-url: ${REVIEW_MODEL_GATEWAY_BASE_URL:}
     model-name: ${REVIEW_MODEL_GATEWAY_MODEL_NAME:}
-    api-key-environment-variable: ${REVIEW_MODEL_GATEWAY_API_KEY_ENV:DASHSCOPE_API_KEY}
+    # Supply the key only through an ignored profile-specific configuration file.
+    api-key:
+    # Print request/response bodies only for a controlled local debugging session; never enable in shared environments.
+    log-conversation: false
     # Logical profiles are safe deployment placeholders; replace model IDs and endpoint variables when enabling calls.
     profiles:
       director:
         provider: openai-compatible
-        model-name: ${REVIEW_MODEL_DIRECTOR_NAME:${REVIEW_MODEL_GATEWAY_MODEL_NAME:chongming-director-placeholder}}
+        model-name: ${review.model-gateway.model-name:chongming-director-placeholder}
         temperature: 0.2
         timeout: PT45S
         max-tokens: 2048
@@ -38,7 +46,7 @@ review:
           initial-backoff: PT0.2S
       role-reviewer:
         provider: openai-compatible
-        model-name: ${REVIEW_MODEL_ROLE_REVIEWER_NAME:${REVIEW_MODEL_GATEWAY_MODEL_NAME:chongming-reviewer-placeholder}}
+        model-name: ${review.model-gateway.model-name:chongming-reviewer-placeholder}
         temperature: 0.2
         timeout: PT30S
         max-tokens: 2048
@@ -47,7 +55,7 @@ review:
           initial-backoff: PT0.2S
       judge:
         provider: openai-compatible
-        model-name: ${REVIEW_MODEL_JUDGE_NAME:${REVIEW_MODEL_GATEWAY_MODEL_NAME:chongming-judge-placeholder}}
+        model-name: ${review.model-gateway.model-name:chongming-judge-placeholder}
         temperature: 0.0
         timeout: PT30S
         max-tokens: 1024
@@ -56,7 +64,7 @@ review:
           initial-backoff: PT0.2S
       fallback:
         provider: openai-compatible
-        model-name: ${REVIEW_MODEL_FALLBACK_NAME:${REVIEW_MODEL_GATEWAY_MODEL_NAME:chongming-fallback-placeholder}}
+        model-name: ${review.model-gateway.model-name:chongming-fallback-placeholder}
         temperature: 0.0
         timeout: PT20S
         max-tokens: 1024

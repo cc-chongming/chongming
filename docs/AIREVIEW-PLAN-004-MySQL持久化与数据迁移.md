@@ -28,7 +28,7 @@ AgentScope 运行态使用 `agentscope-extensions-mysql` 保存 AgentState、wor
 
 - 创建 evidence_block、claim、claim_evidence、debate_topic、debate_turn、judge_decision、gate_decision。
 - 幂等键唯一；外键或应用层完整性策略必须统一，避免半落库。
-- `excerpt`、Prompt 摘要、公开发言等大字段使用 TEXT/JSON，明确字符集 utf8mb4。
+- `excerpt`、Prompt 摘要、公开发言及 JSON 序列化载荷使用 TEXT/LONGTEXT，明确字符集 utf8mb4；不依赖 MySQL 原生 JSON 类型。
 
 ### 1.4 审计、事件、报告和通知表 — DONE (baseline)
 
@@ -66,7 +66,7 @@ AgentScope 运行态使用 `agentscope-extensions-mysql` 保存 AgentState、wor
 | Real MySQL migration/state tests | PENDING EXECUTION | Testcontainers tests exist; Docker is unavailable locally |
 ## 3. Explicit pending work
 
-1. **Docker/CI verification** — execute the existing Flyway migration, shared-datasource AgentScope state, and MySQL state compatibility tests against MySQL 8.4; add real unique-constraint and optimistic-lock failure assertions.
+1. **Docker/CI verification** — execute the existing Flyway migration, shared-datasource AgentScope state, and MySQL state compatibility tests against MySQL 5.6 and 8.4; add real unique-constraint and optimistic-lock failure assertions.
 2. **Runtime adapter integration** — have the production `AgentRuntimeAdapter` consume `reviewDistributedStore` when persistence is enabled, and verify session/workspace/review restoration after process restart.
 3. **Transactional workflow** — implement command handlers that atomically write domain changes plus `review_event`; implement Outbox production, retry and delivery-state transitions.
 4. **Failure and concurrency paths** — verify named-lock contention, transaction rollback, database-connection failure without a false-success Gate, and crash recovery from the persisted business stage.
@@ -81,7 +81,7 @@ PLAN-004 is complete only when all pending items in section 3 have passed on a r
 |----------------------------|--------------------------------|
 | AgentScope 自动建表与 Flyway 冲突 | 明确所有权；内部表不由项目迁移脚本重复创建          |
 | 长事务耗尽连接                    | 模型、文件、网络调用全部在事务外，事务仅包领域落库      |
-| JSON 字段难查询                 | 高频过滤字段拆列并建索引，JSON 仅存非关键扩展信息    |
+| JSON 载荷难查询                 | 高频过滤字段拆列并建索引，序列化 JSON 仅以 LONGTEXT 保存非关键扩展信息 |
 | 长期保存导致增长                   | MVP 只监控表量；归档策略作为赛后计划，不在本计划删除数据 |
 
 ## 6. 变更记录
@@ -91,6 +91,7 @@ PLAN-004 is complete only when all pending items in section 3 have passed on a r
 | 2026-07-14 | 创建双层 MySQL、迁移、Repository、事务与恢复计划。 |
 | 2026-07-15 | 事件 sequence 对齐技术方案：在 review 范围全局递增，attempt 仅用于隔离业务产物。 |
 | 2026-07-15 | 完成持久化基线；将 Docker 验证、运行时接入、事务恢复和运维脚本显式标为待办。 |
+| 2026-07-20 | 为兼容 MySQL 5.6，将 V1-V3 中全部 6 个原生 JSON 列改为 LONGTEXT；将 URI、revision、session、Gate 与幂等技术标识改为 ASCII 索引字符集，以满足 utf8mb4 表默认字符集下 767 字节索引限制；新增 V8 对既有数据库执行 JSON 列转换；新增 V9 以受 Flyway 管理的兼容 DDL 创建 AgentScope 状态和工作区表，替代库自身不兼容的自动建表。 |
 
 ## 7. Implementation record (2026-07-15)
 
@@ -100,6 +101,14 @@ PLAN-004 is complete only when all pending items in section 3 have passed on a r
 - Added the MyBatis review repository with a conditional lifecycle, aggregate restore support, optimistic-lock writes, idempotency result persistence, and batch Claim/Evidence/Turn reads without per-item selects.
 - Added a composed `DistributedStore` using the same datasource with named AgentScope state/workspace/snapshot tables and a unique MySQL named-lock key prefix. In `initialize-schema=false` mode, the AgentScope snapshot component is intentionally `NoopSnapshotSpec`: AgentScope 2.0.0 has no public JDBC snapshot constructor that suppresses auto-DDL.
 - Added unit tests for disabled-placeholder binding and repository batch mapping, plus Docker-optional migration and AgentScope shared-datasource integration tests.
+- JSON compatibility migration: new databases create all serialized payload columns as LONGTEXT; V8 converts the same six columns for databases that previously used native JSON.
+- AgentScope runtime compatibility: V9 creates the default state and workspace tables with MySQL 5.6-safe composite keys; `review.persistence.agentscope.initialize-schema` must remain `false` so AgentScope does not execute its incompatible auto-DDL.
+
+## 7.1 MySQL 5.6 migration recovery
+
+- **未保留数据的本地开发库**：V1 在 MySQL 5.6 上失败后可能已经创建部分表并写入失败的 Flyway 历史。先备份确认无须保留的数据，再删除并重建整个开发数据库，随后重新启动应用，让 Flyway 从 V1 重新执行。
+- **已保留数据的数据库**：先完成备份；V1 出现 767 字节索引失败时，必须先评估是否存在部分建表，不能仅执行 `repair`。仅当 V1-V3 已完整执行且 URI、revision、session、Gate 名称和幂等键均符合 ASCII 技术标识约束时，才可审核 JSON→LONGTEXT 与索引字符集的 checksum 变化、使用受控 Flyway `repair`，再启动应用执行 V8。V8 使用 `ALTER TABLE ... MODIFY ... LONGTEXT` 保留已有序列化内容。
+- 不得仅通过 `repair` 跳过 V8，也不得在未完成备份和 checksum 审核时修改 `flyway_schema_history`。
 
 ## 8. Verification and remaining work
 

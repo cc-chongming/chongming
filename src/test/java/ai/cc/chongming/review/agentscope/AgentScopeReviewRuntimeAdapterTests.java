@@ -6,7 +6,9 @@ import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.config.ReviewProperties;
 import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentEventAdapter;
+import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeRoleRequest;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeStartRequest;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeReviewRuntimeAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewDirectorHarnessFactory;
@@ -53,6 +55,33 @@ class AgentScopeReviewRuntimeAdapterTests {
         ReviewRuntimeContext secondAttempt = new ReviewRuntimeContext(
                 firstAttempt.reviewId(), 2, firstAttempt.userId(), "trace-002", IntakeCancellation.neverCancelled());
         adapter.start(startRequest(secondAttempt)).block();
+    }
+
+    @Test
+    void registersRoleWhenAdapterReplacesOnlyTheCancellationSignal() {
+        ReviewRuntimeContext context = context(1);
+        AgentScopeReviewRuntimeAdapter adapter = adapter();
+        adapter.start(startRequest(context)).block();
+
+        adapter.registerRole(new AgentRuntimeRoleRequest(
+                context.runtimeId(),
+                context,
+                RoleType.PRODUCT,
+                context.roleLabel(RoleType.PRODUCT),
+                context.roleSessionId(RoleType.PRODUCT))).block();
+    }
+
+    @Test
+    void rejectsRoleRegistrationWithoutRuntimeContext() {
+        ReviewRuntimeContext context = context(1);
+        AgentScopeReviewRuntimeAdapter adapter = adapter();
+        adapter.start(startRequest(context)).block();
+
+        assertThatThrownBy(() -> adapter.registerRole(new AgentRuntimeRoleRequest(
+                context.runtimeId(), null, RoleType.PRODUCT, context.roleLabel(RoleType.PRODUCT),
+                context.roleSessionId(RoleType.PRODUCT))).block())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("role request must use the active runtime context");
     }
 
     private AgentScopeReviewRuntimeAdapter adapter() {

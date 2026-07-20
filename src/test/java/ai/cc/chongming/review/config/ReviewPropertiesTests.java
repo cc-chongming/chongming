@@ -36,13 +36,28 @@ class ReviewPropertiesTests {
     }
 
     @Test
-    void rejectsEnabledGatewayWithoutEnvironmentCredential() {
+    void bindsEnabledGatewayWithDirectConfigurationCredential() {
         contextRunner.withPropertyValues(baseProperties())
                 .withPropertyValues(
                         "review.model-gateway.enabled=true",
                         "review.model-gateway.base-url=https://example.invalid/v1",
                         "review.model-gateway.model-name=test-model",
-                        "review.model-gateway.api-key-environment-variable=CHONGMING_MISSING_API_KEY")
+                        "review.model-gateway.api-key=test-key")
+                .run(context -> {
+                    ModelGatewayProperties properties = context.getBean(ModelGatewayProperties.class);
+
+                    assertThat(properties.apiKey()).isEqualTo("test-key");
+                });
+    }
+
+    @Test
+    void rejectsEnabledGatewayWithoutDirectConfigurationCredential() {
+        contextRunner.withPropertyValues(baseProperties())
+                .withPropertyValues(
+                        "review.model-gateway.enabled=true",
+                        "review.model-gateway.base-url=https://example.invalid/v1",
+                        "review.model-gateway.model-name=test-model",
+                        "review.model-gateway.api-key=")
                 .run(context -> assertThat(context).hasFailed());
     }
 
@@ -54,7 +69,7 @@ class ReviewPropertiesTests {
                 "review.agentscope.persist-session=true",
                 "review.agentscope.state-home=.agentscope/state",
                 "review.model-gateway.enabled=false",
-                "review.model-gateway.api-key-environment-variable=CHONGMING_TEST_API_KEY"
+                "review.model-gateway.api-key=test-key"
         };
     }
 

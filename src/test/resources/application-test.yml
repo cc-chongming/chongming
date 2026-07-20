@@ -7,7 +7,7 @@ review:
     state-home: ${java.io.tmpdir}/chongming-test-state
   model-gateway:
     enabled: false
-    api-key-environment-variable: CHONGMING_TEST_API_KEY
+    api-key: test-key
 
 spring:
   autoconfigure:

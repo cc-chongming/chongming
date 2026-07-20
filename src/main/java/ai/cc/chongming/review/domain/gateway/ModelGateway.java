@@ -6,6 +6,8 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
+import java.util.List;
+import java.util.Map;
 import reactor.core.publisher.Mono;
 
 /**
@@ -37,6 +39,7 @@ public interface ModelGateway {
             String systemInstruction,
             String publicContext,
             Set<String> allowedTools,
+            List<ToolDefinition> tools,
             String traceId) {
 
         public ModelRequest {
@@ -47,7 +50,13 @@ public interface ModelGateway {
             requireText(systemInstruction, "systemInstruction");
             Objects.requireNonNull(publicContext, "publicContext must not be null");
             allowedTools = allowedTools == null ? Set.of() : Set.copyOf(allowedTools);
+            tools = tools == null ? List.of() : List.copyOf(tools);
             requireText(traceId, "traceId");
+        }
+
+        public ModelRequest(ReviewId reviewId, RoleType roleType, String profileId, String promptVersion,
+                String systemInstruction, String publicContext, Set<String> allowedTools, String traceId) {
+            this(reviewId, roleType, profileId, promptVersion, systemInstruction, publicContext, allowedTools, List.of(), traceId);
         }
     }
 
@@ -64,12 +73,17 @@ public interface ModelGateway {
             FinishReason finishReason,
             Duration latency,
             int attempts,
+            List<ToolCall> toolCalls,
             String traceId) {
 
         public ModelResponse {
             requireText(responseId, "responseId");
             requireText(modelName, "modelName");
-            requireText(publicText, "publicText");
+            publicText = publicText == null ? "" : publicText;
+            toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+            if ((publicText == null || publicText.isBlank()) && toolCalls.isEmpty()) {
+                throw new IllegalArgumentException("publicText or toolCalls must not be empty");
+            }
             Objects.requireNonNull(usage, "usage must not be null");
             Objects.requireNonNull(finishReason, "finishReason must not be null");
             if (latency == null || latency.isNegative()) {
@@ -79,6 +93,11 @@ public interface ModelGateway {
                 throw new IllegalArgumentException("attempts must be between 1 and 3");
             }
             requireText(traceId, "traceId");
+        }
+
+        public ModelResponse(String responseId, String modelName, String publicText, Usage usage,
+                FinishReason finishReason, Duration latency, int attempts, String traceId) {
+            this(responseId, modelName, publicText, usage, finishReason, latency, attempts, List.of(), traceId);
         }
     }
 
@@ -107,6 +126,22 @@ public interface ModelGateway {
         TOOL_CALL,
         CONTENT_FILTER,
         UNKNOWN
+    }
+
+    record ToolDefinition(String name, String description, Map<String, Object> parameters, Boolean strict) {
+        public ToolDefinition {
+            requireText(name, "name");
+            requireText(description, "description");
+            parameters = parameters == null ? Map.of() : Map.copyOf(parameters);
+        }
+    }
+
+    record ToolCall(String id, String name, Map<String, Object> input) {
+        public ToolCall {
+            requireText(id, "id");
+            requireText(name, "name");
+            input = input == null ? Map.of() : Map.copyOf(input);
+        }
     }
 
     private static void requireText(String value, String name) {

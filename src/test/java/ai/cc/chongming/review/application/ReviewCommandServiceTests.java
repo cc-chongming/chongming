@@ -17,6 +17,8 @@ import ai.cc.chongming.review.infrastructure.event.InMemoryReviewEventStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -61,6 +63,40 @@ class ReviewCommandServiceTests {
         assertThat(replayed.replayed()).isTrue();
         assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
         verify(orchestrationService, timeout(1_000)).start(any());
+    }
+
+    @Test
+    void startPublishesFailureTypeAndSafeMessageWhenStartupFails() throws InterruptedException {
+        CountDownLatch completed = new CountDownLatch(1);
+        when(orchestrationService.start(any())).thenReturn(Mono.<ReviewOrchestrationService.StartResult>error(
+                new IllegalArgumentException("password=secret role profile is missing"))
+                .doFinally(signal -> completed.countDown()));
+
+        commandService.start(reviewId, startCommand(0L, "start-failure-001"));
+
+        verify(orchestrationService, timeout(1_000)).start(any());
+        assertThat(completed.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(review.stage()).isEqualTo(ReviewStage.FAILED);
+        assertThat(eventService.replay(reviewId, 0L, 10))
+                .anySatisfy(event -> {
+                    assertThat(event.type()).isEqualTo(ReviewEventType.REVIEW_FAILED);
+                    assertThat(event.payload())
+                            .containsEntry("failureType", "IllegalArgumentException")
+                            .doesNotContainKey("failureMessage")
+                            .doesNotContainValue("password=secret");
+                });
+    }
+
+    @Test
+    void redactsCredentialsFromLocalDiagnosticText() {
+        String diagnostic = "password=secret Authorization: Bearer bearer-secret "
+                + "https://alice:pw@example.test/path?token=query-secret sk-private-key";
+
+        String redacted = ReviewCommandService.redactDiagnosticText(diagnostic, 1_000);
+
+        assertThat(redacted)
+                .doesNotContain("secret", "bearer-secret", "alice:pw", "query-secret", "sk-private-key")
+                .contains("[REDACTED]");
     }
 
     @Test

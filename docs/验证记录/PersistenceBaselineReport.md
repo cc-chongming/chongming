@@ -12,7 +12,7 @@
 | Conditional repository lifecycle | `ChongmingApplicationTests` | PASS |
 | Aggregate rehydration and idempotency mapping | `MyBatisReviewRepositoryTests` | PASS |
 | Batch Claim/Evidence mapping | `MyBatisReviewRepositoryTests` | PASS |
-| Flyway V1-V5 migration on MySQL 8.4 | `ReviewPersistenceMigrationIntegrationTests` | SKIPPED (Docker unavailable) |
+| 全部当前 Flyway 迁移（V1-V8）在 MySQL 5.6 上执行 | `ReviewPersistenceMigrationIntegrationTests` | SKIPPED (Docker unavailable) |
 | Shared datasource and AgentScope runtime state | `ReviewPersistenceConfigurationIntegrationTests` | SKIPPED (Docker unavailable) |
 | Existing AgentScope state compatibility | `MysqlAgentStateCompatibilityTests` | SKIPPED (Docker unavailable) |
 
@@ -28,7 +28,8 @@
 - Docker-backed verification and recovery/concurrency/failure-path tests remain required before PLAN-004 can be marked complete.
 ## Explicit pending verification
 
-- Run `ReviewPersistenceMigrationIntegrationTests`, `ReviewPersistenceConfigurationIntegrationTests`, and `MysqlAgentStateCompatibilityTests` with Docker/MySQL 8.4 available.
+- Run `ReviewPersistenceMigrationIntegrationTests` with Docker/MySQL 5.6, and run `ReviewPersistenceConfigurationIntegrationTests` plus `MysqlAgentStateCompatibilityTests` with the supported AgentScope MySQL environment available.
+- For an existing database that predates V8, back up first, perform a reviewed Flyway `repair` only for the intentional V1-V3 checksum changes, then verify V8 converts all serialized payload columns to LONGTEXT.
 - Add real MySQL assertions for duplicate/idempotency keys, foreign keys, optimistic-lock conflicts, and Flyway repeat-start behavior.
 - Verify process restart restores the AgentScope session/workspace together with the persisted review stage through the production runtime adapter.
 - Verify named-lock contention, transaction rollback, Outbox retry/delivery transitions, database-failure handling, and absence of false-success Gate decisions.

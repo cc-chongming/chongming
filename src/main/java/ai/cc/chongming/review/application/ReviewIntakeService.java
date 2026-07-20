@@ -10,12 +10,15 @@ import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementValidat
 import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
 import ai.cc.chongming.review.infrastructure.document.StoredRequirementSnapshot;
 import ai.cc.chongming.review.infrastructure.document.ValidatedMarkdown;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPersistenceMapper;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -30,6 +33,8 @@ public class ReviewIntakeService {
     private final MarkdownRequirementParser parser;
     private final RequirementSnapshotStore snapshotStore;
     private final ReviewRegistry reviewRegistry;
+    private final ObjectProvider<ReviewPersistenceMapper> persistenceMapperProvider;
+    private final boolean persistenceEnabled;
     private final Map<IntakeKey, ReviewIntakeResult> submissions = new HashMap<>();
 
     public ReviewIntakeService(
@@ -39,16 +44,28 @@ public class ReviewIntakeService {
         this(validator, parser, snapshotStore, ReviewRegistry.noop());
     }
 
-    @Autowired
     public ReviewIntakeService(
             MarkdownRequirementValidator validator,
             MarkdownRequirementParser parser,
             RequirementSnapshotStore snapshotStore,
             ReviewRegistry reviewRegistry) {
+        this(validator, parser, snapshotStore, reviewRegistry, null, false);
+    }
+
+    @Autowired
+    public ReviewIntakeService(
+            MarkdownRequirementValidator validator,
+            MarkdownRequirementParser parser,
+            RequirementSnapshotStore snapshotStore,
+            ReviewRegistry reviewRegistry,
+            ObjectProvider<ReviewPersistenceMapper> persistenceMapperProvider,
+            @Value("${review.persistence.enabled:false}") boolean persistenceEnabled) {
         this.validator = validator;
         this.parser = parser;
         this.snapshotStore = snapshotStore;
         this.reviewRegistry = reviewRegistry;
+        this.persistenceMapperProvider = persistenceMapperProvider;
+        this.persistenceEnabled = persistenceEnabled;
     }
 
     /**
@@ -107,6 +124,7 @@ public class ReviewIntakeService {
                         snapshot, markdown, request.cancellation());
                 ReviewIntakeResult created = new ReviewIntakeResult(snapshot, workspaceSnapshot, false);
                 if (existing == null) {
+                    persistReviewRoot(snapshot);
                     reviewRegistry.register(Review.pending(reviewId));
                 }
                 submissions.put(key, created);
@@ -130,6 +148,23 @@ public class ReviewIntakeService {
 
     private String normalizeOptional(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private void persistReviewRoot(RequirementSnapshot snapshot) {
+        if (!persistenceEnabled) {
+            return;
+        }
+        ReviewPersistenceMapper mapper = persistenceMapperProvider == null ? null : persistenceMapperProvider.getIfAvailable();
+        if (mapper == null || mapper.insertReviewRequest(new ReviewPersistenceMapper.ReviewRequestRow(
+                snapshot.reviewId().value().toString(),
+                snapshot.snapshotId().toString(),
+                snapshot.submitter(),
+                "PENDING",
+                "intake:" + snapshot.snapshotId(),
+                snapshot.attemptNo(),
+                0L)) != 1) {
+            throw new IllegalStateException("review root was not persisted during intake");
+        }
     }
 
     /**

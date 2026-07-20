@@ -10,6 +10,7 @@ import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.permission.PermissionRule;
+import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -27,16 +28,28 @@ public class RoleSubagentFactory {
     private final ModelGateway modelGateway;
     private final AgentScopeProperties agentScopeProperties;
     private final ReviewWorkspaceLayout workspaceLayout;
+    private final ReviewRoleToolFactory reviewRoleToolFactory;
 
     public RoleSubagentFactory(
             RolePackRegistry rolePackRegistry,
             ModelGateway modelGateway,
             AgentScopeProperties agentScopeProperties,
             ReviewWorkspaceLayout workspaceLayout) {
+        this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public RoleSubagentFactory(
+            RolePackRegistry rolePackRegistry,
+            ModelGateway modelGateway,
+            AgentScopeProperties agentScopeProperties,
+            ReviewWorkspaceLayout workspaceLayout,
+            ReviewRoleToolFactory reviewRoleToolFactory) {
         this.rolePackRegistry = Objects.requireNonNull(rolePackRegistry, "rolePackRegistry must not be null");
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
         this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
+        this.reviewRoleToolFactory = reviewRoleToolFactory;
     }
 
     /**
@@ -52,6 +65,7 @@ public class RoleSubagentFactory {
         RolePack rolePack = rolePackRegistry.require(roleType);
         Path roleWorkspace = workspaceLayout.roleWorkspace(workspace, roleType);
         String prompt = rolePrompt(rolePack);
+        Toolkit toolkit = reviewToolkit(runtimeContext, roleType);
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(runtimeContext.roleLabel(roleType))
                 .agentId(runtimeContext.roleLabel(roleType))
@@ -67,7 +81,7 @@ public class RoleSubagentFactory {
                         rolePack.allowedTools()))
                 .sysPrompt(prompt)
                 .maxIters(rolePack.maxIterations())
-                .enablePlanMode()
+                .toolkit(toolkit)
                 .disableFilesystemTools()
                 .disableShellTool()
                 .disableMemoryTools()
@@ -104,8 +118,17 @@ public class RoleSubagentFactory {
                 + rolePack.description()
                 + " Work only from the supplied public context and server-authorized tool results. "
                 + " Do not access files, shell commands, other role sessions, hidden reasoning, credentials, or final Gate authority. "
-                + " Return public " + rolePack.outputKind().name() + " JSON compatible output using prompt version "
-                + rolePack.promptVersion() + ".";
+                + " Submit every finding with submit_claim, then always call complete_initial_review, including when there are no findings. "
+                + " Do not treat final text as a substitute for either tool. Return public "
+                + rolePack.outputKind().name() + " JSON compatible output using prompt version " + rolePack.promptVersion() + ".";
+    }
+
+    private Toolkit reviewToolkit(ReviewRuntimeContext runtimeContext, RoleType roleType) {
+        Toolkit toolkit = new Toolkit();
+        if (reviewRoleToolFactory != null) {
+            reviewRoleToolFactory.initialReviewTools(runtimeContext, roleType).forEach(toolkit::registerAgentTool);
+        }
+        return toolkit;
     }
 
     /**

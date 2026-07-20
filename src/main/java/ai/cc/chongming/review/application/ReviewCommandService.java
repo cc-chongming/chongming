@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.config.ReviewDiagnosticsProperties;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.exception.ReviewErrorCode;
 import ai.cc.chongming.review.domain.model.Review;
@@ -11,10 +12,15 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -31,12 +37,14 @@ import reactor.core.scheduler.Schedulers;
 public class ReviewCommandService {
 
     private static final String START_IDEMPOTENCY_PREFIX = "http-start:";
+    private static final Logger LOGGER = LoggerFactory.getLogger(ReviewCommandService.class);
 
     private final ReviewRegistry reviewRegistry;
     private final ReviewLifecycleService lifecycleService;
     private final ReviewOrchestrationService orchestrationService;
     private final ReviewStateMachine stateMachine;
     private final ReviewEventPublisher eventPublisher;
+    private final ReviewDiagnosticsProperties diagnosticsProperties;
 
     public ReviewCommandService(
             ReviewRegistry reviewRegistry,
@@ -44,11 +52,24 @@ public class ReviewCommandService {
             ReviewOrchestrationService orchestrationService,
             ReviewStateMachine stateMachine,
             ReviewEventPublisher eventPublisher) {
+        this(reviewRegistry, lifecycleService, orchestrationService, stateMachine, eventPublisher,
+                new ReviewDiagnosticsProperties(false));
+    }
+
+    @Autowired
+    public ReviewCommandService(
+            ReviewRegistry reviewRegistry,
+            ReviewLifecycleService lifecycleService,
+            ReviewOrchestrationService orchestrationService,
+            ReviewStateMachine stateMachine,
+            ReviewEventPublisher eventPublisher,
+            ReviewDiagnosticsProperties diagnosticsProperties) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.lifecycleService = Objects.requireNonNull(lifecycleService, "lifecycleService must not be null");
         this.orchestrationService = Objects.requireNonNull(orchestrationService, "orchestrationService must not be null");
         this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.diagnosticsProperties = Objects.requireNonNull(diagnosticsProperties, "diagnosticsProperties must not be null");
     }
 
     /**
@@ -119,6 +140,7 @@ public class ReviewCommandService {
     }
 
     private void recordStartupFailure(Review review, Throwable failure) {
+        logStartupFailure(review, failure);
         synchronized (review) {
             if (review.stage().isTerminal() || !stateMachine.canTransition(review.stage(), ReviewStage.FAILED)) {
                 return;
@@ -136,6 +158,51 @@ public class ReviewCommandService {
                     null,
                     Map.of("failureType", failure.getClass().getSimpleName())));
         }
+    }
+
+    private void logStartupFailure(Review review, Throwable failure) {
+        if (diagnosticsProperties.logStartupFailureStack()) {
+            LOGGER.error(
+                    "REVIEW_STARTUP_FAILED reviewId={} attempt={} stage={} failureType={} message={}\n{}",
+                    review.id().value(),
+                    review.attemptNo(),
+                    review.stage(),
+                    failure.getClass().getSimpleName(),
+                    redactFailureMessage(failure),
+                    redactedStackTrace(failure));
+            return;
+        }
+        LOGGER.error(
+                "REVIEW_STARTUP_FAILED reviewId={} attempt={} stage={} failureType={}",
+                review.id().value(),
+                review.attemptNo(),
+                review.stage(),
+                failure.getClass().getSimpleName());
+    }
+
+    private String redactFailureMessage(Throwable failure) {
+        String message = failure.getMessage();
+        if (message == null || message.isBlank()) {
+            return "No failure message";
+        }
+        return redactDiagnosticText(message, 500);
+    }
+
+    private String redactedStackTrace(Throwable failure) {
+        StringWriter writer = new StringWriter();
+        failure.printStackTrace(new PrintWriter(writer));
+        return redactDiagnosticText(writer.toString(), 10_000);
+    }
+
+    static String redactDiagnosticText(String value, int limit) {
+        String redacted = value
+                .replaceAll("(?i)authorization\\s*[=:]\\s*bearer\\s+\\S+", "Authorization=[REDACTED]")
+                .replaceAll("(?i)\\bbearer\\s+\\S+", "Bearer [REDACTED]")
+                .replaceAll("(?i)(password|api[_-]?key|authorization|token)\\s*[=:]\\s*[^\\s,;]+", "$1=[REDACTED]")
+                .replaceAll("(?i)(https?://)[^/@\\s]+@", "$1[REDACTED]@")
+                .replaceAll("(?i)([?&](?:password|api[_-]?key|token)=)[^&#\\s]+", "$1[REDACTED]")
+                .replaceAll("\\bsk-[A-Za-z0-9_-]+", "[REDACTED]");
+        return redacted.length() <= limit ? redacted : redacted.substring(0, limit);
     }
 
     private Review requireReview(ReviewId reviewId) {

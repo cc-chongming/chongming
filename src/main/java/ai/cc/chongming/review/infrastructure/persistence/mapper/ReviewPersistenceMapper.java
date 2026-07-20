@@ -23,6 +23,13 @@ public interface ReviewPersistenceMapper {
             """)
     ReviewRow findReview(@Param("reviewId") String reviewId);
 
+    @Insert("""
+            INSERT INTO review_request
+                (review_id, request_id, submitter_id, stage, input_idempotency_key, current_attempt_no, version)
+            VALUES (#{reviewId}, #{requestId}, #{submitterId}, #{stage}, #{inputIdempotencyKey}, #{attemptNo}, #{version})
+            """)
+    int insertReviewRequest(ReviewRequestRow row);
+
     @Update("""
             UPDATE review_request
             SET stage = #{review.stage}, current_attempt_no = #{review.attemptNo}, version = #{review.version}
@@ -217,6 +224,21 @@ public interface ReviewPersistenceMapper {
      * @author wangli
      */
     record ReviewRow(String reviewId, String stage, int attemptNo, long version) {
+    }
+
+    /**
+     * Row for the review root created at intake time.
+     *
+     * @author wangli
+     */
+    record ReviewRequestRow(
+            String reviewId,
+            String requestId,
+            String submitterId,
+            String stage,
+            String inputIdempotencyKey,
+            int attemptNo,
+            long version) {
     }
 
     /**

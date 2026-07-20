@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeModelBridge;
 import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ToolSchema;
 import java.time.Duration;
 import java.util.List;
@@ -44,7 +45,39 @@ class AgentScopeModelBridgeTests {
 
         assertThat(captured.get().roleType()).isEqualTo(RoleType.PRODUCT);
         assertThat(captured.get().allowedTools()).containsExactly("searchText");
+        assertThat(captured.get().tools()).containsExactly(new ModelGateway.ToolDefinition(
+                "searchText", "Search", Map.of(), null));
         assertThat(captured.get().publicContext()).contains("Assess the requirement");
+    }
+
+    @Test
+    void returnsOnlyRequestedToolCallsToAgentScope() {
+        ModelGateway gateway = (request, cancellation) -> Mono.just(new ModelGateway.ModelResponse(
+                "response-001", "model-001", "", new ModelGateway.Usage(1, 2, 3),
+                ModelGateway.FinishReason.TOOL_CALL, Duration.ofMillis(20), 1,
+                List.of(new ModelGateway.ToolCall("call-1", "searchText", Map.of("query", "api"))), "trace-001"));
+        AgentScopeModelBridge bridge = new AgentScopeModelBridge(
+                gateway, context(), RoleType.PRODUCT, "role-reviewer", "Review public requirements", Set.of("searchText"));
+
+        var response = bridge.stream(List.of(new UserMessage("Assess")),
+                List.of(ToolSchema.builder().name("searchText").description("Search").parameters(Map.of()).build()), null).blockFirst();
+
+        assertThat(response.getContent()).hasSize(1).first().isInstanceOf(ToolUseBlock.class);
+    }
+
+    @Test
+    void rejectsModelToolCallOutsideRequestedSchema() {
+        ModelGateway gateway = (request, cancellation) -> Mono.just(new ModelGateway.ModelResponse(
+                "response-001", "model-001", "", new ModelGateway.Usage(1, 2, 3),
+                ModelGateway.FinishReason.TOOL_CALL, Duration.ofMillis(20), 1,
+                List.of(new ModelGateway.ToolCall("call-1", "submit_claim", Map.of())), "trace-001"));
+        AgentScopeModelBridge bridge = new AgentScopeModelBridge(
+                gateway, context(), RoleType.PRODUCT, "role-reviewer", "Review public requirements", Set.of("searchText", "submit_claim"));
+
+        assertThatThrownBy(() -> bridge.stream(List.of(new UserMessage("Assess")),
+                List.of(ToolSchema.builder().name("searchText").description("Search").parameters(Map.of()).build()), null).blockFirst())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Model returned a non-permitted or duplicate tool call");
     }
 
     @Test

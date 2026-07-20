@@ -10,6 +10,8 @@ checklist:
   - Check dependencies and delivery sequencing.
   - Check ownership and acceptance risk.
 allowedTools:
+  - submit_claim
+  - complete_initial_review
   - listFiles
   - searchText
   - submitEvidence

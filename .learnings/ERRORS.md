@@ -1,5 +1,33 @@
 # Errors
 
+## [ERR-20260720-001] Maven test dependency resolution blocked by sandbox network policy
+
+**Logged**: 2026-07-20T00:00:00+08:00
+**Priority**: low
+**Status**: open
+**Area**: verification
+
+### Summary
+Focused Maven tests could not start because the Spring Boot parent POM was absent locally and the sandbox denied the Maven Central connection.
+
+### Error
+```
+Could not transfer artifact ... Permission denied: getsockopt
+```
+
+### Context
+- IDEA incremental build completed successfully after the Tool Calling and first-review completion changes.
+- The checked-in PowerShell wrapper separately failed with `Cannot index into a null array`; invoking the bundled Maven executable reached dependency resolution but was blocked by network policy.
+
+### Suggested Fix
+Run the focused test set in an environment with the Maven dependencies cached or with approved Maven Central access.
+
+### Metadata
+- Reproducible: yes
+- Related Files: pom.xml
+
+---
+
 ## [ERR-20260714-001] git repository ownership check
 
 **Logged**: 2026-07-14T00:00:00+08:00

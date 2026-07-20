@@ -137,7 +137,7 @@
 
 ### 已完成
 
-- 已创建 Vue 3/Vite 工作台源码与生产构建：`frontend/` 通过 `npm run build` 输出到 Spring Boot 默认静态目录 `src/main/resources/static/review/`；使用 Hash 路由，`/review/` 刷新不依赖后端前端路由回退。
+- 已创建 Vue 3/Vite 工作台源码与生产构建：`frontend/` 通过 `npm run build` 输出到 Spring Boot 默认静态目录 `src/main/resources/static/review/`；使用 Hash 路由，`/review/` 由后端入口映射转发至 `index.html`，刷新不依赖前端路由回退。
 - 已实现 Markdown 创建页、真实 REST Client、按 `reviewId + sequence` 幂等的 Store、断线指数退避与 `afterSequence` SSE 恢复；页面首次加载从服务端全量回放，绝不以本地缓存代替服务端事实。
 - 已实现计划/角色、辩论时间线、证据抽屉、人工审核草稿 CRUD、最终 Gate、报告版本与通知 Outbox 状态页面；Markdown 与代码片段均按纯文本显示，不执行 HTML。
 - 概览 API 已新增只读 `reviewVersion`，使刷新后的最终 Gate 提交能够携带正确的乐观锁版本；`lastSequence` 仍只用于事件回放，二者不可混用。

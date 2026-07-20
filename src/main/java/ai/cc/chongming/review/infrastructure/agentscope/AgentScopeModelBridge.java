@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.GenerateOptions;
@@ -74,8 +75,11 @@ public final class AgentScopeModelBridge implements Model {
                 systemInstruction,
                 publicContext(safeMessages),
                 requestedTools,
+                toolDefinitions(tools),
                 runtimeContext.traceId());
-        return modelGateway.generate(request, cancellation).map(this::toResponse).flux();
+        return modelGateway.generate(request, cancellation)
+                .map(response -> toResponse(response, requestedTools))
+                .flux();
     }
 
     @Override
@@ -83,11 +87,11 @@ public final class AgentScopeModelBridge implements Model {
         return profileId;
     }
 
-    private ChatResponse toResponse(ModelGateway.ModelResponse response) {
+    private ChatResponse toResponse(ModelGateway.ModelResponse response, Set<String> requestedTools) {
         ModelGateway.Usage usage = response.usage();
         return ChatResponse.builder()
                 .id(response.responseId())
-                .content(List.of(TextBlock.builder().text(response.publicText()).build()))
+                .content(content(response, requestedTools))
                 .usage(new ChatUsage(
                         safeInt(usage.inputTokens()),
                         safeInt(usage.outputTokens()),
@@ -96,6 +100,28 @@ public final class AgentScopeModelBridge implements Model {
                 .metadata(Map.of("traceId", response.traceId(), "attempts", response.attempts()))
                 .finishReason(response.finishReason().name().toLowerCase())
                 .build();
+    }
+
+    private List<ContentBlock> content(ModelGateway.ModelResponse response, Set<String> requestedTools) {
+        List<ContentBlock> blocks = new java.util.ArrayList<>();
+        if (!response.publicText().isBlank()) {
+            blocks.add(TextBlock.builder().text(response.publicText()).build());
+        }
+        Set<String> callIds = new LinkedHashSet<>();
+        for (ModelGateway.ToolCall call : response.toolCalls()) {
+            if (!requestedTools.contains(call.name()) || !callIds.add(call.id())) {
+                throw new IllegalArgumentException("Model returned a non-permitted or duplicate tool call");
+            }
+            blocks.add(new ToolUseBlock(call.id(), call.name(), call.input()));
+        }
+        return List.copyOf(blocks);
+    }
+
+    private List<ModelGateway.ToolDefinition> toolDefinitions(List<ToolSchema> tools) {
+        if (tools == null) return List.of();
+        return tools.stream().filter(Objects::nonNull)
+                .map(tool -> new ModelGateway.ToolDefinition(tool.getName(), tool.getDescription(), tool.getParameters(), tool.getStrict()))
+                .toList();
     }
 
     private String publicContext(Collection<Msg> messages) {

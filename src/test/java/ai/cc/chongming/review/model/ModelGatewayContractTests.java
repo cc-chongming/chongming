@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -33,7 +34,9 @@ class ModelGatewayContractTests {
     @Test
     void retriesOnlyTransientFailuresAndAuditsHashesInsteadOfPrompts() {
         AtomicInteger calls = new AtomicInteger();
+        AtomicReference<ModelProviderClient.ProviderRequest> providerRequest = new AtomicReference<>();
         ModelProviderClient provider = request -> {
+            providerRequest.set(request);
             if (calls.incrementAndGet() == 1) {
                 throw new ModelGatewayException(Code.MODEL_RATE_LIMITED, "transient");
             }
@@ -45,12 +48,13 @@ class ModelGatewayContractTests {
         };
         ModelCallAuditService audit = new ModelCallAuditService();
         CommercialModelGateway gateway = new CommercialModelGateway(
-                enabledProperties(), profileRegistry(1), provider, audit, ignored -> "test-key");
+                enabledProperties(), profileRegistry(1), provider, audit);
 
         ModelGateway.ModelResponse response = gateway.generate(request(), IntakeCancellation.neverCancelled()).block();
 
         assertThat(response.attempts()).isEqualTo(2);
         assertThat(calls).hasValue(2);
+        assertThat(providerRequest.get().apiKey()).isEqualTo("test-key");
         assertThat(audit.findByReview(responseRequestReviewId())).singleElement().satisfies(entry -> {
             assertThat(entry.inputHash()).hasSize(64);
             assertThat(entry.outputHash()).hasSize(64);
@@ -64,18 +68,17 @@ class ModelGatewayContractTests {
             throw new AssertionError("Provider must not be invoked");
         };
         CommercialModelGateway disabled = new CommercialModelGateway(
-                new ModelGatewayProperties(false, null, "placeholder", "TEST_KEY"),
+                new ModelGatewayProperties(false, null, "placeholder", "test-key", false),
                 profileRegistry(0),
                 provider,
-                new ModelCallAuditService(),
-                ignored -> "test-key");
+                new ModelCallAuditService());
 
         assertThatThrownBy(() -> disabled.generate(request(), IntakeCancellation.neverCancelled()).block())
                 .isInstanceOf(ModelGatewayException.class)
                 .extracting(error -> ((ModelGatewayException) error).code())
                 .isEqualTo(Code.MODEL_GATEWAY_DISABLED);
         assertThatThrownBy(() -> new CommercialModelGateway(
-                        enabledProperties(), profileRegistry(0), provider, new ModelCallAuditService(), ignored -> "test-key")
+                        enabledProperties(), profileRegistry(0), provider, new ModelCallAuditService())
                 .generate(request(), () -> true)
                 .block())
                 .isInstanceOf(ModelGatewayException.class)
@@ -84,7 +87,7 @@ class ModelGatewayContractTests {
     }
 
     private ModelGatewayProperties enabledProperties() {
-        return new ModelGatewayProperties(true, URI.create("https://example.invalid/v1"), "placeholder", "TEST_KEY");
+        return new ModelGatewayProperties(true, URI.create("https://example.invalid/v1"), "placeholder", "test-key", false);
     }
 
     private ModelProfileRegistry profileRegistry(int maxRetries) {

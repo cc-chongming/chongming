@@ -10,6 +10,8 @@ checklist:
   - Check user interaction and UI state coverage.
   - Check client contracts and error handling.
 allowedTools:
+  - submit_claim
+  - complete_initial_review
   - listFiles
   - searchText
   - readLines

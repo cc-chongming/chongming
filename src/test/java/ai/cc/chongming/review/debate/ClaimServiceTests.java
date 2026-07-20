@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ClaimServiceTests {
 
     @Test
-    void marksHighSeverityClaimWithoutEvidenceUnverifiedAndReplaysIdempotently() {
+    void preservesInitialReviewUntilTheRoleExplicitlyCompletesAndReplaysIdempotently() {
         ClaimService service = service();
         Review review = initialReview();
         ClaimService.ClaimSubmission submission = submission(review, new IdempotencyKey("claim-product-001"), List.of());
@@ -33,13 +33,18 @@ class ClaimServiceTests {
 
         assertThat(accepted.claim().status()).isEqualTo(ClaimStatus.UNVERIFIED);
         assertThat(review.roleActivations()).singleElement()
-                .extracting(RoleActivation::initialReviewCompleted).isEqualTo(true);
+                .extracting(RoleActivation::initialReviewCompleted).isEqualTo(false);
         assertThatThrownBy(() -> service.publishInitialClaims(review))
                 .isInstanceOf(ReviewDomainException.class)
                 .extracting(exception -> ((ReviewDomainException) exception).errorCode())
                 .isEqualTo(ai.cc.chongming.review.domain.exception.ReviewErrorCode.CORE_ROLE_INITIAL_REVIEW_REQUIRED);
         assertThat(replay.replayed()).isTrue();
         assertThat(replay.claim().claimId()).isEqualTo(accepted.claim().claimId());
+
+        review.transitionTo(new ReviewStateMachine(), ReviewStage.CONFLICT_DETECTION);
+        ClaimService.ClaimSubmissionResult replayAfterStageAdvance = service.submit(review, submission);
+        assertThat(replayAfterStageAdvance.replayed()).isTrue();
+        assertThat(replayAfterStageAdvance.claim().claimId()).isEqualTo(accepted.claim().claimId());
     }
 
     @Test

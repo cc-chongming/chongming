@@ -10,6 +10,8 @@ checklist:
   - Check API and data consistency constraints.
   - Check failure handling and operability.
 allowedTools:
+  - submit_claim
+  - complete_initial_review
   - listFiles
   - findSymbol
   - searchText

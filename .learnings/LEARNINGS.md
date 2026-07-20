@@ -1,5 +1,13 @@
 # Learnings
 
+## [LRN-20260720-001] Tool-only model responses require end-to-end protocol validation
+
+**Status**: resolved
+
+OpenAI-compatible providers may return a valid response with no text and only `tool_calls`. The provider response, domain response, and AgentScope bridge must all allow this shape while rejecting missing or duplicate call IDs, non-object arguments, and tool names outside the schemas exposed for the current call.
+
+---
+
 Record project-specific corrections, knowledge gaps, and reusable practices here.
 ## [LRN-20260716-001] compatibility
 
