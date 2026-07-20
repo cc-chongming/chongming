@@ -1,76 +1,78 @@
-# 重明（Chongming）
+# Chongming
 
-> **双睛照见，众议成明。** 以协议、证据和人工 Gate 约束多 Agent 需求评审，而不把它做成一次不可追溯的群聊。
+[简体中文](README.zh-CN.md)
 
-重明是一个面向研发需求评审的多智能体工作台。它接收 Markdown 需求与受控的本地仓库标识，让产品、项目、前端、后端等角色独立提出 Claim；冲突进入受限辩论，Judge 只给出 Gate 草案，最终决定始终由人完成。
+> **See through ambiguity. Build consensus with evidence.** Chongming is a protocol-driven, multi-agent requirements-review workbench—not an untraceable group chat.
 
-## 为什么不是「多 Agent 群聊」
+Chongming accepts a Markdown requirement and a controlled local-repository reference. Product, project, frontend, and backend roles independently submit Claims; conflicts enter constrained debate; a Judge produces a Gate draft; a human makes the final decision.
 
-| 常见 Agent Demo | 重明的约束 |
+## Why it is not a multi-agent chat demo
+
+| Typical agent demo | Chongming constraint |
 |---|---|
-| 对话结束即得到结论 | Claim、Challenge、Rebuttal、Judgement 与 Gate 均为强类型领域对象 |
-| Agent 自己选择权限与身份 | 服务端重新绑定 review、attempt、role、版本号和幂等键 |
-| 模型输出直接改变流程 | `ReviewProtocolGuard` 校验状态机、角色和动作后才提交命令 |
-| 只看最终回答 | 业务事件带全局 sequence，可通过 SSE 回放评审过程 |
-| AI 直接放行需求 | AI 仅生成草案；`HUMAN_REQUIRED` 进入人工等待态，人工决定版本化留痕 |
+| A conclusion appears when the chat ends | Claims, challenges, rebuttals, judgements, and Gates are typed domain objects |
+| Agents choose their own identity and permissions | The server rebinds review, attempt, role, version, and idempotency keys |
+| Model output changes the workflow directly | `ReviewProtocolGuard` validates the state, role, and action before a command is committed |
+| Only the final answer is visible | Business events have a global sequence and can be replayed through SSE |
+| AI approves a requirement | AI produces a draft only; `HUMAN_REQUIRED` waits for a versioned human decision |
 
-这套方向借鉴了开源 Agent 工程的两项成熟实践：AgentScope Java 的受控工具调用、可观测与运行时中断能力，以及 LangGraph 的持久状态、人工介入和可恢复工作流理念。重明不复制它们的通用编排层，而是把这些原则收敛为“研发评审协议”。
+The project draws from two production-oriented open-source directions: AgentScope Java's controlled tool use, observability, and runtime intervention; and LangGraph's durable state and human-in-the-loop workflow model. Chongming narrows those ideas into a review protocol for software delivery.
 
-## 当前能力
+## Current capability matrix
 
-| 能力 | 当前状态 | 说明 |
+| Capability | Status | Notes |
 |---|---|---|
-| Markdown 受理与评审工作台 | 已可本地联调 | `POST /api/reviews` 创建评审，工作台入口为 `/review/` |
-| 状态机、角色权限与幂等命令 | 已实现 | 非法阶段、越权角色和重复命令由服务端拒绝或安全重放 |
-| OpenAI 兼容模型网关 | 已实现 | 支持角色模型配置、超时/退避与 Tool Call；须填入实际可用模型名 |
-| 首轮评审 | 已接入运行时 | 四个核心角色提交 Claim 后进入冲突检测 |
-| 辩论、Judge 与 Gate 草案 | 已接入运行时 | Director、角色和 Judge 使用受限工具推进；当前每个 attempt 仅一个活跃辩题 |
-| 领域事件与 SSE | 已实现 | 支持事件序号、历史回放、心跳及断线后的增量订阅 |
-| 人工审核、报告与通知 | 核心链路可用 | 外部通知 MCP 与生产持久化仍需真实契约联调 |
-| MySQL 命令写入与多实例恢复 | 未完成 | 当前评审聚合与运行时调度仍包含进程内边界，不能宣称生产级恢复 |
-| 安全审计、评测与故障演练 | 未完成 | 属于生产发布门禁，不应以本地 Demo 结果替代 |
+| Markdown intake and review workbench | Ready for local integration | Create a review with `POST /api/reviews`; UI entry is `/review/` |
+| State machine, role authorization, idempotent commands | Implemented | Invalid stages, unauthorized roles, and replayed commands are rejected or safely replayed server-side |
+| OpenAI-compatible model gateway | Implemented | Per-role model profiles, timeouts/backoff, and Tool Calls; a real model ID is required |
+| Initial review | Connected to runtime | Four core roles submit Claims, then the flow reaches conflict detection |
+| Debate, Judge, and Gate draft | Connected to runtime | Director, roles, and Judge use restricted tools; one attempt currently supports one active debate topic |
+| Domain events and SSE | Implemented | Sequenced events, historical replay, heartbeat, and incremental reconnect are supported |
+| Human review, reports, notifications | Core flow available | External notification MCP and production persistence still need real-contract integration |
+| MySQL command writes and multi-instance recovery | Not complete | The review aggregate and runtime dispatcher still have in-process boundaries |
+| Security audit, evaluation, fault injection | Not complete | These are release gates, not substitutes for a local demo |
 
-## 评审链路
+## Review flow
 
 ```mermaid
 flowchart LR
-    A["Markdown 需求"] --> B["创建 Review / 固化快照"]
-    B --> C["Director 制定计划"]
-    C --> D["核心角色首轮 Claim"]
-    D --> E["冲突检测"]
-    E --> F["受限辩论：质询 / 反驳 / 补证"]
-    F --> G["Judge 裁决与 Gate 草案"]
-    G --> H["人工审核与版本化决定"]
+    A["Markdown requirement"] --> B["Create review / freeze snapshot"]
+    B --> C["Director plans"]
+    C --> D["Core-role Claims"]
+    D --> E["Conflict detection"]
+    E --> F["Constrained debate: challenge / rebuttal / evidence"]
+    F --> G["Judge and Gate draft"]
+    G --> H["Human review and versioned decision"]
 
-    D -. "正式领域事件" .-> I["SSE 事件流 / 工作台"]
-    F -. "提交后串行唤醒" .-> C
+    D -. "committed business events" .-> I["SSE stream / workbench"]
+    F -. "serialized stage wake-up" .-> C
     G -. "HUMAN_REQUIRED" .-> H
 ```
 
-运行时不依赖模型“自觉遵守流程”：模型只选择已下发的 Tool Schema；每个工具调用都会在服务端验证后再写入领域状态。`ReviewWorkflowDispatcher` 只监听已提交的正式事件，并在单个 review 内串行唤醒下一位 Agent，避免同一 Director 会话并发执行。
+The runtime does not rely on a model voluntarily following the process. A model can only select an exposed Tool Schema; every tool call is validated server-side before it changes domain state. `ReviewWorkflowDispatcher` listens only to committed business events and serializes the next Agent wake-up within a review, preventing concurrent execution of the same Director session.
 
-## 架构
+## Architecture
 
-| 层次 | 责任 | 当前实现 |
+| Layer | Responsibility | Current implementation |
 |---|---|---|
-| 交互层 | 工作台、受理、查询、SSE | Vue 3/Vite 静态资源 + Spring MVC |
-| 领域层 | Review 状态机、Guard、Claim、Debate、Judge、Gate | Java 21、Spring Boot、强类型命令 |
-| Agent 运行时 | Director/角色/Judge Harness、受限工具、运行态调度 | AgentScope Java Harness + 运行时上下文绑定 |
-| 模型适配层 | OpenAI 兼容请求、流式消息、Tool Call、重试 | Model Gateway Adapter |
-| 事件与存储 | sequence 事件、SSE 回放、可选 MyBatis event store | 内存默认实现；MySQL 写模型待完整接入 |
+| Interaction | Workbench, intake, query APIs, SSE | Vue 3/Vite static assets + Spring MVC |
+| Domain | Review state machine, Guard, Claim, Debate, Judge, Gate | Java 21, Spring Boot, typed commands |
+| Agent runtime | Director/role/Judge Harness, restricted tools, runtime dispatch | AgentScope Java Harness + bound runtime context |
+| Model adapter | OpenAI-compatible calls, streaming, Tool Calls, retry | Model Gateway adapter |
+| Events and storage | Sequenced events, SSE replay, optional MyBatis event store | In-memory by default; complete MySQL write model is pending |
 
-## 快速开始
+## Quick start
 
-### 前置条件
+### Prerequisites
 
 - JDK 21
-- Maven Wrapper 可用
-- MySQL 5.6+（本项目迁移不使用 JSON 列）
-- 一个支持 OpenAI Chat Completions 与 Tool Calling 的模型兼容接口
+- A working Maven Wrapper
+- MySQL 5.6+ (the migrations do not require JSON columns)
+- A model endpoint compatible with OpenAI Chat Completions and Tool Calling
 
-### 本地配置
+### Local configuration
 
-使用 `src/main/resources/application-local.yml` 填写本机配置；该文件只能用于本地，禁止提交密钥。最小结构如下：
+Configure your workstation in `src/main/resources/application-local.yml`. Use it locally only and never commit secrets. The minimal structure is:
 
 ```yaml
 review:
@@ -84,27 +86,27 @@ review:
     base-url: https://your-openai-compatible-endpoint/v1
     model-name: your_actual_model_name
     api-key: your_api_key
-    log-conversation: true # 仅限本地排障，完成后关闭
+    log-conversation: true # local diagnosis only; turn it off afterwards
 repositories:
   allowed:
     - id: your-repository-id
       root: E:\\your\\local\\repository
 ```
 
-`model-name` 不能保留默认的 `chongming-*-placeholder`，否则模型服务会返回 404。启用 `log-conversation` 会记录脱敏前后运行细节，仅应在受控本地调试时短暂开启。
+Do not leave `model-name` as a `chongming-*-placeholder`; the provider will return HTTP 404. `log-conversation` is for a controlled local debugging session only.
 
-如果本地配置文件曾进入版本控制或被共享，请立即移除其中的凭据并轮换数据库、模型网关密钥；README 不应成为复制真实密钥的载体。
+If a local configuration file was committed or shared, remove its credentials and rotate the database and model-gateway secrets immediately. Documentation must never become a vehicle for copying live credentials.
 
-### 构建与启动
+### Build and run
 
 ```powershell
 .\mvnw.cmd test
 .\mvnw.cmd spring-boot:run
 ```
 
-浏览器打开 [http://localhost:8080/review/](http://localhost:8080/review/)。注意入口是 `/review/`，不是根路径或省略末尾斜杠后的静态资源猜测路径。
+Open [http://localhost:8080/review/](http://localhost:8080/review/). The workbench entry is `/review/`, not the root path.
 
-前端源码位于 `frontend/`。修改前端后需要重新构建并提交同步后的 `src/main/resources/static/review/` 产物：
+Frontend sources are in `frontend/`. After frontend changes, rebuild and commit the matching assets under `src/main/resources/static/review/`:
 
 ```powershell
 Set-Location frontend
@@ -112,61 +114,61 @@ npm test
 npm run build
 ```
 
-## 调试一场评审
+## Debugging a review
 
-1. 在工作台创建评审，上传 `.md`，选择已配置的仓库标识。
-2. 使用 `main` 或目标分支；Commit 可为空，填写时必须是 40 位 SHA。
-3. 启动后观察工作台 SSE 状态和服务端日志。模型网关 401/404 首先检查 API Key、`base-url` 和实际模型名。
-4. 评审卡在某阶段时，先查询 `GET /api/reviews/{reviewId}` 与 SSE 事件，不要直接修改数据库状态。
+1. Create a review in the workbench, upload a `.md` file, and choose a configured repository ID.
+2. Use `main` or the target branch. Commit is optional; when supplied, it must be a 40-character SHA.
+3. Observe the workbench SSE state and server logs. For model-gateway 401/404 errors, check the API key, `base-url`, and actual model name first.
+4. When a review stalls, query its state and SSE events before changing any database record directly.
 
-调试接口包括：
+Useful endpoints:
 
-- `GET /api/reviews/{reviewId}`：评审聚合状态。
-- `GET /api/reviews/{reviewId}/plans`：计划快照。
-- `GET /api/reviews/{reviewId}/debates`：辩论状态与回合。
-- `GET /api/reviews/{reviewId}/events`：SSE 事件流。
-- `POST /api/reviews/{reviewId}/cancel`、`/retry`：生命周期命令。
+- `GET /api/reviews/{reviewId}` — review aggregate state.
+- `GET /api/reviews/{reviewId}/plans` — plan snapshot.
+- `GET /api/reviews/{reviewId}/debates` — debate state and turns.
+- `GET /api/reviews/{reviewId}/events` — SSE event stream.
+- `POST /api/reviews/{reviewId}/cancel` and `/retry` — lifecycle commands.
 
-## 生产化差距
+## Production gaps
 
-当前版本适合本地联调、演示和协议验证，**不适合作为多实例生产服务**。以下能力是发布前必须完成的门槛：
+The current version is suitable for local integration, demonstrations, and protocol validation. It is **not yet a multi-instance production service**. Before release, the following are required:
 
-- 将 Claim、Debate、Judge、Gate 与领域事件纳入同一个 MySQL 事务。
-- 实现数据库 lease、启动扫描、可恢复 Agent 任务和失败转人工。
-- 支持多个冲突辩题的批量编排，而不是当前的单活跃辩题限制。
-- 接入仓库快照/证据工具的真实只读 scope，并完成模型冒烟与权限审计。
-- 完成真实 MySQL 回放压测、安全审计、故障注入与评测基线。
+- Commit Claim, Debate, Judge, Gate, and domain events in one MySQL transaction.
+- Implement database leases, startup scanning, resumable Agent work, and failure-to-human escalation.
+- Batch-orchestrate multiple conflicting topics instead of the current single-active-topic limitation.
+- Connect real read-only repository snapshot/evidence scopes and complete model smoke tests and authorization audit.
+- Complete MySQL replay load tests, security audit, fault injection, and evaluation baselines.
 
-## 项目文档
+## Documentation
 
-- [总体实施路线图](docs/AIREVIEW-PLAN-001-总体实施路线图.md)
-- [Harness 与角色编排](docs/AIREVIEW-PLAN-008-Harness主持人与角色编排.md)
-- [辩论、Judge 与 Gate](docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md)
-- [领域事件、SSE 与恢复](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
-- [人工审核、报告与通知](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
-- [开发约束](AGENTS.md)
+- [Master implementation roadmap](docs/AIREVIEW-PLAN-001-总体实施路线图.md)
+- [Harness and role orchestration](docs/AIREVIEW-PLAN-008-Harness主持人与角色编排.md)
+- [Debate, Judge, and Gate](docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md)
+- [Domain events, SSE, and recovery](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
+- [Human review, reports, and notification](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
+- [Development rules](AGENTS.md)
 
-## 开源对标
+## Open-source benchmark
 
-| 项目 | 借鉴点 | 重明的落点 |
+| Project | What we adopt | Chongming application |
 |---|---|---|
-| [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | 受控工具调用、运行时中断、可观测与多 Agent 协作 | 使用 Harness 承载角色，但由 Review 协议和白名单收紧工具边界 |
-| [LangGraph](https://github.com/langchain-ai/langgraph) | 持久执行、人工介入、状态可视化 | 以人工 Gate 和事件回放实现审阅；持久恢复仍是待完成门槛 |
+| [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | Controlled tool calling, runtime intervention, observability, multi-agent collaboration | Harness hosts roles while the review protocol and whitelist narrow the authority boundary |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | Durable execution, human-in-the-loop, state visibility | Human Gates and event replay are implemented; durable recovery remains a release gate |
 
-项目不会把“接入了 Agent 框架”当成生产就绪证明。对标开源项目的下一步，是补齐 durable execution、审计和评测，而不是继续堆叠角色数量。
+Using an agent framework is not evidence of production readiness. The next benchmark milestone is durable execution, auditability, and evaluation—not adding more roles.
 
-## 目录结构
+## Repository layout
 
 ```text
-src/main/java/ai/cc/chongming/   Java 生产代码
-src/main/resources/              应用配置与内嵌工作台静态资源
-src/test/java/                   单元与集成测试
-frontend/                        Vue 3/Vite 源码与前端测试
-docs/                            技术方案、集成契约和分阶段计划
-.agentscope/workspace/           本地 Agent 工作区（不提交）
-.learnings/                      错误、需求与经验记录
+src/main/java/ai/cc/chongming/   Java production code
+src/main/resources/              Application configuration and embedded workbench assets
+src/test/java/                   Unit and integration tests
+frontend/                        Vue 3/Vite source and frontend tests
+docs/                            Technical design, integration contracts, and phased plans
+.agentscope/workspace/           Local Agent workspace (not committed)
+.learnings/                      Errors, requests, and reusable learnings
 ```
 
-## 贡献
+## Contributing
 
-每项实现应同步更新对应 `AIREVIEW-PLAN-xxx`、测试证据和 `.learnings/`。提交前至少运行与改动范围匹配的测试；前端改动还须重建并同步静态资源。详细规则见 [AGENTS.md](AGENTS.md)。
+Every implementation change should update its matching `AIREVIEW-PLAN-xxx`, test evidence, and `.learnings/` entry. Run tests appropriate to the change before submitting; frontend changes must also rebuild the embedded static assets. See [AGENTS.md](AGENTS.md) for the detailed rules.
