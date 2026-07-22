@@ -8,6 +8,7 @@ import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
@@ -56,6 +57,54 @@ public class InitialReviewProgressService {
             boolean newlyCompleted = !isCompleted(review, actorRole);
             review.completeInitialReview(actorRole);
             return afterRoleCompleted(review, actorRole, newlyCompleted, publicSummary);
+        }
+    }
+
+    /**
+     * Converts a normally terminated role run without its mandatory completion command into an
+     * explicit, retryable review failure. It never fabricates role completion or removes facts
+     * committed before the run ended.
+     */
+    public boolean failIncompleteRole(Review review, RoleType actorRole, String failureReason) {
+        return failIncompleteRole(review, review.attemptNo(), actorRole, failureReason);
+    }
+
+    /**
+     * Same as {@link #failIncompleteRole(Review, RoleType, String)}, scoped to the attempt that
+     * owned the role stream. A late stream from an earlier attempt must not fail a retried review.
+     */
+    public boolean failIncompleteRole(
+            Review review, int expectedAttemptNo, RoleType actorRole, String failureReason) {
+        return failIncompleteRole(review, expectedAttemptNo, actorRole, failureReason, () -> false);
+    }
+
+    /**
+     * Fails an incomplete role only when cancellation has not won the same aggregate lock.
+     */
+    public boolean failIncompleteRole(
+            Review review,
+            int expectedAttemptNo,
+            RoleType actorRole,
+            String failureReason,
+            BooleanSupplier cancellationRequested) {
+        synchronized (review) {
+            Objects.requireNonNull(review, "review must not be null");
+            Objects.requireNonNull(actorRole, "actorRole must not be null");
+            requireText(failureReason, "failureReason");
+            Objects.requireNonNull(cancellationRequested, "cancellationRequested must not be null");
+            if (cancellationRequested.getAsBoolean() || review.attemptNo() != expectedAttemptNo
+                    || review.stage() != ReviewStage.INITIAL_REVIEW || isCompleted(review, actorRole)) {
+                return false;
+            }
+            requireActiveInitialReviewer(review, actorRole);
+            review.transitionTo(stateMachine, ReviewStage.FAILED);
+            eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                    review, ReviewEventType.ROLE_FAILED, actorRole, null, null, null, null,
+                    null, null, Map.of("reason", failureReason, "failureCode", "ROLE_INCOMPLETE")));
+            eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                    review, ReviewEventType.REVIEW_FAILED, RoleType.DIRECTOR, null, null, null, null,
+                    null, null, Map.of("failureType", "ROLE_INCOMPLETE", "role", actorRole.name())));
+            return true;
         }
     }
 

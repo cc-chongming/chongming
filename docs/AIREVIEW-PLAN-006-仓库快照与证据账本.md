@@ -23,6 +23,7 @@ Agent 需要读取代码并给出绝对路径和单行号，但不得执行仓�
 - 已使用无 shell 的受限 `git -C` 子进程记录 HEAD、branch、dirty 与 manifestHash，并禁用 Git 锁和交互提示。
 - 已将 dirty/clean 工作树复制至 `reviews/{reviewId}/snapshot/repository`，同时生成 NDJSON 文件清单和 JSON 摘要；源仓库不写锁或临时文件。
 - 快照目录固定 `reviews/{reviewId}/snapshot/repository`，保存 snapshot metadata。
+- 若进程中断留下没有 `repository/` 或 `snapshot-manifest.json` 的未发布目录，服务仅删除该 review 的不完整 `snapshot` 目录并重新捕获；已发布快照或清单解析失败的目录绝不自动删除。
 
 ### 1.3 文件清单与检索索引 ✅
 
@@ -88,7 +89,7 @@ Agent 需要读取代码并给出绝对路径和单行号，但不得执行仓�
 2. **步骤 2**：✅ 只读快照、manifest 与 Git metadata。
 3. **步骤 3**：✅ 受限检索、预算和协作取消。
 4. **步骤 4**：🟡 EvidenceBlock 哈希、内存去重与批量校验已完成；MyBatis 落库待评审执行链路接入。
-5. **步骤 5**：🟡 服务端工具 facade 已完成；AgentScope 注册待 PLAN-008，证据事件待 PLAN-010。
+5. **步骤 5**：🟡 服务端只读工具已注册到 Role Harness，且固定为服务端创建的仓库快照；`submitEvidence` 和证据事件仍待后续执行链路与 PLAN-010 完整接入。
 ## 4. 验证与退出标准
 
 - 白名单外、symlink/junction 逃逸、敏感文件和写操作全部被拒绝。
@@ -112,3 +113,4 @@ Agent 需要读取代码并给出绝对路径和单行号，但不得执行仓�
 | 2026-07-14 | 创建仓库边界、只读工具、快照、证据哈希与批量校验计划。 |
 | 2026-07-15 | 证据拒绝事件对齐技术方案：统一使用 `EVIDENCE_REJECTED`，不创建有效 Claim 或 DebateTurn。 |
 | 2026-07-16 | 完成仓库白名单与快照、受限检索、EvidenceBlock/内存账本及工具 facade；持久化、事件和 AgentScope 注册明确留待后续计划。 |
+| 2026-07-22 | 为中断后遗留的不完整仓库快照加入受控补偿重建；完整或元数据损坏的快照保持不删，避免破坏可审计产物。 |

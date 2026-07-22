@@ -4,6 +4,7 @@ import ai.cc.chongming.review.application.IntakeCancellation;
 import ai.cc.chongming.review.config.ReviewProperties;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot.RequirementDocument;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -17,9 +18,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.stream.Stream;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -89,6 +92,51 @@ public class RequirementSnapshotStore {
             throw new IllegalStateException("Failed to store immutable requirement snapshot", exception);
         } finally {
             deleteDirectoryQuietly(stagingDirectory);
+        }
+    }
+
+    /**
+     * Rehydrates an immutable requirement snapshot from the controlled workspace manifest.
+     *
+     * @author wangli
+     */
+    public RequirementSnapshot load(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        Path manifestPath = workspaceRoot
+                .resolve("reviews")
+                .resolve(reviewId.value().toString())
+                .resolve("attempt-" + attemptNo)
+                .resolve("input")
+                .resolve("snapshot-manifest.json")
+                .normalize();
+        verifyWorkspacePath(manifestPath);
+        if (!Files.isRegularFile(manifestPath)) {
+            throw new IllegalStateException("Requirement snapshot was not found for the active review attempt");
+        }
+        try {
+            SnapshotManifest manifest = OBJECT_MAPPER.readValue(manifestPath.toFile(), SnapshotManifest.class);
+            if (!reviewId.value().toString().equals(manifest.reviewId()) || attemptNo != manifest.attemptNo()) {
+                throw new IllegalStateException("Requirement snapshot identity does not match the active review attempt");
+            }
+            return new RequirementSnapshot(
+                    UUID.fromString(manifest.snapshotId()),
+                    reviewId,
+                    manifest.attemptNo(),
+                    manifest.submitter(),
+                    manifest.repositoryPath(),
+                    manifest.branch(),
+                    manifest.commit(),
+                    manifest.originalFilename(),
+                    manifest.sourceHash(),
+                    manifest.contentHash(),
+                    manifest.parserVersion(),
+                    manifest.document(),
+                    Instant.parse(manifest.createdAt()));
+        } catch (IOException | RuntimeException exception) {
+            throw new IllegalStateException("Requirement snapshot cannot be loaded", exception);
         }
     }
 

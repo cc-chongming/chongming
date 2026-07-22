@@ -64,6 +64,38 @@ class RepositorySnapshotServiceTests {
     }
 
     @Test
+    void reloadsTheSameFrozenSnapshotWithoutReadingTheHostRepositoryAgain() throws Exception {
+        Path repository = createGitRepository("reusable-snapshot-repository");
+        RepositorySnapshotService service = newService(repository);
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        RepositorySnapshot captured = service.snapshot(reviewId, "sample-repository", IntakeCancellation.neverCancelled());
+
+        Files.writeString(repository.resolve("src/App.java"), "class App { int changed; }\n", StandardCharsets.UTF_8);
+        RepositorySnapshot reloaded = service.findExistingSnapshot(reviewId, "sample-repository").orElseThrow();
+
+        assertThat(reloaded.repositoryId()).isEqualTo(captured.repositoryId());
+        assertThat(reloaded.manifestHash()).isEqualTo(captured.manifestHash());
+        assertThat(reloaded.snapshotRepositoryRoot().resolve("src/App.java")).hasContent("class App {}\n");
+    }
+
+    @Test
+    void replacesAnIncompleteSnapshotDirectoryBeforeCapturingTheRepository() throws Exception {
+        Path repository = createGitRepository("incomplete-snapshot-repository");
+        RepositorySnapshotService service = newService(repository);
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Path incompleteSnapshot = temporaryDirectory.resolve("workspace/reviews")
+                .resolve(reviewId.value().toString())
+                .resolve("snapshot");
+        Files.createDirectories(incompleteSnapshot);
+
+        RepositorySnapshot snapshot = service.snapshot(reviewId, "sample-repository", IntakeCancellation.neverCancelled());
+
+        assertThat(snapshot.snapshotRepositoryRoot()).isDirectory();
+        assertThat(snapshot.snapshotRepositoryRoot().getParent().resolve("snapshot-manifest.json")).isRegularFile();
+        assertThat(snapshot.snapshotRepositoryRoot().resolve("src/App.java")).hasContent("class App {}\n");
+    }
+
+    @Test
     void doesNotPublishSnapshotWhenCancelledBeforeCopying() throws Exception {
         Path repository = createGitRepository("cancelled-repository");
         RepositorySnapshotService service = newService(repository);

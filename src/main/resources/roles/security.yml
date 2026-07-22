@@ -18,4 +18,4 @@ allowedTools:
 outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
-maxIterations: 4
+maxIterations: 8

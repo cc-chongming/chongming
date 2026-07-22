@@ -4,6 +4,8 @@
 > **创建日期**: 2026-07-14
 > **目标**: 实现 ReviewDirectorHarness 上帝主持人，在 ProtocolGuard 边界内强计划驱动、动态激活并协调持久角色子 Agent。
 > **前置计划**: PLAN-004、PLAN-006、PLAN-007；PLAN-003 已冻结
+> **关联计划**: PLAN-015 负责共享仓库快照与 review 引用；Harness 只解析受控引用后的共享只读视图。
+> **关联计划**: PLAN-016 已关闭通用 WorkspaceContext 注入，将核心/按需/Judge 角色预算调整为 10/8/4，并把未调用 `complete_initial_review` 的正常结束转换为 `ROLE_INCOMPLETE` 领域失败；运行迭代统计仍待后续补齐。
 
 ## 0. 背景与边界
 
@@ -66,7 +68,7 @@
 
 - `ReviewRuntimeContext` 以 reviewId、attempt、userId、traceId、取消令牌推导全部 director/role label 与 sessionId；禁止调用方伪造身份。
 - `ReviewWorkspaceLayout` 固化 review/attempt/角色私有目录，公开协作 artifact 仅写入 schemaVersion、SHA-256 和公开载荷，不能替代领域状态。
-- Director 与角色 Harness 显式关闭 shell、文件系统、memory、动态 skill/subagent；AgentScope 内置 `plan_*`、`todo_write` 仅用于受控计划过程，其余 ToolSchema 须命中 RolePack 白名单。
+- Director 与角色 Harness 显式关闭 shell、文件系统、memory、动态 skill/subagent；Director 启用 AgentScope Plan Mode，并以 `BYPASS` 跳过无人值守场景中的 `plan_exit` 人工确认，但上述高风险能力仍由显式 DENY 规则禁止；`plan_*`、`todo_write` 仅用于受控计划过程，其余 ToolSchema 须命中 RolePack 白名单。
 - `ReviewOrchestrationService` 生成可版本化总计划与修订计划，先启动四个核心角色；动态角色必须由 `RoleActivationService + ReviewProtocolGuard` 批准后才创建运行时。
 - `AgentScopeReviewRuntimeAdapter` 对单 review 强制一个活动 director；取消会中断全部已注册 agent 并释放下一 attempt 的本进程锁；取消后的 runtime 不能恢复。`ReviewRecoveryService` 以稳定 session/label 重建运行时句柄而不重放领域命令。
 - AgentScope 原始事件被收敛为不含私有 payload 的运行观测；正式业务事件、Claim、Debate 和 Gate 仍由 PLAN-009/010 的强类型命令和事件总线负责。
@@ -74,7 +76,7 @@
 本计划保留的集成项：
 
 - 数据库 lease/多实例抢占、启动扫描恢复、持久化业务事件由 PLAN-010 实现；当前 Adapter 的活动 director 互斥为单 JVM 保护。
-- `ReadOnlyRepositoryTools` 与 `EvidenceTools` 已在 PLAN-006 实现，但 Harness 运行时尚未携带不可变 `RepositorySnapshot`，因此未直接注册给 agent，避免在缺少服务端 snapshot scope 时暴露工具。与 Claim/Debate 强类型工具一起在 PLAN-009 集成。
+- 已接入：Role Harness 按其 RolePack 白名单注册 `listFiles`、`searchText`、`findSymbol`、`readLines` 和 `getFileMetadata`。工具工厂从当前 review attempt 的需求快照解析受配置白名单保护的仓库标识，创建或安全复用不可变 `RepositorySnapshot` 后再绑定给角色；模型无法提交宿主机路径、仓库标识或快照路径。`submitEvidence` 仍未接入运行时。
 - 已接入：角色 Harness 会注册仅绑定当前 review/attempt/role 的 `submit_claim`、`complete_initial_review` 以及辩论工具；Director Harness 注册开题、闭题、第二轮和进入裁决工具；Judge 预注册但在 `JUDGING` 前保持待命。ToolSchema 会下传模型兼容网关，模型 Tool Call 回到 AgentScope 后由服务端重新绑定 identity、version 与幂等键。四个核心角色完成后自动进入 `CONFLICT_DETECTION` 并发布正式事件。
 - 已接入：`ReviewWorkflowDispatcher` 只在正式业务事件提交后，按单个 review 的串行队列唤醒 Director、对应核心角色或 Judge；取消和失败会释放该进程内队列。它不是持久化恢复队列，进程重启后的续跑仍依赖 PLAN-010 的数据库恢复能力。
 - 当前边界：`open_debate_topic` 首次开题即进入第一轮，单个 attempt 当前只支持一个活跃辩题；多个冲突的批量编排尚未落地。角色超时降级、仓库只读/证据工具和生产模型 smoke test 仍依赖后续真实 snapshot 与模型配置。
@@ -146,3 +148,5 @@ eview/config/ReviewProtocolConfiguration.java | ✅ | 将纯领域状态机与�
 | 2026-07-14 | 创建 Harness、两级计划、持久子 Agent、动态激活与恢复计划。 |
 | 2026-07-16 | 实现 Harness 主持人、角色隔离、计划/激活编排、取消/恢复适配和原始事件观测；记录 PLAN-009/010 依赖的集成项。 |
 | 2026-07-20 | 接入首轮、辩论、Judge/Gate 的受限运行时工具，以及按正式领域事件串行唤醒角色的进程内调度；明确单辩题和非持久化恢复边界。 |
+| 2026-07-22 | 将受限本地仓库读取工具接入 Role Harness；所有读取均固定到服务端创建的 review 快照，Evidence 提交保持未接入。 |
+| 2026-07-22 | Director 启用 Plan Mode 并以 `BYPASS` 自动通过无人值守计划退出；shell、文件系统与动态子代理继续显式拒绝。 |

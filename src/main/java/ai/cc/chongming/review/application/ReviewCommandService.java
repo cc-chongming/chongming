@@ -45,6 +45,8 @@ public class ReviewCommandService {
     private final ReviewStateMachine stateMachine;
     private final ReviewEventPublisher eventPublisher;
     private final ReviewDiagnosticsProperties diagnosticsProperties;
+    private final ReviewIntakeService intakeService;
+    private final RepositorySnapshotService snapshotService;
 
     public ReviewCommandService(
             ReviewRegistry reviewRegistry,
@@ -53,7 +55,7 @@ public class ReviewCommandService {
             ReviewStateMachine stateMachine,
             ReviewEventPublisher eventPublisher) {
         this(reviewRegistry, lifecycleService, orchestrationService, stateMachine, eventPublisher,
-                new ReviewDiagnosticsProperties(false));
+                new ReviewDiagnosticsProperties(false), null, null);
     }
 
     @Autowired
@@ -63,13 +65,17 @@ public class ReviewCommandService {
             ReviewOrchestrationService orchestrationService,
             ReviewStateMachine stateMachine,
             ReviewEventPublisher eventPublisher,
-            ReviewDiagnosticsProperties diagnosticsProperties) {
+            ReviewDiagnosticsProperties diagnosticsProperties,
+            ReviewIntakeService intakeService,
+            RepositorySnapshotService snapshotService) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.lifecycleService = Objects.requireNonNull(lifecycleService, "lifecycleService must not be null");
         this.orchestrationService = Objects.requireNonNull(orchestrationService, "orchestrationService must not be null");
         this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.diagnosticsProperties = Objects.requireNonNull(diagnosticsProperties, "diagnosticsProperties must not be null");
+        this.intakeService = intakeService;
+        this.snapshotService = snapshotService;
     }
 
     /**
@@ -129,14 +135,27 @@ public class ReviewCommandService {
     }
 
     private void launch(Review review, ReviewRuntimeContext context, StartReviewCommand command) {
-        Mono.defer(() -> orchestrationService.start(new ReviewOrchestrationService.StartRequest(
+        Mono.defer(() -> {
+            bindRepositorySnapshot(context);
+            return orchestrationService.start(new ReviewOrchestrationService.StartRequest(
                         review,
                         context,
                         command.publicTasks(),
                         command.changeReason(),
-                        command.initialMessage())))
+                        command.initialMessage()));
+                })
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(ignored -> { }, failure -> recordStartupFailure(review, failure));
+    }
+
+    private void bindRepositorySnapshot(ReviewRuntimeContext context) {
+        if (intakeService == null || snapshotService == null) {
+            return;
+        }
+        var requirementSnapshot = intakeService.requireSnapshot(context.reviewId(), context.attemptNo());
+        snapshotService.bindSnapshot(
+                context.reviewId(), context.attemptNo(), requirementSnapshot.repositoryPath(),
+                requirementSnapshot.contentHash(), context.cancellation());
     }
 
     private void recordStartupFailure(Review review, Throwable failure) {

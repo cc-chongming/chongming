@@ -54,6 +54,60 @@ class InitialReviewProgressServiceTests {
         assertThat(replay.stage()).isEqualTo(ReviewStage.CONFLICT_DETECTION);
     }
 
+    @Test
+    void failsInitialReviewWhenAnActivatedRoleEndsWithoutExplicitCompletion() {
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.INITIAL_REVIEW, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", false)), java.util.Map.of());
+        List<ReviewEventDraft> events = new ArrayList<>();
+        InitialReviewProgressService service = new InitialReviewProgressService(
+                new ReviewProtocolGuard(), new ReviewStateMachine(), events::add);
+
+        boolean failed = service.failIncompleteRole(
+                review, RoleType.PRODUCT, "The role ended without calling complete_initial_review.");
+
+        assertThat(failed).isTrue();
+        assertThat(review.stage()).isEqualTo(ReviewStage.FAILED);
+        assertThat(review.roleActivations()).singleElement().satisfies(activation ->
+                assertThat(activation.initialReviewCompleted()).isFalse());
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .containsExactly(ReviewEventType.ROLE_FAILED, ReviewEventType.REVIEW_FAILED);
+    }
+
+    @Test
+    void doesNotFailRoleThatAlreadyCompletedItsInitialReview() {
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.INITIAL_REVIEW, 1, 0,
+                List.of(
+                        new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.PROJECT, "project", false)),
+                java.util.Map.of());
+        List<ReviewEventDraft> events = new ArrayList<>();
+        InitialReviewProgressService service = new InitialReviewProgressService(
+                new ReviewProtocolGuard(), new ReviewStateMachine(), events::add);
+
+        boolean failed = service.failIncompleteRole(
+                review, RoleType.PRODUCT, "The role ended without calling complete_initial_review.");
+
+        assertThat(failed).isFalse();
+        assertThat(review.stage()).isEqualTo(ReviewStage.INITIAL_REVIEW);
+        assertThat(events).isEmpty();
+    }
+
+    @Test
+    void doesNotFailNewAttemptFromLatePreviousAttemptRoleStream() {
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.INITIAL_REVIEW, 2, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", false)), java.util.Map.of());
+        List<ReviewEventDraft> events = new ArrayList<>();
+        InitialReviewProgressService service = new InitialReviewProgressService(
+                new ReviewProtocolGuard(), new ReviewStateMachine(), events::add);
+
+        boolean failed = service.failIncompleteRole(
+                review, 1, RoleType.PRODUCT, "The role ended without calling complete_initial_review.");
+
+        assertThat(failed).isFalse();
+        assertThat(review.stage()).isEqualTo(ReviewStage.INITIAL_REVIEW);
+        assertThat(events).isEmpty();
+    }
+
     private void complete(InitialReviewProgressService service, Review review, RoleType roleType, String key) {
         service.completeWithoutClaim(review,
                 new ReviewCommandMetadata(review.id(), review.version(), new IdempotencyKey(key)), roleType,

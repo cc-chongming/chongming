@@ -77,16 +77,18 @@ public class ReviewDirectorHarnessFactory {
                 .maxIters(12)
                 .toolkit(toolkit)
                 .enableTaskList()
+                .enablePlanMode()
                 .disableFilesystemTools()
                 .disableShellTool()
                 .disableMemoryTools()
                 .disableMemoryHooks()
+                .disableWorkspaceContext()
                 .disableSubagents()
                 .disableDynamicSubagents()
                 .disableDynamicSkills()
                 .disableDefaultWorkspaceSkills()
                 .skillsEnabled(false)
-                .permissionContext(readOnlyPermissionContext());
+                .permissionContext(bypassPermissionContext());
         DistributedStore store = distributedStoreProvider.getIfAvailable();
         if (store != null) {
             builder.distributedStore(store);
@@ -97,9 +99,9 @@ public class ReviewDirectorHarnessFactory {
         return new DirectorRuntime(runtimeContext, workspace, builder.build());
     }
 
-    private PermissionContextState readOnlyPermissionContext() {
+    private PermissionContextState bypassPermissionContext() {
         return PermissionContextState.builder()
-                .mode(PermissionMode.EXPLORE)
+                .mode(PermissionMode.BYPASS)
                 .addDenyRule("shell", new PermissionRule("shell", "*", PermissionBehavior.DENY, "review-director-policy"))
                 .addDenyRule("filesystem", new PermissionRule(
                         "filesystem", "*", PermissionBehavior.DENY, "review-director-policy"))
@@ -109,11 +111,13 @@ public class ReviewDirectorHarnessFactory {
     }
 
     private String directorPrompt() {
-        return "You are ReviewDirectorHarness. Create and revise public review plans, then request only "
+        return "You are ReviewDirectorHarness. Create and revise public review plans with plan_enter, plan_write, "
+                + "and plan_exit, then request only "
                 + "server-authorized role activation. You do not decide final Gate results, bypass ReviewProtocolGuard, "
                 + "read arbitrary files, run shell commands, access private role sessions, reveal hidden reasoning, "
                 + "or create agents directly. When woken after a committed event, advance only through the registered debate stage tools. "
-                + "All business facts must be submitted through strongly typed server tools.";
+                + "All business facts must be submitted through strongly typed server tools. "
+                + "Use Simplified Chinese for every visible response, plan, tool summary, and final text.";
     }
 
     /**

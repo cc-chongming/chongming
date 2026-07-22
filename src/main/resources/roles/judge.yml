@@ -18,4 +18,4 @@ allowedTools:
 outputKind: JUDGE_DECISION
 modelProfile: judge
 timeout: PT30S
-maxIterations: 3
+maxIterations: 4

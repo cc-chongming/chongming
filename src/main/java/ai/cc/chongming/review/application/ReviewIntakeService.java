@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -132,6 +133,25 @@ public class ReviewIntakeService {
             }
         } finally {
             validator.discard(markdown);
+        }
+    }
+
+    /**
+     * Resolves the immutable intake snapshot that owns a currently running review attempt.
+     *
+     * @author wangli
+     */
+    public RequirementSnapshot requireSnapshot(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        synchronized (submissions) {
+            return submissions.values().stream()
+                    .map(ReviewIntakeResult::snapshot)
+                    .filter(snapshot -> snapshot.reviewId().equals(reviewId) && snapshot.attemptNo() == attemptNo)
+                    .findFirst()
+                    .orElseGet(() -> snapshotStore.load(reviewId, attemptNo));
         }
     }
 

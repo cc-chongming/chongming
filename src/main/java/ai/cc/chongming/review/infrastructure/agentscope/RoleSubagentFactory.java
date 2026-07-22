@@ -32,13 +32,25 @@ public class RoleSubagentFactory {
     private final ReviewWorkspaceLayout workspaceLayout;
     private final ReviewRoleToolFactory reviewRoleToolFactory;
     private final ReviewDebateToolFactory reviewDebateToolFactory;
+    private final ReviewRepositoryToolFactory reviewRepositoryToolFactory;
 
     public RoleSubagentFactory(
             RolePackRegistry rolePackRegistry,
             ModelGateway modelGateway,
             AgentScopeProperties agentScopeProperties,
             ReviewWorkspaceLayout workspaceLayout) {
-        this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, null, null);
+        this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, null, null, null);
+    }
+
+    public RoleSubagentFactory(
+            RolePackRegistry rolePackRegistry,
+            ModelGateway modelGateway,
+            AgentScopeProperties agentScopeProperties,
+            ReviewWorkspaceLayout workspaceLayout,
+            ReviewRoleToolFactory reviewRoleToolFactory,
+            ReviewDebateToolFactory reviewDebateToolFactory) {
+        this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, reviewRoleToolFactory,
+                reviewDebateToolFactory, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -48,13 +60,15 @@ public class RoleSubagentFactory {
             AgentScopeProperties agentScopeProperties,
             ReviewWorkspaceLayout workspaceLayout,
             ReviewRoleToolFactory reviewRoleToolFactory,
-            ReviewDebateToolFactory reviewDebateToolFactory) {
+            ReviewDebateToolFactory reviewDebateToolFactory,
+            ReviewRepositoryToolFactory reviewRepositoryToolFactory) {
         this.rolePackRegistry = Objects.requireNonNull(rolePackRegistry, "rolePackRegistry must not be null");
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
         this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
         this.reviewRoleToolFactory = reviewRoleToolFactory;
         this.reviewDebateToolFactory = reviewDebateToolFactory;
+        this.reviewRepositoryToolFactory = reviewRepositoryToolFactory;
     }
 
     /**
@@ -70,7 +84,7 @@ public class RoleSubagentFactory {
         RolePack rolePack = rolePackRegistry.require(roleType);
         Path roleWorkspace = workspaceLayout.roleWorkspace(workspace, roleType);
         String prompt = rolePrompt(rolePack);
-        Toolkit toolkit = reviewToolkit(runtimeContext, roleType);
+        Toolkit toolkit = reviewToolkit(runtimeContext, roleType, rolePack.allowedTools());
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(runtimeContext.roleLabel(roleType))
                 .agentId(runtimeContext.roleLabel(roleType))
@@ -91,6 +105,7 @@ public class RoleSubagentFactory {
                 .disableShellTool()
                 .disableMemoryTools()
                 .disableMemoryHooks()
+                .disableWorkspaceContext()
                 .disableSubagents()
                 .disableDynamicSubagents()
                 .disableDynamicSkills()
@@ -122,18 +137,24 @@ public class RoleSubagentFactory {
         if (rolePack.roleType() == RoleType.JUDGE) {
             return "You are the JUDGE role. Remain idle until the server sends a JUDGING-stage instruction. "
                     + "Then use only submit_judgement and draft_gate over persisted public facts. "
-                    + "Never create Claims, Evidence, or a final human Gate.";
+                    + "Never create Claims, Evidence, or a final human Gate. "
+                    + "Use Simplified Chinese for every visible response, judgement summary, tool summary, and final text.";
         }
         return "You are the " + rolePack.roleType().name() + " review role. "
                 + rolePack.description()
                 + " Work only from the supplied public context and server-authorized tool results. "
-                + " Do not access files, shell commands, other role sessions, hidden reasoning, credentials, or final Gate authority. "
+                + " Read repository files only through server-authorized snapshot tools; never access host files, shell commands, "
+                + "other role sessions, hidden reasoning, credentials, or final Gate authority. "
+                + " First call listFiles only when you need a repository map, then use targeted searchText, readLines, or findSymbol "
+                + "for concrete files and symbols. Do not probe directories or read repository documents outside the assigned review. "
                 + " Submit every finding with submit_claim, then always call complete_initial_review, including when there are no findings. "
                 + " Do not treat final text as a substitute for either tool. Return public "
-                + rolePack.outputKind().name() + " JSON compatible output using prompt version " + rolePack.promptVersion() + ".";
+                + rolePack.outputKind().name() + " JSON compatible output using prompt version " + rolePack.promptVersion() + ". "
+                + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.";
     }
 
-    private Toolkit reviewToolkit(ReviewRuntimeContext runtimeContext, RoleType roleType) {
+    private Toolkit reviewToolkit(
+            ReviewRuntimeContext runtimeContext, RoleType roleType, java.util.Set<String> allowedToolNames) {
         Toolkit toolkit = new Toolkit();
         List<io.agentscope.core.tool.AgentTool> tools = new ArrayList<>();
         if (roleType != RoleType.JUDGE && reviewRoleToolFactory != null) {
@@ -143,6 +164,9 @@ public class RoleSubagentFactory {
             tools.addAll(roleType == RoleType.JUDGE
                     ? reviewDebateToolFactory.judgeTools(runtimeContext)
                     : reviewDebateToolFactory.roleTools(runtimeContext, roleType));
+        }
+        if (reviewRepositoryToolFactory != null && roleType != RoleType.JUDGE) {
+            tools.addAll(reviewRepositoryToolFactory.readTools(runtimeContext, roleType, allowedToolNames));
         }
         tools.forEach(toolkit::registerAgentTool);
         return toolkit;

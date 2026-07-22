@@ -42,6 +42,7 @@ The project draws from two production-oriented open-source directions: AgentScop
 | Markdown intake and review workbench | Ready for local integration | Create a review with `POST /api/reviews`; UI entry is `/review/` |
 | State machine, role authorization, idempotent commands | Implemented | Invalid stages, unauthorized roles, and replayed commands are rejected or safely replayed server-side |
 | OpenAI-compatible model gateway | Implemented | Per-role model profiles, timeouts/backoff, and Tool Calls; a real model ID is required |
+| Local repository reads | Connected to role Harness | Roles can list, search, and read bounded lines from a server-frozen, allow-listed repository snapshot; evidence submission is still pending |
 | Initial review | Connected to runtime | Four core roles submit Claims, then the flow reaches conflict detection |
 | Debate, Judge, and Gate draft | Connected to runtime | Director, roles, and Judge use restricted tools; one attempt currently supports one active debate topic |
 | Domain events and SSE | Implemented | Sequenced events, historical replay, heartbeat, and incremental reconnect are supported |

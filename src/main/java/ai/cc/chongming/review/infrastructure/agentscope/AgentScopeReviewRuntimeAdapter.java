@@ -1,9 +1,11 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.ReviewCancellationToken;
+import ai.cc.chongming.review.application.InitialReviewProgressService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.harness.agent.HarnessAgent;
@@ -28,6 +30,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     private final ReviewDirectorHarnessFactory directorFactory;
     private final RoleSubagentFactory roleSubagentFactory;
     private final AgentEventAdapter eventAdapter;
+    private final ReviewRegistry reviewRegistry;
+    private final InitialReviewProgressService initialReviewProgressService;
     private final ConcurrentMap<String, RuntimeState> runtimes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> activeRuntimeByReview = new ConcurrentHashMap<>();
 
@@ -35,9 +39,21 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ReviewDirectorHarnessFactory directorFactory,
             RoleSubagentFactory roleSubagentFactory,
             AgentEventAdapter eventAdapter) {
+        this(directorFactory, roleSubagentFactory, eventAdapter, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentScopeReviewRuntimeAdapter(
+            ReviewDirectorHarnessFactory directorFactory,
+            RoleSubagentFactory roleSubagentFactory,
+            AgentEventAdapter eventAdapter,
+            ReviewRegistry reviewRegistry,
+            InitialReviewProgressService initialReviewProgressService) {
         this.directorFactory = Objects.requireNonNull(directorFactory, "directorFactory must not be null");
         this.roleSubagentFactory = Objects.requireNonNull(roleSubagentFactory, "roleSubagentFactory must not be null");
         this.eventAdapter = Objects.requireNonNull(eventAdapter, "eventAdapter must not be null");
+        this.reviewRegistry = reviewRegistry;
+        this.initialReviewProgressService = initialReviewProgressService;
     }
 
     @Override
@@ -134,7 +150,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             if (state.cancelled()) {
                 return;
             }
-            state.cancellation().cancel();
+            markCancellation(state);
             try {
                 state.director().agent().interrupt();
                 state.roles().values().forEach(role -> role.agent().interrupt());
@@ -171,7 +187,41 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 .doOnNext(event -> emitRawObservation(state, event, roleType, agentId, sessionId, stage))
                 .doOnError(exception -> state.emit(AgentRuntimeEventType.FAILED, agentId, "agent-run-failed"))
                 .then()
+                .then(Mono.<Void>fromRunnable(() -> verifyInitialReviewCompletion(state, roleType)))
                 .doOnSuccess(ignored -> state.emit(AgentRuntimeEventType.MESSAGE_SENT, agentId, "completed"));
+    }
+
+    private void verifyInitialReviewCompletion(RuntimeState state, RoleType roleType) {
+        if (roleType == RoleType.DIRECTOR || roleType == RoleType.JUDGE
+                || state.cancelled() || reviewRegistry == null || initialReviewProgressService == null) {
+            return;
+        }
+        reviewRegistry.find(state.context().reviewId())
+                .ifPresent(review -> {
+                    if (state.cancelled()) {
+                        return;
+                    }
+                    if (initialReviewProgressService.failIncompleteRole(
+                            review, state.context().attemptNo(), roleType,
+                            "The role ended without calling complete_initial_review.", state::cancelled)) {
+                        throw new IllegalStateException("ROLE_INCOMPLETE: " + roleType.name()
+                                + " ended without complete_initial_review");
+                    }
+                });
+    }
+
+    private void markCancellation(RuntimeState state) {
+        if (reviewRegistry == null) {
+            state.cancellation().cancel();
+            return;
+        }
+        reviewRegistry.find(state.context().reviewId())
+                .filter(review -> review.attemptNo() == state.context().attemptNo())
+                .ifPresentOrElse(review -> {
+                    synchronized (review) {
+                        state.cancellation().cancel();
+                    }
+                }, () -> state.cancellation().cancel());
     }
 
     private RuntimeContext agentContext(ReviewRuntimeContext context, String sessionId) {

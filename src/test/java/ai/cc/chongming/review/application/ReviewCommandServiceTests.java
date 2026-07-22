@@ -5,10 +5,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.RequirementSnapshot;
+import ai.cc.chongming.review.domain.model.RepositorySnapshot;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
@@ -63,6 +66,40 @@ class ReviewCommandServiceTests {
         assertThat(replayed.replayed()).isTrue();
         assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
         verify(orchestrationService, timeout(1_000)).start(any());
+    }
+
+    @Test
+    void bindsTheRepositorySnapshotBeforeStartingTheHarnessWorkflow() {
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
+        RequirementSnapshot requirement = new RequirementSnapshot(
+                UUID.randomUUID(), reviewId, 1, "user-001", "approved-repository", null, null,
+                "requirement.md", "a".repeat(64), "b".repeat(64), "test",
+                new RequirementSnapshot.RequirementDocument(List.of(), List.of(), 0, 0, false), java.time.Instant.now());
+        RepositorySnapshot repositorySnapshot = new RepositorySnapshot(
+                UUID.randomUUID(), reviewId, "approved-repository", java.nio.file.Path.of("build/source"),
+                java.nio.file.Path.of("build/snapshot"), "c".repeat(40), "main", false,
+                "d".repeat(64), 1, java.time.Instant.now());
+        when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirement);
+        when(snapshotService.bindSnapshot(reviewId, 1, "approved-repository", requirement.contentHash(),
+                IntakeCancellation.neverCancelled())).thenReturn(repositorySnapshot);
+        when(orchestrationService.start(any())).thenReturn(Mono.never());
+        commandService = new ReviewCommandService(
+                reviewRegistry,
+                new ReviewLifecycleService(new InMemoryReviewDebateStore(), stateMachine, eventService),
+                orchestrationService,
+                stateMachine,
+                eventService,
+                new ai.cc.chongming.review.config.ReviewDiagnosticsProperties(false),
+                intakeService,
+                snapshotService);
+
+        commandService.start(reviewId, startCommand(0L, "start-bind-001"));
+
+        var order = inOrder(snapshotService, orchestrationService);
+        order.verify(snapshotService, timeout(1_000)).bindSnapshot(
+                reviewId, 1, "approved-repository", requirement.contentHash(), IntakeCancellation.neverCancelled());
+        order.verify(orchestrationService, timeout(1_000)).start(any());
     }
 
     @Test
