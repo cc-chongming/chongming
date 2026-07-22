@@ -6,6 +6,23 @@
 
 Chongming accepts a Markdown requirement and a controlled local-repository reference. Product, project, frontend, and backend roles independently submit Claims; conflicts enter constrained debate; a Judge produces a Gate draft; a human makes the final decision.
 
+## Origin of the name
+
+The name comes from the Chongming bird (重明鸟) in *Shi Yi Ji* (*Records of Gleaned Relics*) by Jin-dynasty writer Wang Jia. Tradition describes the bird as having double pupils in both eyes, with a gaze bright enough to see through disguises and drive away evil. The text also calls it **Shuangjing** (双睛, “double-pupilled”), describing it as driving away beasts and harmful evils; its image at a doorway signifies keeping out what should not enter.
+
+That is a project metaphor, not a claim about mythology as system design:
+
+| Chongming image | Meaning in this project |
+|---|---|
+| Double pupils | The same requirement is examined through multiple independent professional lenses, rather than by a single model answer |
+| Seeing through disguise | Claims must be challenged by evidence, counterarguments, and protocol checks; plausible wording is not enough |
+| Keeping harm from the doorway | A Gate sits before implementation: unresolved risk is surfaced for human review instead of silently passing downstream |
+| A bird, not a judge | Chongming illuminates disagreement. It does not replace the accountable human who makes the final Gate decision |
+
+This is why the project motto is **“See through ambiguity. Build consensus with evidence.”** Four core roles—product, project, frontend, and backend—form the initial set of perspectives. Optional architecture, test, and security roles can be activated when the review needs them. Their task is not to manufacture agreement; it is to make the disagreement, evidence, and decision path visible.
+
+The source text is available in [*Shi Yi Ji*: “the Chongming bird”](https://www.shidianguji.com/mid-page/7595700568979554313). The mapping above is Chongming’s product interpretation.
+
 ## Why it is not a multi-agent chat demo
 
 | Typical agent demo | Chongming constraint |
