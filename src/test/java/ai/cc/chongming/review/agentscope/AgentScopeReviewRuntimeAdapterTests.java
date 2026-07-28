@@ -153,7 +153,7 @@ class AgentScopeReviewRuntimeAdapterTests {
         assertThat(captured.get().publicContext())
                 .doesNotContain("AgentStateStore", "Domain Knowledge", "Memory Recall", "Workspace Context");
         assertThat(captured.get().allowedTools())
-                .contains("plan_enter", "plan_write", "plan_exit", "todo_write");
+                .contains("plan_enter", "plan_write", "plan_exit", "todo_write", "read_file", "list_files", "write_file");
     }
 
     @Test

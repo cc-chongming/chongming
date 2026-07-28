@@ -64,6 +64,11 @@
 			<version>${agentscope.version}</version>
 		</dependency>
 		<dependency>
+			<groupId>io.agentscope</groupId>
+			<artifactId>agentscope-extensions-agui</artifactId>
+			<version>${agentscope.version}</version>
+		</dependency>
+		<dependency>
 			<groupId>com.mysql</groupId>
 			<artifactId>mysql-connector-j</artifactId>
 			<scope>runtime</scope>

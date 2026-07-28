@@ -6,6 +6,8 @@ promptVersion: security-v1
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
+  - scout-overview
+  - role-scope
 checklist:
   - Check trust boundaries and authorization.
   - Check sensitive data and injection exposure.
@@ -14,8 +16,7 @@ allowedTools:
   - searchText
   - readLines
   - getFileMetadata
-  - submitEvidence
 outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
-maxIterations: 8
+maxIterations: 20

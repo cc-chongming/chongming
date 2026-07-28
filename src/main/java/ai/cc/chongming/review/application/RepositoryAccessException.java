@@ -37,6 +37,7 @@ public class RepositoryAccessException extends RuntimeException {
         REPOSITORY_NOT_GIT,
         GIT_METADATA_UNAVAILABLE,
         SYMLINK_NOT_ALLOWED,
+        REPOSITORY_READ_BUDGET_EXHAUSTED,
         SNAPSHOT_ALREADY_EXISTS,
         SNAPSHOT_FAILED
     }

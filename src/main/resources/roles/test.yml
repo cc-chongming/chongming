@@ -6,6 +6,8 @@ promptVersion: testing-v1
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
+  - scout-overview
+  - role-scope
 checklist:
   - Check happy-path and boundary coverage.
   - Check regression and observability expectations.
@@ -13,8 +15,7 @@ allowedTools:
   - listFiles
   - searchText
   - readLines
-  - submitEvidence
 outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
-maxIterations: 8
+maxIterations: 20

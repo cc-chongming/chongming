@@ -4,6 +4,7 @@ import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
 import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionMode;
@@ -31,13 +32,23 @@ public class ReviewDirectorHarnessFactory {
     private final AgentScopeProperties agentScopeProperties;
     private final ObjectProvider<DistributedStore> distributedStoreProvider;
     private final ReviewDebateToolFactory reviewDebateToolFactory;
+    private final RequirementSnapshotStore requirementSnapshotStore;
 
     public ReviewDirectorHarnessFactory(
             ReviewWorkspaceLayout workspaceLayout,
             ModelGateway modelGateway,
             AgentScopeProperties agentScopeProperties,
             ObjectProvider<DistributedStore> distributedStoreProvider) {
-        this(workspaceLayout, modelGateway, agentScopeProperties, distributedStoreProvider, null);
+        this(workspaceLayout, modelGateway, agentScopeProperties, distributedStoreProvider, null, null);
+    }
+
+    public ReviewDirectorHarnessFactory(
+            ReviewWorkspaceLayout workspaceLayout,
+            ModelGateway modelGateway,
+            AgentScopeProperties agentScopeProperties,
+            ObjectProvider<DistributedStore> distributedStoreProvider,
+            ReviewDebateToolFactory reviewDebateToolFactory) {
+        this(workspaceLayout, modelGateway, agentScopeProperties, distributedStoreProvider, reviewDebateToolFactory, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -46,12 +57,14 @@ public class ReviewDirectorHarnessFactory {
             ModelGateway modelGateway,
             AgentScopeProperties agentScopeProperties,
             ObjectProvider<DistributedStore> distributedStoreProvider,
-            ReviewDebateToolFactory reviewDebateToolFactory) {
+            ReviewDebateToolFactory reviewDebateToolFactory,
+            RequirementSnapshotStore requirementSnapshotStore) {
         this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
         this.distributedStoreProvider = Objects.requireNonNull(distributedStoreProvider, "distributedStoreProvider must not be null");
         this.reviewDebateToolFactory = reviewDebateToolFactory;
+        this.requirementSnapshotStore = requirementSnapshotStore;
     }
 
     /**
@@ -60,6 +73,10 @@ public class ReviewDirectorHarnessFactory {
     public DirectorRuntime create(ReviewRuntimeContext runtimeContext) {
         Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
         ReviewWorkspaceLayout.ReviewWorkspace workspace = workspaceLayout.open(runtimeContext);
+        if (requirementSnapshotStore != null) {
+            requirementSnapshotStore.materializeForAgentWorkspace(
+                    runtimeContext.reviewId(), runtimeContext.attemptNo(), workspace.attempt(), runtimeContext.cancellation());
+        }
         String prompt = directorPrompt();
         List<AgentTool> debateTools = reviewDebateToolFactory == null ? List.of() : reviewDebateToolFactory.directorTools(runtimeContext);
         Toolkit toolkit = new Toolkit();
@@ -74,11 +91,10 @@ public class ReviewDirectorHarnessFactory {
                         modelGateway, runtimeContext, RoleType.DIRECTOR, "director", prompt,
                         debateTools.stream().map(AgentTool::getName).collect(java.util.stream.Collectors.toSet())))
                 .sysPrompt(prompt)
-                .maxIters(12)
+                .maxIters(agentScopeProperties.directorMaxIterations())
                 .toolkit(toolkit)
                 .enableTaskList()
                 .enablePlanMode()
-                .disableFilesystemTools()
                 .disableShellTool()
                 .disableMemoryTools()
                 .disableMemoryHooks()
@@ -103,8 +119,6 @@ public class ReviewDirectorHarnessFactory {
         return PermissionContextState.builder()
                 .mode(PermissionMode.BYPASS)
                 .addDenyRule("shell", new PermissionRule("shell", "*", PermissionBehavior.DENY, "review-director-policy"))
-                .addDenyRule("filesystem", new PermissionRule(
-                        "filesystem", "*", PermissionBehavior.DENY, "review-director-policy"))
                 .addDenyRule("agent_spawn", new PermissionRule(
                         "agent_spawn", "*", PermissionBehavior.DENY, "review-director-policy"))
                 .build();
@@ -114,8 +128,10 @@ public class ReviewDirectorHarnessFactory {
         return "You are ReviewDirectorHarness. Create and revise public review plans with plan_enter, plan_write, "
                 + "and plan_exit, then request only "
                 + "server-authorized role activation. You do not decide final Gate results, bypass ReviewProtocolGuard, "
-                + "read arbitrary files, run shell commands, access private role sessions, reveal hidden reasoning, "
+                + "read outside the current attempt workspace, run shell commands, access private role sessions, reveal hidden reasoning, "
                 + "or create agents directly. When woken after a committed event, advance only through the registered debate stage tools. "
+                + "The current attempt workspace is the only filesystem root you may operate. Its input/requirement.md "
+                + "is a mutable working copy of the uploaded requirement, and plans/ is available for planning artifacts. "
                 + "All business facts must be submitted through strongly typed server tools. "
                 + "Use Simplified Chinese for every visible response, plan, tool summary, and final text.";
     }

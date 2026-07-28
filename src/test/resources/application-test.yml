@@ -7,6 +7,7 @@ review:
     state-home: ${java.io.tmpdir}/chongming-test-state
   model-gateway:
     enabled: false
+    model-name: test-model
     api-key: test-key
 
 spring:

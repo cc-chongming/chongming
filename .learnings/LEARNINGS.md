@@ -366,3 +366,26 @@ When adding framework-managed components with test-specific constructors, mark t
 - Tags: spring, constructor-injection, jackson, model-gateway, testing
 
 ---
+
+## [LRN-20260722-001] architecture
+
+**Logged**: 2026-07-22T17:12:00+08:00
+**Priority**: medium
+**Status**: active
+**Area**: review-observability
+
+### Summary
+
+AG-UI execution observation must be published as a side branch of the existing `HarnessAgent.streamEvents` subscription. Starting an `AguiAgentAdapter` separately would invoke the model twice and make the page trace diverge from the real review.
+
+### Suggested Action
+
+Keep durable domain SSE and bounded runtime AG-UI SSE as separate endpoints. Keep trace writes in-memory and make slow browser delivery occur outside the trace-buffer lock.
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-017 implementation
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java, src/main/java/ai/cc/chongming/review/application/ReviewRuntimeTraceRegistry.java
+- Tags: ag-ui, harness, sse, observability
+
+---

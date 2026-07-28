@@ -31,8 +31,17 @@ class ReviewPropertiesTests {
                     assertThat(reviewProperties.workspaceRoot()).isEqualTo(".agentscope/workspace");
                     assertThat(reviewProperties.maxAgents()).isEqualTo(8);
                     assertThat(agentScopeProperties.persistSession()).isTrue();
+                    assertThat(agentScopeProperties.directorMaxIterations()).isEqualTo(48);
                     assertThat(modelGatewayProperties.enabled()).isFalse();
                 });
+    }
+
+    @Test
+    void overridesDirectorMaxIterations() {
+        contextRunner.withPropertyValues(baseProperties())
+                .withPropertyValues("review.agentscope.director-max-iterations=64")
+                .run(context -> assertThat(context.getBean(AgentScopeProperties.class).directorMaxIterations())
+                        .isEqualTo(64));
     }
 
     @Test

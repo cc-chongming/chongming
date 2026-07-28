@@ -25,6 +25,9 @@ review:
   agentscope:
     persist-session: true
     state-home: ${AGENTSCOPE_STATE_HOME:.agentscope/state}
+    # Director needs enough turns to inspect the requirement, produce a plan, and dispatch roles.
+    # Keep this bounded to prevent a malformed tool loop from keeping a review running forever.
+    director-max-iterations: ${REVIEW_AGENTSCOPE_DIRECTOR_MAX_ITERATIONS:48}
   model-gateway:
     enabled: ${REVIEW_MODEL_GATEWAY_ENABLED:false}
     base-url: ${REVIEW_MODEL_GATEWAY_BASE_URL:}
@@ -43,6 +46,15 @@ review:
         max-tokens: 2048
         retry:
           max-retries: 2
+          initial-backoff: PT0.2S
+      scout:
+        provider: openai-compatible
+        model-name: ${review.model-gateway.model-name:chongming-scout-placeholder}
+        temperature: 0.0
+        timeout: PT30S
+        max-tokens: 1024
+        retry:
+          max-retries: 1
           initial-backoff: PT0.2S
       role-reviewer:
         provider: openai-compatible

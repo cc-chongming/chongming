@@ -13,8 +13,6 @@ checklist:
 allowedTools:
   - submit_judgement
   - draft_gate
-  - loadReviewFacts
-  - loadDebateContext
 outputKind: JUDGE_DECISION
 modelProfile: judge
 timeout: PT30S

@@ -20,5 +20,13 @@ public interface AgentRuntimeAdapter {
 
     Mono<Void> cancel(String runtimeId);
 
+    /**
+     * Releases runtime-owned resources after a terminal review transition.
+     * Implementations must treat an unknown or already released runtime as a no-op.
+     */
+    default Mono<Void> close(String runtimeId) {
+        return Mono.empty();
+    }
+
     Mono<AgentRuntimeSession> resume(String runtimeId);
 }

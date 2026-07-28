@@ -52,6 +52,7 @@ h4 { margin: .35rem 0 .5rem; font-size: .95rem; }
 .inline-message { padding: .55rem .75rem; color: #155326; background: #ecf8ef; border: 1px solid #9fd5aa; border-radius: .35rem; }
 
 .workbench-header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; padding-bottom: 1.25rem; border-bottom: 1px solid #d8e1ee; }
+.workbench-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
 .workbench-header h1 { overflow-wrap: anywhere; font-size: clamp(1.25rem, 2.5vw, 1.7rem); }
 .connection { display: flex; align-items: center; gap: .35rem; margin-bottom: 0; color: #4a5d76; font-size: .9rem; }
 .connection span { color: #a26b08; font-size: .85rem; }
@@ -146,3 +147,19 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .ag-ui-message header { display: flex; justify-content: space-between; gap: .75rem; color: #40556f; font-size: .8rem; }
 .ag-ui-message header span { color: #64758a; }
 .ag-ui-message p { margin: .45rem 0 0; white-space: pre-wrap; line-height: 1.5; }
+.roundtable-panel { grid-column: 1 / -1; }
+.stage-rail { display: flex; flex-wrap: wrap; gap: .45rem; padding: 0; list-style: none; color: #40556f; font-size: .8rem; font-weight: 700; }
+.stage-rail li { padding: .35rem .55rem; background: #edf3fc; border-radius: 1rem; }
+.roundtable-layout { display: grid; grid-template-columns: minmax(13rem, .55fr) minmax(0, 1.45fr); gap: 1rem; margin-top: 1rem; }
+.roundtable-layout h3 { margin-top: 0; }
+.role-seat { display: grid; width: 100%; gap: .2rem; margin-bottom: .5rem; padding: .65rem; text-align: left; color: #243b5a; background: #f7f9fc; border: 1px solid #dce5f0; cursor: pointer; }
+.role-seat span, .director-narrative span { color: #5b6c83; font-size: .84rem; }
+.director-narrative ol { display: grid; gap: .55rem; padding: 0; list-style: none; }
+.director-narrative li { display: grid; gap: .2rem; padding: .65rem; border-left: 3px solid #4c82cf; background: #f8fbff; }
+.agent-trace-drawer { z-index: 25; }
+.agent-trace-embedded { position: static; width: auto; height: auto; min-height: 20rem; margin-top: 1.2rem; border: 1px solid #d8e1ee; box-shadow: 0 4px 18px rgba(28, 58, 94, .05); }
+.agent-trace-embedded .ag-ui-messages { max-height: 38rem; }
+.live-observatory-page { max-width: 88rem; margin: 0 auto; }
+.live-observatory-page .roundtable-panel { margin-top: 1.25rem; min-height: 34rem; }
+.live-observatory-note { margin: 1rem 0; color: #5b6c83; font-size: .85rem; }
+@media (max-width: 960px) { .roundtable-panel { grid-column: auto; } .roundtable-layout { grid-template-columns: 1fr; } }

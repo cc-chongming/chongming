@@ -51,8 +51,8 @@ public class NotificationOutboxService implements ReviewEventListener {
     private final ReviewEventPublisher eventPublisher;
     private final NotificationOutboxProperties properties;
     private final Clock clock;
+    private final ReviewOrchestrationService orchestrationService;
 
-    @Autowired
     public NotificationOutboxService(
             NotificationOutboxStore outboxStore,
             HumanGateDecisionStore decisionStore,
@@ -60,7 +60,7 @@ public class NotificationOutboxService implements ReviewEventListener {
             ReviewStateMachine stateMachine,
             @Lazy ReviewEventPublisher eventPublisher,
             NotificationOutboxProperties properties) {
-        this(outboxStore, decisionStore, reviewRegistry, stateMachine, eventPublisher, properties, Clock.systemUTC());
+        this(outboxStore, decisionStore, reviewRegistry, stateMachine, eventPublisher, properties, Clock.systemUTC(), null);
     }
 
     public NotificationOutboxService(
@@ -71,6 +71,30 @@ public class NotificationOutboxService implements ReviewEventListener {
             @Lazy ReviewEventPublisher eventPublisher,
             NotificationOutboxProperties properties,
             Clock clock) {
+        this(outboxStore, decisionStore, reviewRegistry, stateMachine, eventPublisher, properties, clock, null);
+    }
+
+    @Autowired
+    public NotificationOutboxService(
+            NotificationOutboxStore outboxStore,
+            HumanGateDecisionStore decisionStore,
+            ReviewRegistry reviewRegistry,
+            ReviewStateMachine stateMachine,
+            @Lazy ReviewEventPublisher eventPublisher,
+            NotificationOutboxProperties properties,
+            @Lazy ReviewOrchestrationService orchestrationService) {
+        this(outboxStore, decisionStore, reviewRegistry, stateMachine, eventPublisher, properties, Clock.systemUTC(), orchestrationService);
+    }
+
+    public NotificationOutboxService(
+            NotificationOutboxStore outboxStore,
+            HumanGateDecisionStore decisionStore,
+            ReviewRegistry reviewRegistry,
+            ReviewStateMachine stateMachine,
+            @Lazy ReviewEventPublisher eventPublisher,
+            NotificationOutboxProperties properties,
+            Clock clock,
+            ReviewOrchestrationService orchestrationService) {
         this.outboxStore = Objects.requireNonNull(outboxStore, "outboxStore must not be null");
         this.decisionStore = Objects.requireNonNull(decisionStore, "decisionStore must not be null");
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
@@ -78,6 +102,7 @@ public class NotificationOutboxService implements ReviewEventListener {
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.orchestrationService = orchestrationService;
     }
 
     /**
@@ -174,6 +199,12 @@ public class NotificationOutboxService implements ReviewEventListener {
                     review, ReviewEventType.NOTIFICATION_SENT, RoleType.DIRECTOR,
                     null, null, null, null, null, 100,
                     Map.of("notificationId", entry.notificationId().toString(), "responseCode", receipt.responseCode())));
+            if (orchestrationService != null && review.stage() == ReviewStage.COMPLETED) {
+                orchestrationService.releaseRuntime(review.id(), review.attemptNo())
+                        .subscribe(null, failure -> LOGGER.warn(
+                                "Unable to release completed runtime reviewId={} attempt={}",
+                                review.id().value(), review.attemptNo(), failure));
+            }
         });
     }
 

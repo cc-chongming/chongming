@@ -31,7 +31,8 @@ import reactor.core.publisher.Flux;
 public final class AgentScopeModelBridge implements Model {
 
     private static final Set<String> INTERNAL_HARNESS_TOOLS = Set.of(
-            "wait_async_results", "todo_write", "plan_enter", "plan_write", "plan_exit");
+            "wait_async_results", "todo_write", "plan_enter", "plan_write", "plan_exit",
+            "list_files", "grep_files", "glob_files", "read_file", "write_file", "edit_file");
 
     private final ModelGateway modelGateway;
     private final ReviewRuntimeContext runtimeContext;

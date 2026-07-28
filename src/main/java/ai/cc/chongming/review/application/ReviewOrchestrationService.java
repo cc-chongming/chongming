@@ -171,7 +171,7 @@ public class ReviewOrchestrationService {
             return Mono.error(new IllegalArgumentException("runtime context must identify the active review attempt"));
         }
         review.transitionTo(stateMachine, ReviewStage.CANCELLING);
-        return runtimeAdapter.cancel(context.runtimeId()).doOnSuccess(ignored -> {
+        return runtimeAdapter.cancel(context.runtimeId()).then(runtimeAdapter.close(context.runtimeId())).doOnSuccess(ignored -> {
             review.transitionTo(stateMachine, ReviewStage.CANCELLED);
             emit(context, OrchestrationEventType.CANCELLED, ReviewStage.CANCELLED, "DIRECTOR", review.version());
         });
@@ -186,7 +186,19 @@ public class ReviewOrchestrationService {
         if (attemptNo < 1) {
             throw new IllegalArgumentException("attemptNo must be positive");
         }
-        return runtimeAdapter.cancel(ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo);
+        return runtimeAdapter.cancel(runtimeId).then(runtimeAdapter.close(runtimeId));
+    }
+
+    /**
+     * Releases a terminal attempt without emitting a cancellation lifecycle event.
+     */
+    public Mono<Void> releaseRuntime(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        return runtimeAdapter.close(ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo));
     }
 
     /**

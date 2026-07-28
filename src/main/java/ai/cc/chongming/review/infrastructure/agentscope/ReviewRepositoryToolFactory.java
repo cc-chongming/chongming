@@ -1,8 +1,10 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.RepositorySnapshotService;
+import ai.cc.chongming.review.application.RepositoryAccessException;
 import ai.cc.chongming.review.application.ReviewIntakeService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.application.ReviewContextAssembler;
 import ai.cc.chongming.review.application.IntakeCancellation;
 import ai.cc.chongming.review.domain.model.RepositorySnapshot;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot;
@@ -13,12 +15,16 @@ import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolCallParam;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -33,15 +39,20 @@ import reactor.core.publisher.Mono;
 @Component
 public class ReviewRepositoryToolFactory {
 
+    private static final Logger log = LoggerFactory.getLogger(ReviewRepositoryToolFactory.class);
+
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
     private static final int DEFAULT_LINE_COUNT = 80;
     private static final int MAX_LINE_COUNT = 200;
+    private static final int INITIAL_REVIEW_READ_TOOL_CALLS = 36;
 
     private final ReviewIntakeService intakeService;
     private final RepositorySnapshotService snapshotService;
     private final ReadOnlyRepositoryTools repositoryTools;
     private final ConcurrentMap<String, RepositorySnapshot> snapshotsByReviewAttempt = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, SharedProjectContext> sharedContextsByReviewAttempt = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, String> scoutResultsByReviewAttempt = new ConcurrentHashMap<>();
 
     public ReviewRepositoryToolFactory(
             ReviewIntakeService intakeService,
@@ -64,26 +75,110 @@ public class ReviewRepositoryToolFactory {
             return List.of();
         }
         RepositoryToolContext context = toolContext(runtimeContext, roleType);
+        RepositoryReadBudget readBudget = allowedToolNames.contains("complete_initial_review")
+                ? new RepositoryReadBudget(INITIAL_REVIEW_READ_TOOL_CALLS)
+                : null;
         List<AgentTool> tools = new ArrayList<>();
         if (allowedToolNames.contains("listFiles")) {
-            tools.add(new ListFilesTool(context, runtimeContext.cancellation()));
+            tools.add(new ListFilesTool(context, runtimeContext.cancellation(), readBudget));
         }
         if (allowedToolNames.contains("searchText")) {
-            tools.add(new SearchTextTool(context, runtimeContext.cancellation()));
+            tools.add(new SearchTextTool(context, runtimeContext.cancellation(), readBudget));
         }
         if (allowedToolNames.contains("findSymbol")) {
-            tools.add(new FindSymbolTool(context, runtimeContext.cancellation()));
+            tools.add(new FindSymbolTool(context, runtimeContext.cancellation(), readBudget));
         }
         if (allowedToolNames.contains("readLines")) {
-            tools.add(new ReadLinesTool(context, runtimeContext.cancellation()));
+            tools.add(new ReadLinesTool(context, runtimeContext.cancellation(), readBudget));
         }
         if (allowedToolNames.contains("getFileMetadata")) {
-            tools.add(new FileMetadataTool(context, runtimeContext.cancellation()));
+            tools.add(new FileMetadataTool(context, runtimeContext.cancellation(), readBudget));
         }
         return List.copyOf(tools);
     }
 
+    /**
+     * Provides the independent Context Scout with the complete read-only snapshot surface.
+     * It is deliberately not exposed through any RolePack and cannot submit review-domain commands.
+     */
+    public List<AgentTool> scoutReadTools(ReviewRuntimeContext runtimeContext) {
+        Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
+        RepositoryToolContext context = toolContext(runtimeContext, RoleType.DIRECTOR, Set.of(""));
+        return List.of(
+                new ListFilesTool(context, runtimeContext.cancellation(), null),
+                new SearchTextTool(context, runtimeContext.cancellation(), null),
+                new FindSymbolTool(context, runtimeContext.cancellation(), null),
+                new ReadLinesTool(context, runtimeContext.cancellation(), null),
+                new FileMetadataTool(context, runtimeContext.cancellation(), null));
+    }
+
+    /**
+     * Produces one bounded, server-derived public project overview for all roles in a review attempt.
+     * The output contains no host paths and is not a replacement for role-specific repository reads.
+     */
+    public SharedProjectContext sharedProjectContext(ReviewRuntimeContext runtimeContext) {
+        Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
+        String key = runtimeContext.reviewId().value() + ":" + runtimeContext.attemptNo();
+        return sharedContextsByReviewAttempt.computeIfAbsent(key, ignored -> buildSharedProjectContext(runtimeContext));
+    }
+
+    /**
+     * Assembles the role's bounded public context from selector-addressable snapshot and Scout facts.
+     */
+    public String rolePublicContext(
+            ReviewRuntimeContext runtimeContext,
+            ai.cc.chongming.review.domain.role.RolePack rolePack,
+            ReviewContextAssembler contextAssembler) {
+        Objects.requireNonNull(rolePack, "rolePack must not be null");
+        Objects.requireNonNull(contextAssembler, "contextAssembler must not be null");
+        SharedProjectContext overview = sharedProjectContext(runtimeContext);
+        Instant createdAt = Instant.now();
+        List<ReviewContextAssembler.ContextFact> facts = List.of(
+                new ReviewContextAssembler.ContextFact(
+                        "requirement-snapshot", "requirement-snapshot", ReviewContextAssembler.Priority.CRITICAL,
+                        false, createdAt, "Public requirement context:\n" + String.join("\n", overview.requirementSections())),
+                new ReviewContextAssembler.ContextFact(
+                        "repository-snapshot", "repository-snapshot", ReviewContextAssembler.Priority.HIGH,
+                        false, createdAt, repositorySummary(overview, rolePack.roleType())),
+                new ReviewContextAssembler.ContextFact(
+                        "scout-overview", "scout-overview", ReviewContextAssembler.Priority.HIGH,
+                        false, createdAt, "Context Scout overview: " + scoutSummary(runtimeContext, overview, rolePack.roleType())),
+                new ReviewContextAssembler.ContextFact(
+                        "role-scope", "role-scope", ReviewContextAssembler.Priority.CRITICAL,
+                        false, createdAt, "Authorized snapshot scope for " + rolePack.roleType().name() + ": "
+                                + String.join(", ", allowedPathPrefixes(rolePack.roleType()))));
+        ReviewContextAssembler.AssembledContext assembled = contextAssembler.assemble(
+                new ReviewContextAssembler.ContextRequest(runtimeContext.reviewId(), rolePack, facts, 8_000));
+        return assembled.facts().stream()
+                .map(ReviewContextAssembler.ContextFact::publicText)
+                .collect(java.util.stream.Collectors.joining("\n\n"));
+    }
+
+    /** Releases only one cancelled attempt's process-local cache entries. */
+    public void release(ReviewRuntimeContext runtimeContext) {
+        Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
+        String key = runtimeContext.reviewId().value() + ":" + runtimeContext.attemptNo();
+        snapshotsByReviewAttempt.remove(key);
+        sharedContextsByReviewAttempt.remove(key);
+        scoutResultsByReviewAttempt.remove(key);
+    }
+
+    /** Stores only the Scout's final visible response; hidden reasoning is never captured. */
+    public void recordScoutResult(ReviewRuntimeContext runtimeContext, String visibleResult) {
+        Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
+        if (visibleResult == null || visibleResult.isBlank()) {
+            return;
+        }
+        String key = runtimeContext.reviewId().value() + ":" + runtimeContext.attemptNo();
+        scoutResultsByReviewAttempt.put(key, abbreviate(visibleResult, 6_000));
+    }
+
     private RepositoryToolContext toolContext(ReviewRuntimeContext runtimeContext, RoleType roleType) {
+        return toolContext(runtimeContext, roleType, allowedPathPrefixes(roleType));
+    }
+
+    private RepositoryToolContext toolContext(
+            ReviewRuntimeContext runtimeContext, RoleType roleType, Set<String> allowedPathPrefixes) {
         RequirementSnapshot requirementSnapshot = intakeService.requireSnapshot(
                 runtimeContext.reviewId(), runtimeContext.attemptNo());
         String key = runtimeContext.reviewId().value() + ":" + runtimeContext.attemptNo();
@@ -95,20 +190,99 @@ public class ReviewRepositoryToolFactory {
                                 runtimeContext.reviewId(), runtimeContext.attemptNo(), requirementSnapshot.repositoryPath(),
                                 requirementSnapshot.contentHash(), runtimeContext.cancellation())));
         return new RepositoryToolContext(
-                runtimeContext.runtimeId(), runtimeContext.reviewId(), roleType, repositorySnapshot);
+                runtimeContext.runtimeId(), runtimeContext.reviewId(), roleType, repositorySnapshot, allowedPathPrefixes);
+    }
+
+    private SharedProjectContext buildSharedProjectContext(ReviewRuntimeContext runtimeContext) {
+        RequirementSnapshot requirement = intakeService.requireSnapshot(runtimeContext.reviewId(), runtimeContext.attemptNo());
+        RepositoryToolContext toolContext = toolContext(runtimeContext, RoleType.PROJECT, Set.of(""));
+        RepositorySnapshot snapshot = toolContext.snapshot();
+        if (snapshot.includedFileCount() == 0) {
+            throw new RepositoryAccessException(
+                    RepositoryAccessException.Code.SNAPSHOT_FAILED,
+                    "The repository snapshot contains no reviewable text files");
+        }
+        List<ai.cc.chongming.review.infrastructure.repository.RepositorySearchIndex.FileMetadata> files =
+                repositoryTools.listFiles(toolContext, 40, runtimeContext.cancellation());
+        Set<String> moduleRoots = new LinkedHashSet<>();
+        for (var file : files) {
+            int separator = file.relativePath().indexOf('/');
+            moduleRoots.add(separator < 0 ? "." : file.relativePath().substring(0, separator));
+        }
+        List<String> requirementSections = requirement.document().sections().stream()
+                .limit(16)
+                .map(section -> "- " + section.heading() + ": " + abbreviate(section.content(), 600))
+                .toList();
+        return new SharedProjectContext(
+                requirement.repositoryPath(),
+                snapshot.headCommit(),
+                snapshot.branch(),
+                snapshot.includedFileCount(),
+                requirementSections,
+                List.copyOf(moduleRoots),
+                files.stream().map(file -> file.relativePath()).toList());
+    }
+
+    private static String abbreviate(String value, int limit) {
+        if (value == null || value.isBlank()) {
+            return "(empty)";
+        }
+        return value.length() <= limit ? value : value.substring(0, limit) + "…";
+    }
+
+    private static String repositorySummary(SharedProjectContext overview, RoleType roleType) {
+        String summary = "Repository overview: repository=" + overview.repositoryId() + ", branch=" + overview.branch()
+                + ", commit=" + overview.headCommit() + ", reviewableFiles=" + overview.includedFileCount() + ".";
+        if (roleType == RoleType.PRODUCT) {
+            return summary;
+        }
+        return summary + " Module roots: " + String.join(", ", overview.moduleRoots())
+                + ". Representative snapshot files: " + String.join(", ", overview.sampleFiles());
+    }
+
+    private String scoutSummary(ReviewRuntimeContext runtimeContext, SharedProjectContext overview, RoleType roleType) {
+        String key = runtimeContext.reviewId().value() + ":" + runtimeContext.attemptNo();
+        String result = scoutResultsByReviewAttempt.get(key);
+        if (result != null) {
+            return result;
+        }
+        if (roleType == RoleType.PRODUCT) {
+            return "The requirement and repository metadata are ready; use targeted evidence only when needed.";
+        }
+        return "The frozen snapshot contains module roots " + String.join(", ", overview.moduleRoots())
+                + "; begin with the assigned scope and use targeted reads.";
+    }
+
+    private static Set<String> allowedPathPrefixes(RoleType roleType) {
+        return switch (roleType) {
+            case PRODUCT -> Set.of("README.md", "docs/");
+            case PROJECT -> Set.of("README.md", "docs/", "pom.xml", "package.json", "build.gradle", "settings.gradle");
+            case FRONTEND -> Set.of("frontend/", "web/", "ui/", "client/");
+            case BACKEND -> Set.of("src/main/", "src/test/", "backend/", "server/", "service/", "api/");
+            case TESTING -> Set.of("src/test/", "test/", "tests/");
+            case SECURITY, ARCHITECTURE, DIRECTOR, JUDGE, PERFORMANCE -> Set.of("");
+        };
     }
 
     private abstract class BoundReadTool implements AgentTool {
         private final RepositoryToolContext context;
         private final IntakeCancellation cancellation;
+        private final RepositoryReadBudget readBudget;
 
-        private BoundReadTool(RepositoryToolContext context, IntakeCancellation cancellation) {
+        private BoundReadTool(
+                RepositoryToolContext context, IntakeCancellation cancellation, RepositoryReadBudget readBudget) {
             this.context = context;
             this.cancellation = Objects.requireNonNull(cancellation, "cancellation must not be null");
+            this.readBudget = readBudget;
         }
 
         @Override
         public final Boolean getStrict() {
+            return true;
+        }
+
+        @Override
+        public final boolean isReadOnly() {
             return true;
         }
 
@@ -122,15 +296,75 @@ public class ReviewRepositoryToolFactory {
 
         @Override
         public final Mono<ToolResultBlock> callAsync(ToolCallParam param) {
-            return Mono.fromSupplier(() -> ToolResultBlock.text(String.valueOf(read(param.getInput()))))
-                    .onErrorResume(exception -> Mono.just(ToolResultBlock.error("repository read rejected")));
+            return Mono.fromSupplier(() -> {
+                        if (readBudget != null && !readBudget.tryConsume()) {
+                            throw new RepositoryAccessException(
+                                    RepositoryAccessException.Code.REPOSITORY_READ_BUDGET_EXHAUSTED,
+                                    "Repository read budget is exhausted");
+                        }
+                        return ToolResultBlock.text(String.valueOf(read(param.getInput())));
+                    })
+                    .onErrorResume(exception -> {
+                        String code = toolErrorCode(exception);
+                        log.warn("Review repository tool rejected: tool={}, role={}, code={}",
+                                getName(), context().roleType(), code);
+                        return Mono.just(ToolResultBlock.error("REPOSITORY_TOOL_ERROR:" + code));
+                    });
         }
 
         abstract Object read(Map<String, Object> input);
     }
 
+    private static String toolErrorCode(Throwable exception) {
+        if (exception instanceof RepositoryAccessException accessException) {
+            if (accessException.code() == RepositoryAccessException.Code.REPOSITORY_READ_BUDGET_EXHAUSTED) {
+                return "REPOSITORY_READ_BUDGET_EXHAUSTED: stop repository reads and submit existing findings";
+            }
+            return accessException.code().name();
+        }
+        if (exception instanceof IllegalArgumentException) {
+            return "INVALID_ARGUMENT";
+        }
+        return "SNAPSHOT_UNAVAILABLE";
+    }
+
+    /**
+     * Server-generated, bounded context shared by roles without revealing physical repository paths.
+     *
+     * @author wangli
+     */
+    public record SharedProjectContext(
+            String repositoryId,
+            String headCommit,
+            String branch,
+            long includedFileCount,
+            List<String> requirementSections,
+            List<String> moduleRoots,
+            List<String> sampleFiles) {
+
+        public SharedProjectContext {
+            requirementSections = List.copyOf(requirementSections);
+            moduleRoots = List.copyOf(moduleRoots);
+            sampleFiles = List.copyOf(sampleFiles);
+        }
+
+        public String publicText(RoleType roleType) {
+            String requirement = String.join("\n", requirementSections);
+            String overview = "Repository overview: repository=" + repositoryId + ", branch=" + branch
+                    + ", commit=" + headCommit + ", reviewableFiles=" + includedFileCount + ".";
+            if (roleType == RoleType.PRODUCT) {
+                return "Public requirement context:\n" + requirement + "\n" + overview;
+            }
+            return "Public requirement context:\n" + requirement + "\n" + overview
+                    + "\nModule roots: " + String.join(", ", moduleRoots)
+                    + "\nRepresentative snapshot files: " + String.join(", ", sampleFiles);
+        }
+    }
+
     private final class ListFilesTool extends BoundReadTool {
-        private ListFilesTool(RepositoryToolContext context, IntakeCancellation cancellation) { super(context, cancellation); }
+        private ListFilesTool(RepositoryToolContext context, IntakeCancellation cancellation, RepositoryReadBudget readBudget) {
+            super(context, cancellation, readBudget);
+        }
         @Override public String getName() { return "listFiles"; }
         @Override public String getDescription() { return "List text files from the server-frozen repository snapshot."; }
         @Override public Map<String, Object> getParameters() {
@@ -142,7 +376,9 @@ public class ReviewRepositoryToolFactory {
     }
 
     private final class SearchTextTool extends BoundReadTool {
-        private SearchTextTool(RepositoryToolContext context, IntakeCancellation cancellation) { super(context, cancellation); }
+        private SearchTextTool(RepositoryToolContext context, IntakeCancellation cancellation, RepositoryReadBudget readBudget) {
+            super(context, cancellation, readBudget);
+        }
         @Override public String getName() { return "searchText"; }
         @Override public String getDescription() { return "Search text only within the server-frozen repository snapshot."; }
         @Override public Map<String, Object> getParameters() {
@@ -158,7 +394,9 @@ public class ReviewRepositoryToolFactory {
     }
 
     private final class FindSymbolTool extends BoundReadTool {
-        private FindSymbolTool(RepositoryToolContext context, IntakeCancellation cancellation) { super(context, cancellation); }
+        private FindSymbolTool(RepositoryToolContext context, IntakeCancellation cancellation, RepositoryReadBudget readBudget) {
+            super(context, cancellation, readBudget);
+        }
         @Override public String getName() { return "findSymbol"; }
         @Override public String getDescription() { return "Find lexical symbol candidates only within the server-frozen repository snapshot."; }
         @Override public Map<String, Object> getParameters() {
@@ -172,7 +410,9 @@ public class ReviewRepositoryToolFactory {
     }
 
     private final class ReadLinesTool extends BoundReadTool {
-        private ReadLinesTool(RepositoryToolContext context, IntakeCancellation cancellation) { super(context, cancellation); }
+        private ReadLinesTool(RepositoryToolContext context, IntakeCancellation cancellation, RepositoryReadBudget readBudget) {
+            super(context, cancellation, readBudget);
+        }
         @Override public String getName() { return "readLines"; }
         @Override public String getDescription() { return "Read a bounded line range from one snapshot-relative source file."; }
         @Override public Map<String, Object> getParameters() {
@@ -189,7 +429,9 @@ public class ReviewRepositoryToolFactory {
     }
 
     private final class FileMetadataTool extends BoundReadTool {
-        private FileMetadataTool(RepositoryToolContext context, IntakeCancellation cancellation) { super(context, cancellation); }
+        private FileMetadataTool(RepositoryToolContext context, IntakeCancellation cancellation, RepositoryReadBudget readBudget) {
+            super(context, cancellation, readBudget);
+        }
         @Override public String getName() { return "getFileMetadata"; }
         @Override public String getDescription() { return "Return metadata for one snapshot-relative source file."; }
         @Override public Map<String, Object> getParameters() {

@@ -27,7 +27,8 @@ public class ReadOnlyRepositoryTools {
      * Lists only files already frozen beneath the caller's review snapshot.
      */
     public List<FileMetadata> listFiles(RepositoryToolContext context, int limit, IntakeCancellation cancellation) {
-        return searchIndex.listFiles(requireContext(context).snapshot(), limit, requireCancellation(cancellation));
+        RepositoryToolContext safeContext = requireContext(context);
+        return searchIndex.listFiles(safeContext.snapshot(), limit, requireCancellation(cancellation), safeContext::allows);
     }
 
     /**
@@ -39,8 +40,9 @@ public class ReadOnlyRepositoryTools {
             boolean regularExpression,
             int limit,
             IntakeCancellation cancellation) {
+        RepositoryToolContext safeContext = requireContext(context);
         return searchIndex.searchText(
-                requireContext(context).snapshot(), query, regularExpression, limit, requireCancellation(cancellation));
+                safeContext.snapshot(), query, regularExpression, limit, requireCancellation(cancellation), safeContext::allows);
     }
 
     /**
@@ -48,7 +50,8 @@ public class ReadOnlyRepositoryTools {
      */
     public List<TextMatch> findSymbol(
             RepositoryToolContext context, String symbol, int limit, IntakeCancellation cancellation) {
-        return searchIndex.findSymbol(requireContext(context).snapshot(), symbol, limit, requireCancellation(cancellation));
+        RepositoryToolContext safeContext = requireContext(context);
+        return searchIndex.findSymbol(safeContext.snapshot(), symbol, limit, requireCancellation(cancellation), safeContext::allows);
     }
 
     /**
@@ -60,9 +63,11 @@ public class ReadOnlyRepositoryTools {
             int startLine,
             int lineCount,
             IntakeCancellation cancellation) {
+        RepositoryToolContext safeContext = requireContext(context);
+        String safePath = requireAllowedPath(safeContext, relativePath);
         return searchIndex.readLines(
-                requireContext(context).snapshot(),
-                relativePath,
+                safeContext.snapshot(),
+                safePath,
                 startLine,
                 lineCount,
                 requireCancellation(cancellation));
@@ -73,8 +78,10 @@ public class ReadOnlyRepositoryTools {
      */
     public FileMetadata getFileMetadata(
             RepositoryToolContext context, String relativePath, IntakeCancellation cancellation) {
+        RepositoryToolContext safeContext = requireContext(context);
+        String safePath = requireAllowedPath(safeContext, relativePath);
         return searchIndex.getFileMetadata(
-                requireContext(context).snapshot(), relativePath, requireCancellation(cancellation));
+                safeContext.snapshot(), safePath, requireCancellation(cancellation));
     }
 
     private RepositoryToolContext requireContext(RepositoryToolContext context) {
@@ -83,5 +90,13 @@ public class ReadOnlyRepositoryTools {
 
     private IntakeCancellation requireCancellation(IntakeCancellation cancellation) {
         return Objects.requireNonNull(cancellation, "cancellation must not be null");
+    }
+
+    private String requireAllowedPath(RepositoryToolContext context, String relativePath) {
+        String safePath = context.normalizeRelativePath(relativePath);
+        if (!context.allows(relativePath)) {
+            throw new IllegalArgumentException("Requested file is outside this role's assigned snapshot scope");
+        }
+        return safePath;
     }
 }

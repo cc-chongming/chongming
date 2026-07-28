@@ -145,7 +145,7 @@ public class ReviewCommandService {
                         command.initialMessage()));
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(ignored -> { }, failure -> recordStartupFailure(review, failure));
+                .subscribe(ignored -> { }, failure -> recordStartupFailure(review, context, failure).subscribe());
     }
 
     private void bindRepositorySnapshot(ReviewRuntimeContext context) {
@@ -158,11 +158,14 @@ public class ReviewCommandService {
                 requirementSnapshot.contentHash(), context.cancellation());
     }
 
-    private void recordStartupFailure(Review review, Throwable failure) {
+    private Mono<Void> recordStartupFailure(Review review, ReviewRuntimeContext context, Throwable failure) {
         logStartupFailure(review, failure);
         synchronized (review) {
             if (review.stage().isTerminal() || !stateMachine.canTransition(review.stage(), ReviewStage.FAILED)) {
-                return;
+                return releaseRuntime(context);
+            }
+            if (review.attemptNo() != context.attemptNo()) {
+                return releaseRuntime(context);
             }
             review.transitionTo(stateMachine, ReviewStage.FAILED);
             eventPublisher.publish(ReviewEventDrafts.completedCommand(
@@ -177,6 +180,12 @@ public class ReviewCommandService {
                     null,
                     Map.of("failureType", failure.getClass().getSimpleName())));
         }
+        return releaseRuntime(context);
+    }
+
+    private Mono<Void> releaseRuntime(ReviewRuntimeContext context) {
+        Mono<Void> release = orchestrationService.releaseRuntime(context.reviewId(), context.attemptNo());
+        return release == null ? Mono.empty() : release;
     }
 
     private void logStartupFailure(Review review, Throwable failure) {

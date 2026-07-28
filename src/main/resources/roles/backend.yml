@@ -6,6 +6,8 @@ promptVersion: backend-v1
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
+  - scout-overview
+  - role-scope
 checklist:
   - Check API and data consistency constraints.
   - Check failure handling and operability.
@@ -20,8 +22,7 @@ allowedTools:
   - findSymbol
   - searchText
   - readLines
-  - submitEvidence
 outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
-maxIterations: 10
+maxIterations: 20

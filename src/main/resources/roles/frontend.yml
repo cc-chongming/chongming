@@ -6,6 +6,8 @@ promptVersion: frontend-v1
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
+  - scout-overview
+  - role-scope
 checklist:
   - Check user interaction and UI state coverage.
   - Check client contracts and error handling.
@@ -19,8 +21,7 @@ allowedTools:
   - listFiles
   - searchText
   - readLines
-  - submitEvidence
 outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
-maxIterations: 10
+maxIterations: 20

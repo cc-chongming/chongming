@@ -21,7 +21,7 @@ class RolePackContractTests {
         assertThat(registry.all()).hasSize(8);
         assertThat(registry.require(RoleType.PRODUCT).modelProfile()).isEqualTo("role-reviewer");
         assertThat(registry.require(RoleType.JUDGE).allowedTools())
-                .contains("loadReviewFacts", "loadDebateContext", "submit_judgement", "draft_gate");
+                .containsExactlyInAnyOrder("submit_judgement", "draft_gate");
         assertThat(registry.require(RoleType.BACKEND).allowedTools())
                 .contains("submit_claim", "complete_initial_review", "submit_challenge", "submit_rebuttal");
         assertThat(registry.require(RoleType.SECURITY).activationRules()).isNotEmpty();
@@ -29,5 +29,14 @@ class RolePackContractTests {
             assertThat(rolePack.promptVersion()).matches("[a-z]+-v\\d+");
             assertThat(rolePack.maxIterations()).isBetween(1, 20);
         });
+    }
+
+    @Test
+    void givesEveryInitialReviewRoleEnoughTurnsToResearchAndCompleteItsDomainProtocol() {
+        RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+
+        assertThat(registry.all())
+                .filteredOn(rolePack -> rolePack.roleType() != RoleType.JUDGE)
+                .allSatisfy(rolePack -> assertThat(rolePack.maxIterations()).isEqualTo(20));
     }
 }

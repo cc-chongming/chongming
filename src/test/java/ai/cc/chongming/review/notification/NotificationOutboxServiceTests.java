@@ -3,6 +3,7 @@ package ai.cc.chongming.review.notification;
 import ai.cc.chongming.review.application.NotificationDeliveryException;
 import ai.cc.chongming.review.application.NotificationOutboxService;
 import ai.cc.chongming.review.application.ReviewEventService;
+import ai.cc.chongming.review.application.ReviewOrchestrationService;
 import ai.cc.chongming.review.config.NotificationOutboxProperties;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.HumanGateDecision;
@@ -32,6 +33,10 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import reactor.core.publisher.Mono;
 
 /**
  * [AIREVIEW-PLAN-011#1.5] Verifies idempotent queueing, retry and terminal failure without rolling back Gate state.
@@ -49,6 +54,7 @@ class NotificationOutboxServiceTests {
     private NotificationOutboxService service;
     private Review review;
     private HumanGateDecision decision;
+    private ReviewOrchestrationService orchestrationService;
 
     @BeforeEach
     void setUp() {
@@ -57,6 +63,8 @@ class NotificationOutboxServiceTests {
         decision = new HumanGateDecision(reviewId, 1L, GateResult.CONDITIONAL, "remediate before release",
                 List.of("add authorization"), null, "reviewer-1", null, now);
         decisionStore.append(decision);
+        orchestrationService = mock(ReviewOrchestrationService.class);
+        when(orchestrationService.releaseRuntime(reviewId, 1)).thenReturn(Mono.empty());
         service = new NotificationOutboxService(
                 outboxStore,
                 decisionStore,
@@ -65,7 +73,8 @@ class NotificationOutboxServiceTests {
                 events,
                 new NotificationOutboxProperties(false, false, "learning-platform", "recipient-placeholder",
                         "MISSING_TEST_TOKEN", 3, Duration.ofSeconds(30), Duration.ofSeconds(5)),
-                Clock.fixed(now, ZoneOffset.UTC));
+                Clock.fixed(now, ZoneOffset.UTC),
+                orchestrationService);
     }
 
     @Test
@@ -80,6 +89,7 @@ class NotificationOutboxServiceTests {
         assertEquals(DeliveryStatus.SENT, delivered.deliveryStatus());
         assertEquals(1, delivered.attemptCount());
         assertEquals(ReviewStage.COMPLETED, review.stage());
+        verify(orchestrationService).releaseRuntime(reviewId, 1);
         assertTrue(events.replay(reviewId, 0L, 10).stream().anyMatch(event -> event.type() == ReviewEventType.NOTIFICATION_SENT));
     }
 

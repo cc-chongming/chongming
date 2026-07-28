@@ -108,6 +108,7 @@ class ReviewCommandServiceTests {
         when(orchestrationService.start(any())).thenReturn(Mono.<ReviewOrchestrationService.StartResult>error(
                 new IllegalArgumentException("password=secret role profile is missing"))
                 .doFinally(signal -> completed.countDown()));
+        when(orchestrationService.releaseRuntime(reviewId, 1)).thenReturn(Mono.empty());
 
         commandService.start(reviewId, startCommand(0L, "start-failure-001"));
 
@@ -122,6 +123,7 @@ class ReviewCommandServiceTests {
                             .doesNotContainKey("failureMessage")
                             .doesNotContainValue("password=secret");
                 });
+        verify(orchestrationService, timeout(1_000)).releaseRuntime(reviewId, 1);
     }
 
     @Test

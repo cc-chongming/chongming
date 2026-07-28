@@ -140,6 +140,48 @@ public class RequirementSnapshotStore {
         }
     }
 
+    /**
+     * Creates a mutable, attempt-workspace copy of the immutable requirement input for a Harness agent.
+     * The authoritative intake snapshot remains unchanged under its own controlled directory.
+     */
+    public void materializeForAgentWorkspace(
+            ReviewId reviewId, int attemptNo, Path agentWorkspace, IntakeCancellation cancellation) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(agentWorkspace, "agentWorkspace must not be null");
+        Objects.requireNonNull(cancellation, "cancellation must not be null");
+        Path source = snapshotInputDirectory(reviewId, attemptNo);
+        Path target = agentWorkspace.toAbsolutePath().normalize().resolve("input").normalize();
+        verifyWorkspacePath(target);
+        if (!Files.isRegularFile(source.resolve("requirement.normalized.md"))) {
+            throw new IllegalStateException("Requirement snapshot was not found for the active review attempt");
+        }
+        try {
+            cancellation.checkCancelled();
+            Files.createDirectories(target);
+            Files.copy(source.resolve("requirement.normalized.md"), target.resolve("requirement.md"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(source.resolve("snapshot-manifest.json"), target.resolve("snapshot-manifest.json"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            cancellation.checkCancelled();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to materialize requirement for agent workspace", exception);
+        }
+    }
+
+    private Path snapshotInputDirectory(ReviewId reviewId, int attemptNo) {
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        Path input = workspaceRoot
+                .resolve("reviews")
+                .resolve(reviewId.value().toString())
+                .resolve("attempt-" + attemptNo)
+                .resolve("input")
+                .normalize();
+        verifyWorkspacePath(input);
+        return input;
+    }
+
     private void verifyWorkspacePath(Path path) {
         if (!path.startsWith(workspaceRoot)) {
             throw new IllegalArgumentException("Requirement snapshot path escapes the workspace root");

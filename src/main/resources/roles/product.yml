@@ -6,6 +6,8 @@ promptVersion: product-v1
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
+  - scout-overview
+  - role-scope
 checklist:
   - Check value and user impact.
   - Check acceptance criteria and scope gaps.
@@ -18,8 +20,7 @@ allowedTools:
   - request_additional_evidence
   - searchText
   - readLines
-  - submitEvidence
 outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
-maxIterations: 10
+maxIterations: 20

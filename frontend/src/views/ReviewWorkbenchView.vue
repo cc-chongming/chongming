@@ -2,6 +2,8 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import AgUiConversationPanel from '../components/AgUiConversationPanel.vue';
+import AgentTraceDrawer from '../components/AgentTraceDrawer.vue';
+import ReviewRoundtable from '../components/ReviewRoundtable.vue';
 import DebateTimeline from '../components/DebateTimeline.vue';
 import EvidenceDrawer from '../components/EvidenceDrawer.vue';
 import HumanReviewPanel from '../components/HumanReviewPanel.vue';
@@ -9,12 +11,23 @@ import ReviewLifecyclePanel from '../components/ReviewLifecyclePanel.vue';
 import PlanPanel from '../components/PlanPanel.vue';
 import { formatApiError, reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
+import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
 
 const props = defineProps({ reviewId: { type: String, required: true } });
 const store = createReviewStore();
 const state = store.state;
+const runtimeTrace = createRuntimeTraceStore();
 const commandBusy = ref(false);
 const commandMessage = ref('');
+let loadGeneration = 0;
+const roundtableRoles = computed(() => {
+    const roles = new Map(store.roles.value.map((role) => [role.role, role]));
+    roles.set('DIRECTOR', roles.get('DIRECTOR') ?? { role: 'DIRECTOR', type: '主持中' });
+    runtimeTrace.byRole.value.forEach((events, role) => {
+        roles.set(role, { ...(roles.get(role) ?? {}), role, type: events.length ? '执行中' : '等待事件' });
+    });
+    return [...roles.values()];
+});
 
 const connectionText = computed(() => ({
     idle: '未连接', connecting: '正在连接', connected: '实时同步中', reconnecting: '正在恢复连接',
@@ -22,7 +35,10 @@ const connectionText = computed(() => ({
 }[state.connection.status] ?? state.connection.status));
 
 async function load(reviewId) {
+    const generation = ++loadGeneration;
     await store.load(reviewId);
+    if (generation !== loadGeneration || reviewId !== props.reviewId) return;
+    runtimeTrace.start(reviewId, state.summary?.attempt ?? 1);
 }
 
 function showError(error) {
@@ -68,7 +84,8 @@ async function retryReview() {
     commandBusy.value = true;
     commandMessage.value = '';
     try {
-        await store.retryReview(state.summary.reviewVersion);
+        const result = await store.retryReview(state.summary.reviewVersion);
+        runtimeTrace.start(props.reviewId, result.attemptNo);
         commandMessage.value = '已创建新的评审尝试，请填写公开计划后启动。';
     } catch (error) {
         showError(error);
@@ -87,7 +104,7 @@ async function refreshSummary() {
 }
 
 watch(() => props.reviewId, load, { immediate: true });
-onUnmounted(() => store.dispose());
+onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
 </script>
 
 <template>
@@ -98,7 +115,7 @@ onUnmounted(() => store.dispose());
                 <h1>{{ reviewId }}</h1>
                 <p class="connection" :data-status="state.connection.status"><span aria-hidden="true">●</span>{{ connectionText }}<template v-if="state.connection.retryDelayMs">，{{ Math.ceil(state.connection.retryDelayMs / 1000) }} 秒后重试</template></p>
             </div>
-            <RouterLink class="button secondary" :to="{ name: 'review-report', params: { reviewId } }">查看最终报告</RouterLink>
+            <div class="workbench-actions"><RouterLink class="button" :to="{ name: 'review-live', params: { reviewId } }">进入实时观察台</RouterLink><RouterLink class="button secondary" :to="{ name: 'review-report', params: { reviewId } }">查看最终报告</RouterLink></div>
         </header>
 
         <p v-if="state.error" class="error-banner" role="alert">{{ formatApiError(state.error) }}</p>
@@ -117,6 +134,7 @@ onUnmounted(() => store.dispose());
                     @refresh="refreshSummary"
                 />
                 <DebateTimeline class="wide-panel" :debates="state.debates" @open-evidence="store.selectEvidence" />
+                <ReviewRoundtable class="wide-panel" :events="store.events.value" :roles="roundtableRoles" @inspect-role="(role) => { runtimeTrace.state.selectedRole = role; }" />
                 <AgUiConversationPanel class="ag-ui-workbench-panel" :conversation="state.agUi" />
                 <HumanReviewPanel
                     :review-id="reviewId"
@@ -140,6 +158,7 @@ onUnmounted(() => store.dispose());
                 </section>
             </div>
             <EvidenceDrawer :evidence="state.selectedEvidence" @close="state.selectedEvidence = null" />
+            <AgentTraceDrawer :role="runtimeTrace.state.selectedRole" :events="runtimeTrace.byRole.value.get(runtimeTrace.state.selectedRole) ?? []" @close="runtimeTrace.state.selectedRole = null" />
         </template>
     </section>
 </template>

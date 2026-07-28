@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -62,6 +63,32 @@ class RepositoryToolFacadeTests {
                         "runtime-1", new ReviewId(UUID.randomUUID()), RoleType.BACKEND, snapshot))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must match");
+    }
+
+    @Test
+    void rejectsReadsOutsideTheRoleAssignedSnapshotScope() throws Exception {
+        RepositorySnapshot snapshot = snapshot();
+        RepositoryToolContext productContext = new RepositoryToolContext(
+                "runtime-1", snapshot.reviewId(), RoleType.PRODUCT, snapshot, Set.of("docs/"));
+        ReadOnlyRepositoryTools repositoryTools = new ReadOnlyRepositoryTools(new RepositorySearchIndex());
+
+        assertThatThrownBy(() -> repositoryTools.readLines(
+                productContext, "src/App.java", 1, 10, IntakeCancellation.neverCancelled()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("outside this role's assigned snapshot scope");
+    }
+
+    @Test
+    void rejectsTraversalBeforeCheckingTheRoleAssignedSnapshotScope() throws Exception {
+        RepositorySnapshot snapshot = snapshot();
+        RepositoryToolContext productContext = new RepositoryToolContext(
+                "runtime-1", snapshot.reviewId(), RoleType.PRODUCT, snapshot, Set.of("docs/"));
+        ReadOnlyRepositoryTools repositoryTools = new ReadOnlyRepositoryTools(new RepositorySearchIndex());
+
+        assertThatThrownBy(() -> repositoryTools.readLines(
+                productContext, "docs/../src/App.java", 1, 10, IntakeCancellation.neverCancelled()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("snapshot-relative path is unsafe");
     }
 
     private RepositorySnapshot snapshot() throws Exception {

@@ -23,6 +23,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
@@ -47,6 +48,11 @@ public class RepositorySearchIndex {
      * @return safe file metadata
      */
     public List<FileMetadata> listFiles(RepositorySnapshot snapshot, int limit, IntakeCancellation cancellation) {
+        return listFiles(snapshot, limit, cancellation, ignored -> true);
+    }
+
+    public List<FileMetadata> listFiles(
+            RepositorySnapshot snapshot, int limit, IntakeCancellation cancellation, Predicate<String> scope) {
         int effectiveLimit = requireResultLimit(limit);
         Path root = requireSnapshotRoot(snapshot);
         List<FileMetadata> result = new ArrayList<>();
@@ -54,6 +60,7 @@ public class RepositorySearchIndex {
             files.filter(path -> !path.equals(root))
                     .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .filter(path -> isExposedFile(root, path, cancellation))
+                    .filter(path -> scope.test(toRelativePath(root, path)))
                     .takeWhile(path -> result.size() < effectiveLimit)
                     .forEach(path -> {
                         cancellation.checkCancelled();
@@ -81,6 +88,16 @@ public class RepositorySearchIndex {
             boolean regularExpression,
             int limit,
             IntakeCancellation cancellation) {
+        return searchText(snapshot, query, regularExpression, limit, cancellation, ignored -> true);
+    }
+
+    public List<TextMatch> searchText(
+            RepositorySnapshot snapshot,
+            String query,
+            boolean regularExpression,
+            int limit,
+            IntakeCancellation cancellation,
+            Predicate<String> scope) {
         int effectiveLimit = requireResultLimit(limit);
         Pattern pattern = queryPattern(query, regularExpression);
         Path root = requireSnapshotRoot(snapshot);
@@ -89,6 +106,7 @@ public class RepositorySearchIndex {
             var iterator = files.filter(path -> !path.equals(root))
                     .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .filter(path -> isExposedFile(root, path, cancellation))
+                    .filter(path -> scope.test(toRelativePath(root, path)))
                     .iterator();
             while (iterator.hasNext() && result.size() < effectiveLimit) {
                 cancellation.checkCancelled();
@@ -111,10 +129,15 @@ public class RepositorySearchIndex {
      */
     public List<TextMatch> findSymbol(
             RepositorySnapshot snapshot, String symbol, int limit, IntakeCancellation cancellation) {
+        return findSymbol(snapshot, symbol, limit, cancellation, ignored -> true);
+    }
+
+    public List<TextMatch> findSymbol(
+            RepositorySnapshot snapshot, String symbol, int limit, IntakeCancellation cancellation, Predicate<String> scope) {
         if (symbol == null || !symbol.matches("[A-Za-z_$][A-Za-z0-9_$]{0,255}")) {
             throw new IllegalArgumentException("Symbol candidate must be a bounded identifier");
         }
-        return searchText(snapshot, "\\b" + Pattern.quote(symbol) + "\\b", true, limit, cancellation);
+        return searchText(snapshot, "\\b" + Pattern.quote(symbol) + "\\b", true, limit, cancellation, scope);
     }
 
     /**
