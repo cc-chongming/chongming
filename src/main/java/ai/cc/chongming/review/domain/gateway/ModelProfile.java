@@ -16,7 +16,8 @@ public record ModelProfile(
         double temperature,
         Duration timeout,
         int maxTokens,
-        RetryPolicy retryPolicy) {
+        RetryPolicy retryPolicy,
+        String fallbackProfileId) {
 
     public ModelProfile {
         requireText(profileId, "profileId");
@@ -32,6 +33,7 @@ public record ModelProfile(
             throw new IllegalArgumentException("maxTokens must be positive");
         }
         Objects.requireNonNull(retryPolicy, "retryPolicy must not be null");
+        fallbackProfileId = normalizeOptionalText(fallbackProfileId);
     }
 
     /**
@@ -70,5 +72,9 @@ public record ModelProfile(
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
         }
+    }
+
+    private static String normalizeOptionalText(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

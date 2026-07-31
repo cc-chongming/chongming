@@ -34,6 +34,7 @@ public class ModelProfileRegistry {
             }
             values.put(profileId, toProfile(profileId, definition));
         });
+        values.forEach((profileId, profile) -> validateFallbackProfile(profileId, profile, values));
         this.profiles = Map.copyOf(values);
     }
 
@@ -74,6 +75,21 @@ public class ModelProfileRegistry {
                 definition.maxTokens() == 0 ? DEFAULT_MAX_TOKENS : definition.maxTokens(),
                 new RetryPolicy(
                         retry == null ? 0 : retry.maxRetries(),
-                        retry == null || retry.initialBackoff() == null ? DEFAULT_BACKOFF : retry.initialBackoff()));
+                        retry == null || retry.initialBackoff() == null ? DEFAULT_BACKOFF : retry.initialBackoff()),
+                definition.fallbackProfile());
+    }
+
+    private static void validateFallbackProfile(
+            String profileId, ModelProfile profile, Map<String, ModelProfile> profiles) {
+        String fallbackProfileId = profile.fallbackProfileId();
+        if (fallbackProfileId == null) {
+            return;
+        }
+        if (profileId.equals(fallbackProfileId)) {
+            throw new IllegalArgumentException("Model profile must not fall back to itself: " + profileId);
+        }
+        if (!profiles.containsKey(fallbackProfileId)) {
+            throw new IllegalArgumentException("Fallback model profile is not configured: " + fallbackProfileId);
+        }
     }
 }

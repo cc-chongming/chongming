@@ -75,7 +75,8 @@ class OpenAiCompatibleModelClientTests {
                         0.2d,
                         Duration.ofSeconds(2),
                         128,
-                        new RetryPolicy(0, Duration.ZERO)),
+                        new RetryPolicy(0, Duration.ZERO),
+                        null),
                         new ModelGateway.ModelRequest(
                         new ReviewId(UUID.randomUUID()),
                         RoleType.BACKEND,
@@ -103,7 +104,7 @@ class OpenAiCompatibleModelClientTests {
         assertThatThrownBy(() -> client.invoke(request()))
                 .isInstanceOf(ModelGatewayException.class)
                 .satisfies(exception -> assertThat(((ModelGatewayException) exception).code())
-                        .isEqualTo(ModelGatewayException.Code.MODEL_PROVIDER_ERROR))
+                        .isEqualTo(ModelGatewayException.Code.MODEL_REQUEST_REJECTED))
                 .hasMessageContaining("HTTP 400")
                 .hasMessageNotContaining("The model does not exist");
     }
@@ -163,6 +164,19 @@ class OpenAiCompatibleModelClientTests {
 
     private ModelProfile profile() {
         return new ModelProfile("role-reviewer", Provider.OPENAI_COMPATIBLE, "test-model", 0.2d,
-                Duration.ofSeconds(2), 128, new RetryPolicy(0, Duration.ZERO));
+                Duration.ofSeconds(2), 128, new RetryPolicy(0, Duration.ZERO), null);
+    }
+
+    @Test
+    void rejectsReasoningOnlyResponseInsteadOfTreatingHiddenReasoningAsPublicText() {
+        responseBody.set("""
+                {"id":"chat-reasoning-1","choices":[{"message":{"content":"","reasoning_content":"内部推理"},"finish_reason":"stop"}],"usage":{}}
+                """);
+        OpenAiCompatibleModelClient client = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new ObjectMapper());
+
+        assertThatThrownBy(() -> client.invoke(request()))
+                .isInstanceOf(ModelGatewayException.class)
+                .satisfies(exception -> assertThat(((ModelGatewayException) exception).code())
+                        .isEqualTo(ModelGatewayException.Code.MODEL_RESPONSE_INVALID));
     }
 }

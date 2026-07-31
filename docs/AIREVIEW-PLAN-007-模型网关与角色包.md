@@ -14,7 +14,7 @@
 
 ### 1.1 模型配置与逻辑 Profile ✅
 
-- 定义 `director`、`role-reviewer`、`judge`、`fallback` 四类逻辑 profile。
+- 定义 `director`、`scout`、`role-reviewer`、`judge`、`fallback` 五类逻辑 profile。
 - 每个 profile 配置 provider、modelId、temperature、timeout、maxTokens、retryPolicy。
 - 凭证使用被 Git 忽略的 profile 专属配置或密钥管理，不进入受版本控制的配置文件、Prompt 或日志。
 
@@ -33,6 +33,8 @@
 ### 1.4 失败、重试与降级 ✅
 
 - 网络错误/429 指数退避最多两次；业务校验失败不盲目重试。
+- Profile 可配置单层 `fallbackProfile`：原 Profile 的重试耗尽后，仅在超时、429、网络或 Provider 错误时切换一次；取消、配置错误和响应格式错误不切换。
+- 触发切换时先保留主 Profile 的失败审计（Profile、失败码、已用次数），再单独记录备用 Profile 的最终成功或失败，二者由相同 traceId 关联。
 - 按需角色失败可部分完成；核心角色失败禁止 AI_PASS；Judge 失败交给确定性 Gate 草案。
 - 全部模型不可用时只返回证据与规则结果，生成 HUMAN_REQUIRED Gate 草案并进入 WAITING_HUMAN。
 
@@ -142,3 +144,4 @@
 | 2026-07-16 | 完成逻辑 Profile、商业模型网关、结构化输出、RolePack、上下文隔离、内存审计与失败降级；真实模型冒烟和审计持久化保留为后续环境/执行链路工作。 |
 | 2026-07-20 | 模型网关凭证改为由 Git 忽略的 profile 专属 `api-key` 配置提供，不再依赖环境变量名称解析；四个逻辑 Profile 默认复用顶层 `model-name`，避免本地直配模型时回落至占位模型；补齐配置绑定与网关契约测试。 |
 | 2026-07-20 | 增加仅限本机调试的 `log-conversation` 开关；默认关闭，local Profile 可开启后记录模型请求与响应正文，但仍不记录 API Key 或 Authorization。 |
+| 2026-07-29 | Director、Scout、全部角色评审 Agent（`role-reviewer`）和 Judge 均可在可恢复失败后一次性切换到 `fallback` Profile；Scout 默认单次调用超时调整为 120 秒。4xx 请求/鉴权/模型配置拒绝不会触发切换，主备 Profile 的切换过程保留关联审计。本机配置可为 `fallback` 指定另一个已部署模型，两个 Profile 继续共用同一兼容网关与凭证。 |

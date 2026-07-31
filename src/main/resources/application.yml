@@ -28,6 +28,10 @@ review:
     # Director needs enough turns to inspect the requirement, produce a plan, and dispatch roles.
     # Keep this bounded to prevent a malformed tool loop from keeping a review running forever.
     director-max-iterations: ${REVIEW_AGENTSCOPE_DIRECTOR_MAX_ITERATIONS:48}
+    # Context Scout is advisory. Exhausting either limit records a degradation and immediately starts Director.
+    scout-max-iterations: ${REVIEW_AGENTSCOPE_SCOUT_MAX_ITERATIONS:12}
+    scout-max-tool-calls: ${REVIEW_AGENTSCOPE_SCOUT_MAX_TOOL_CALLS:9}
+    scout-timeout: ${REVIEW_AGENTSCOPE_SCOUT_TIMEOUT:PT90S}
   model-gateway:
     enabled: ${REVIEW_MODEL_GATEWAY_ENABLED:false}
     base-url: ${REVIEW_MODEL_GATEWAY_BASE_URL:}
@@ -47,15 +51,18 @@ review:
         retry:
           max-retries: 2
           initial-backoff: PT0.2S
+        fallback-profile: fallback
       scout:
         provider: openai-compatible
         model-name: ${review.model-gateway.model-name:chongming-scout-placeholder}
         temperature: 0.0
-        timeout: PT30S
-        max-tokens: 1024
+        # Repository exploration can be slow on a local model; switch once to the configured fallback after timeout.
+        timeout: PT120S
+        max-tokens: 2048
         retry:
-          max-retries: 1
+          max-retries: 0
           initial-backoff: PT0.2S
+        fallback-profile: fallback
       role-reviewer:
         provider: openai-compatible
         model-name: ${review.model-gateway.model-name:chongming-reviewer-placeholder}
@@ -65,6 +72,7 @@ review:
         retry:
           max-retries: 2
           initial-backoff: PT0.2S
+        fallback-profile: fallback
       judge:
         provider: openai-compatible
         model-name: ${review.model-gateway.model-name:chongming-judge-placeholder}
@@ -74,14 +82,16 @@ review:
         retry:
           max-retries: 2
           initial-backoff: PT0.2S
+        fallback-profile: fallback
       fallback:
         provider: openai-compatible
+        # Override this profile in application-local.yml with a real alternate model when one is available.
         model-name: ${review.model-gateway.model-name:chongming-fallback-placeholder}
         temperature: 0.0
-        timeout: PT20S
-        max-tokens: 1024
+        timeout: PT120S
+        max-tokens: 2048
         retry:
-          max-retries: 1
+          max-retries: 0
           initial-backoff: PT0.2S
   persistence:
     # Disabled by default. Override these placeholders in the deployment environment.

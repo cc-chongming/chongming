@@ -122,6 +122,11 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
         if (status == 429) {
             throw new ModelGatewayException(Code.MODEL_RATE_LIMITED, "Model provider rate limit reached");
         }
+        if (status >= 400 && status < 500) {
+            throw new ModelGatewayException(
+                    Code.MODEL_REQUEST_REJECTED,
+                    "Model provider rejected the request with HTTP " + status);
+        }
         if (status < 200 || status >= 300) {
             throw new ModelGatewayException(
                     Code.MODEL_PROVIDER_ERROR,

@@ -76,6 +76,8 @@ public interface ModelGateway {
             List<ToolCall> toolCalls,
             String traceId) {
 
+        private static final int MAX_ATTEMPTS = 6;
+
         public ModelResponse {
             requireText(responseId, "responseId");
             requireText(modelName, "modelName");
@@ -89,8 +91,8 @@ public interface ModelGateway {
             if (latency == null || latency.isNegative()) {
                 throw new IllegalArgumentException("latency must not be negative");
             }
-            if (attempts < 1 || attempts > 3) {
-                throw new IllegalArgumentException("attempts must be between 1 and 3");
+            if (attempts < 1 || attempts > MAX_ATTEMPTS) {
+                throw new IllegalArgumentException("attempts must be between 1 and " + MAX_ATTEMPTS);
             }
             requireText(traceId, "traceId");
         }

@@ -31,7 +31,8 @@ public record ModelProfilesProperties(@Valid Map<String, ProfileDefinition> prof
             double temperature,
             Duration timeout,
             int maxTokens,
-            @Valid RetryDefinition retry) {
+            @Valid RetryDefinition retry,
+            String fallbackProfile) {
     }
 
     /**

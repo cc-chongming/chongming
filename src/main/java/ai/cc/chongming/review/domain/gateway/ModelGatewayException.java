@@ -36,6 +36,7 @@ public class ModelGatewayException extends RuntimeException {
         MODEL_CANCELLED,
         MODEL_CALL_TIMEOUT,
         MODEL_RATE_LIMITED,
+        MODEL_REQUEST_REJECTED,
         MODEL_NETWORK_ERROR,
         MODEL_PROVIDER_ERROR,
         MODEL_RESPONSE_INVALID

@@ -17,6 +17,7 @@ import ai.cc.chongming.review.infrastructure.model.ModelProfileRegistry;
 import ai.cc.chongming.review.infrastructure.model.ModelProviderClient;
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -86,6 +87,60 @@ class ModelGatewayContractTests {
                 .isEqualTo(Code.MODEL_CANCELLED);
     }
 
+    @Test
+    void switchesToConfiguredFallbackProfileAfterPrimaryTimeout() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<List<String>> invokedProfiles = new AtomicReference<>(new java.util.ArrayList<>());
+        ModelProviderClient provider = providerRequest -> {
+            invokedProfiles.get().add(providerRequest.profile().profileId());
+            if (calls.incrementAndGet() == 1) {
+                throw new ModelGatewayException(Code.MODEL_CALL_TIMEOUT, "primary timed out");
+            }
+            return new ModelProviderClient.ProviderResponse(
+                    "fallback-response",
+                    "{\"summary\":\"fallback\"}",
+                    new ModelGateway.Usage(5, 3, 8),
+                    ModelGateway.FinishReason.STOP);
+        };
+        ModelCallAuditService audit = new ModelCallAuditService();
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                enabledProperties(), fallbackProfileRegistry(), provider, audit);
+
+        ModelGateway.ModelResponse response = gateway.generate(scoutRequest(), IntakeCancellation.neverCancelled()).block();
+
+        assertThat(response.modelName()).isEqualTo("fallback-model");
+        assertThat(response.attempts()).isEqualTo(2);
+        assertThat(invokedProfiles.get()).containsExactly("scout", "scout-fallback");
+        assertThat(audit.findByReview(responseRequestReviewId())).satisfiesExactly(
+                entry -> {
+                    assertThat(entry.profileId()).isEqualTo("scout");
+                    assertThat(entry.failureCode()).isEqualTo(Code.MODEL_CALL_TIMEOUT.name());
+                    assertThat(entry.attempts()).isEqualTo(1);
+                },
+                entry -> {
+                    assertThat(entry.profileId()).isEqualTo("scout-fallback");
+                    assertThat(entry.failureCode()).isNull();
+                    assertThat(entry.attempts()).isEqualTo(2);
+                });
+    }
+
+    @Test
+    void doesNotSwitchToFallbackAfterRejectedRequest() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelProviderClient provider = providerRequest -> {
+            calls.incrementAndGet();
+            throw new ModelGatewayException(Code.MODEL_REQUEST_REJECTED, "invalid model configuration");
+        };
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                enabledProperties(), fallbackProfileRegistry(), provider, new ModelCallAuditService());
+
+        assertThatThrownBy(() -> gateway.generate(scoutRequest(), IntakeCancellation.neverCancelled()).block())
+                .isInstanceOf(ModelGatewayException.class)
+                .extracting(error -> ((ModelGatewayException) error).code())
+                .isEqualTo(Code.MODEL_REQUEST_REJECTED);
+        assertThat(calls).hasValue(1);
+    }
+
     private ModelGatewayProperties enabledProperties() {
         return new ModelGatewayProperties(true, URI.create("https://example.invalid/v1"), "placeholder", "test-key", false);
     }
@@ -99,7 +154,42 @@ class ModelGatewayContractTests {
                         0.2d,
                         Duration.ofSeconds(1),
                         256,
-                        new ModelProfilesProperties.RetryDefinition(maxRetries, Duration.ZERO)))));
+                        new ModelProfilesProperties.RetryDefinition(maxRetries, Duration.ZERO),
+                        null))));
+    }
+
+    private ModelProfileRegistry fallbackProfileRegistry() {
+        return new ModelProfileRegistry(new ModelProfilesProperties(Map.of(
+                "scout",
+                new ModelProfilesProperties.ProfileDefinition(
+                        "openai-compatible",
+                        "primary-model",
+                        0.0d,
+                        Duration.ofSeconds(1),
+                        512,
+                        new ModelProfilesProperties.RetryDefinition(0, Duration.ZERO),
+                        "scout-fallback"),
+                "scout-fallback",
+                new ModelProfilesProperties.ProfileDefinition(
+                        "openai-compatible",
+                        "fallback-model",
+                        0.0d,
+                        Duration.ofSeconds(1),
+                        512,
+                        new ModelProfilesProperties.RetryDefinition(0, Duration.ZERO),
+                        null))));
+    }
+
+    private ModelGateway.ModelRequest scoutRequest() {
+        return new ModelGateway.ModelRequest(
+                responseRequestReviewId(),
+                RoleType.DIRECTOR,
+                "scout",
+                "scout-v1",
+                "Inspect the repository.",
+                "Public context.",
+                Set.of("list_files"),
+                "trace-fallback");
     }
 
     private ModelGateway.ModelRequest request() {
