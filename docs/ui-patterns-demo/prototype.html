@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重明 — 流水线庭审剧场 完整原型</title>
+<style>
+:root{--bg:#0b0d13;--s1:#13161f;--s2:#1a1e2b;--s3:#222738;--bd:#2a2f44;--tx:#e4e6f0;--td:#7a7f96;--ac:#6c8cff;--gn:#34d399;--rd:#f87171;--yl:#fbbf24;--or:#fb923c;--pu:#a78bfa;--cy:#22d3ee;--pk:#f472b6;--r:10px;--sh:0 4px 24px rgba(0,0,0,.4);--font:-apple-system,"PingFang SC","Noto Sans SC",sans-serif;--mono:"Cascadia Code","Fira Code",monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--tx);line-height:1.6;min-height:100vh}
+a{color:var(--ac);text-decoration:none}
+
+/* ── Page transitions ── */
+.page{display:none;min-height:100vh;animation:fadeIn .3s}
+.page.active{display:flex;flex-direction:column}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Shared: topbar ── */
+.topbar{display:flex;align-items:center;gap:16px;padding:10px 24px;background:var(--s1);border-bottom:1px solid var(--bd);flex-shrink:0}
+.topbar .logo{font-size:18px;font-weight:800;background:linear-gradient(135deg,var(--ac),var(--cy));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.topbar .title{font-size:13px;color:var(--td);flex:1}
+.topbar .status{display:flex;align-items:center;gap:6px;font-size:12px}
+.topbar .dot{width:6px;height:6px;border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.4}}
+.topbar .back{font-size:12px;padding:5px 14px;border-radius:6px;border:1px solid var(--bd);background:var(--s2);color:var(--td);cursor:pointer}
+
+/* ── Shared: buttons ── */
+.btn{font-size:13px;padding:8px 20px;border-radius:8px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);cursor:pointer;font-weight:600;transition:.15s}
+.btn:hover{border-color:var(--ac);color:var(--ac)}
+.btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
+.btn.primary:hover{opacity:.9}
+.btn.success{border-color:var(--gn);color:var(--gn)}
+.btn.danger{border-color:var(--rd);color:var(--rd)}
+.btn.warn{border-color:var(--yl);color:var(--yl)}
+.btn.purple{border-color:var(--pu);color:var(--pu)}
+
+/* ── Shared: tags/badges ── */
+.tag{font-size:11px;padding:2px 10px;border-radius:20px;font-weight:600;display:inline-block;white-space:nowrap}
+.tag-run{background:rgba(108,140,255,.15);color:var(--ac)}
+.tag-done{background:rgba(52,211,153,.15);color:var(--gn)}
+.tag-wait{background:rgba(251,191,36,.15);color:var(--yl)}
+.tag-block{background:rgba(248,113,113,.15);color:var(--rd)}
+.badge{font-size:10px;padding:1px 8px;border-radius:10px;font-weight:700;display:inline-block}
+.b-p0{background:rgba(248,113,113,.15);color:var(--rd)}.b-p1{background:rgba(251,191,36,.15);color:var(--yl)}.b-p2{background:rgba(108,140,255,.15);color:var(--ac)}
+
+/* ── Shared: stream ── */
+.s-msg{margin-bottom:10px;animation:fu .3s}
+@keyframes fu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.s-line{font-size:13px;line-height:1.7}.s-line.dim{color:var(--td)}.s-line.hl{color:var(--cy)}
+.s-tool{background:var(--s2);border:1px solid var(--bd);border-radius:6px;padding:8px 12px;margin:6px 0;font-size:12px;font-family:var(--mono)}
+.s-tool .tn{color:var(--or);font-weight:700}.s-tool .ts{color:var(--gn);float:right}.s-tool .tr{color:var(--td);margin-top:4px;font-size:11px}
+.cursor{display:inline-block;width:2px;height:14px;background:var(--ac);animation:blink 1s step-end infinite;vertical-align:text-bottom;margin-left:2px}
+@keyframes blink{50%{opacity:0}}
+
+/* ── Shared: cards ── */
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden}
+.card-hd{padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px;background:var(--s2)}
+.card-hd .av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px}
+.card-hd .nm{font-size:13px;font-weight:700}.card-hd .rl{font-size:11px;color:var(--td)}
+.card-bd{padding:14px}
+
+/* ── Shared: scrollbars ── */
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- PAGE 1: 创建评审 -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="page active" id="page-create">
+<style>
+#create-body{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 20px}
+.create-card{background:var(--s1);border:1px solid var(--bd);border-radius:16px;width:100%;max-width:640px;box-shadow:var(--sh)}
+.create-hd{padding:28px 32px 20px;text-align:center}
+.create-hd h1{font-size:22px;font-weight:800;margin-bottom:6px;background:linear-gradient(135deg,var(--ac),var(--cy));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.create-hd p{font-size:13px;color:var(--td)}
+.create-bd{padding:0 32px 28px}
+.field{margin-bottom:18px}
+.field label{display:block;font-size:12px;font-weight:700;color:var(--td);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.field input,.field select,.field textarea{width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);font-size:13px;font-family:var(--font);transition:.15s}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px rgba(108,140,255,.15)}
+.field textarea{resize:vertical;min-height:80px}
+.upload-zone{border:2px dashed var(--bd);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:.2s}
+.upload-zone:hover{border-color:var(--ac);background:rgba(108,140,255,.03)}
+.upload-zone .icon{font-size:32px;margin-bottom:8px}
+.upload-zone .txt{font-size:13px;color:var(--td)}
+.upload-zone .hint{font-size:11px;color:var(--td);margin-top:4px;opacity:.6}
+.upload-zone.has-file{border-color:var(--gn);background:rgba(52,211,153,.03)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.create-ft{padding:0 32px 28px;display:flex;justify-content:flex-end;gap:10px}
+.role-chip{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--bd);background:var(--s2);display:flex;align-items:center;gap:6px}
+</style>
+
+<div class="topbar">
+  <div class="logo">重明</div>
+  <div class="title">多角色对抗需求评审工作台</div>
+</div>
+
+<div id="create-body">
+  <div class="create-card">
+    <div class="create-hd">
+      <h1>📋 创建需求评审</h1>
+      <p>上传需求文档，选择代码仓库，启动多角色对抗评审</p>
+      <p style="font-size:11px;color:var(--td);margin-top:4px">参与角色由 Director AI 根据需求内容自动分析决定</p>
+    </div>
+    <div class="create-bd">
+      <div class="field">
+        <label>需求文档</label>
+        <div class="upload-zone" id="uploadZone" onclick="toggleUpload()">
+          <div class="icon" id="uploadIcon">📄</div>
+          <div class="txt" id="uploadTxt">点击或拖拽上传 Markdown 需求文档</div>
+          <div class="hint" id="uploadHint">支持 .md 格式，最大 2MB</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label>目标仓库</label>
+          <select id="repoSelect"><option value="">选择代码仓库...</option><option>cx-ai/data-sync</option><option>cx-ai/user-center</option><option>cx-ai/knowledge-base</option></select>
+        </div>
+        <div class="field">
+          <label>分支</label>
+          <input type="text" placeholder="main" value="main">
+        </div>
+      </div>
+      <div class="field">
+        <label>评审任务描述</label>
+        <textarea placeholder="描述本次评审的重点关注领域，如：数据一致性、性能瓶颈、前端交互方案...">1. 增量同步方案的技术可行性评估
+2. 数据冲突解决策略的完整性审查
+3. 前端增量数据展示的交互方案
+4. 测试覆盖与验收标准的充分性</textarea>
+      </div>
+      <div class="field">
+        <label>参与角色 <span style="font-weight:400;text-transform:none;letter-spacing:0">· 由 Director AI 自动决定</span></label>
+        <div style="background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:14px;">
+          <div style="font-size:12px;color:var(--td);display:flex;align-items:center;gap:6px;margin-bottom:8px">
+            <span style="font-size:14px">🎬</span> Director 将在启动后根据需求内容自动分析，从以下角色池中选择合适的参与角色:
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <div class="role-chip" style="cursor:default;opacity:.7">💡 产品经理</div>
+            <div class="role-chip" style="cursor:default;opacity:.7">🎨 前端开发</div>
+            <div class="role-chip" style="cursor:default;opacity:.7">⚙️ 后端开发</div>
+            <div class="role-chip" style="cursor:default;opacity:.7">🧪 测试工程师</div>
+            <div class="role-chip" style="cursor:default;opacity:.7">🏗️ 架构师</div>
+            <div class="role-chip" style="cursor:default;opacity:.7">🔒 安全专家</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="create-ft">
+      <button class="btn" onclick="alert('已保存为草稿')">💾 保存草稿</button>
+      <button class="btn primary" onclick="startReview()">🚀 启动评审</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- PAGE 2: 评审工作台 (main workspace) -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="page" id="page-workbench">
+<style>
+#workbench{flex:1;display:flex;overflow:hidden}
+/* ── Left pipeline ── */
+#pipe{width:200px;background:var(--s1);border-right:1px solid var(--bd);padding:14px 0;overflow-y:auto;flex-shrink:0}
+#pipe .pl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--td);padding:0 14px;margin-bottom:10px}
+.pi{display:flex;align-items:center;gap:9px;padding:9px 14px;cursor:pointer;border-left:3px solid transparent;transition:.15s}
+.pi:hover{background:var(--s2)}.pi.on{background:rgba(108,140,255,.08);border-left-color:var(--ac)}
+.pi.done .pi-i{background:var(--gn);color:#000}
+.pi.run .pi-i{background:var(--ac);color:#000;animation:pulse 1.5s infinite}
+.pi.pend .pi-i{background:var(--s3);color:var(--td)}
+.pi-i{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.pi-t{flex:1;min-width:0}.pi-t .nm{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pi-t .sb{font-size:10px;color:var(--td)}
+.pi-conn{width:2px;height:10px;background:var(--bd);margin-left:26px}.pi-conn.done{background:var(--gn)}
+
+/* ── Center ── */
+#center{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#content{flex:1;overflow-y:auto;padding:20px}
+.ph{display:none}.ph.on{display:block}
+.ph-hd{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.ph-hd h2{font-size:17px;font-weight:700}
+
+/* ── Debate court ── */
+.court{display:grid;grid-template-columns:1fr 160px 1fr;gap:0;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;min-height:300px}
+.court-side{padding:14px;background:var(--s1);overflow-y:auto}
+.court-side.pro{border-right:1px solid var(--bd)}.court-side.con{border-left:1px solid var(--bd)}
+.court-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+.court-side.pro .court-label{color:var(--gn)}.court-side.con .court-label{color:var(--rd)}
+.dc{background:var(--s2);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px}
+.dc .dch{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+.dc .dch .av{width:18px;height:18px;border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center}
+
+/* ── Agent grid ── */
+.ag-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ag{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:.2s}
+.ag:hover{border-color:var(--ac);transform:translateY(-1px)}
+.ag.open{grid-column:1/-1}
+.ag-h{padding:10px 12px;display:flex;align-items:center;gap:8px;background:var(--s2)}
+.ag-h .av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px}
+.ag-h .nm{font-size:12px;font-weight:700;flex:1}
+.ag-s{padding:6px 12px;font-size:11px;color:var(--td);border-top:1px solid var(--bd)}
+.ag.open .ag-s{display:none}
+.ag-b{padding:10px 12px;font-size:12px;display:none;max-height:250px;overflow-y:auto;line-height:1.7}
+.ag.open .ag-b{display:block}
+
+/* ── Convergence ── */
+.cv-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.cv-lb{width:28px;font-size:12px;font-weight:700;text-align:right;flex-shrink:0}
+.cv-tr{flex:1;height:30px;background:linear-gradient(90deg,rgba(248,113,113,.06),rgba(251,191,36,.06),rgba(52,211,153,.06));border-radius:6px;border:1px solid var(--bd);position:relative}
+.cv-dot{position:absolute;top:50%;width:22px;height:22px;border-radius:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;font-size:10px;border:2px solid var(--bg);box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.cv-ends{display:flex;justify-content:space-between;font-size:9px;color:var(--td);margin:2px 0 0 36px}
+
+/* ── Right sidebar ── */
+#sidebar{width:300px;background:var(--s1);border-left:1px solid var(--bd);display:flex;flex-direction:column;flex-shrink:0}
+.sb-tabs{display:flex;border-bottom:1px solid var(--bd)}
+.sb-tab{flex:1;padding:10px 6px;text-align:center;font-size:11px;font-weight:600;color:var(--td);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent}
+.sb-tab.active{color:var(--ac);border-bottom-color:var(--ac)}
+.sb-panel{flex:1;overflow-y:auto;padding:12px;display:none}.sb-panel.active{display:block}
+.tl-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd);animation:fu .3s}
+.tl-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+.tl-body{flex:1;font-size:12px}.tl-body .tl-t{font-weight:600}.tl-body .tl-s{color:var(--td);font-size:11px;margin-top:2px}
+.tl-time{font-size:10px;color:var(--td);float:right}
+
+/* ── Verdict bar ── */
+.vb{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:14px 18px;display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap}
+.vb-tag{font-size:12px;font-weight:700;padding:4px 14px;border-radius:20px}
+.vb-txt{font-size:12px;flex:1;min-width:200px}
+.vb-btns{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ── Round tabs ── */
+.rtabs{display:flex;gap:4px;margin-bottom:14px}
+.rtab{padding:6px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--bd);background:var(--s1);color:var(--td);transition:.15s}
+.rtab:hover{border-color:var(--ac);color:var(--tx)}.rtab.active{background:var(--ac);color:#fff;border-color:var(--ac)}
+</style>
+
+<!-- Topbar -->
+<div class="topbar">
+  <div class="logo">重明</div>
+  <div class="title">#2026-0731 · 数据同步模块增量同步需求</div>
+  <div class="status" id="ws-status"><div class="dot" style="background:var(--ac)"></div><span style="color:var(--ac)">审查进行中</span></div>
+  <button class="back" onclick="navigate('report')">📊 查看报告</button>
+</div>
+
+<div id="workbench">
+  <!-- Pipeline -->
+  <div id="pipe">
+    <div class="pl">评审流程</div>
+    <div class="pi done" data-ph="scout" onclick="goPhase('scout')"><div class="pi-i">🔍</div><div class="pi-t"><div class="nm">Scout</div><div class="sb">已完成</div></div></div>
+    <div class="pi-conn done"></div>
+    <div class="pi done" data-ph="director" onclick="goPhase('director')"><div class="pi-i">🎬</div><div class="pi-t"><div class="nm">Director</div><div class="sb">已完成</div></div></div>
+    <div class="pi-conn done"></div>
+    <div class="pi done" data-ph="review" onclick="goPhase('review')"><div class="pi-i">👥</div><div class="pi-t"><div class="nm">独立审查</div><div class="sb">已完成</div></div></div>
+    <div class="pi-conn done"></div>
+    <div class="pi done" data-ph="conflict" onclick="goPhase('conflict')"><div class="pi-i">⚡</div><div class="pi-t"><div class="nm">冲突检测</div><div class="sb">已完成</div></div></div>
+    <div class="pi-conn"></div>
+    <div class="pi run" data-ph="debate" onclick="goPhase('debate')"><div class="pi-i">⚖️</div><div class="pi-t"><div class="nm">多轮辩论</div><div class="sb">R2 进行中</div></div></div>
+    <div class="pi-conn"></div>
+    <div class="pi pend" data-ph="judge" onclick="goPhase('judge')"><div class="pi-i">👨‍⚖️</div><div class="pi-t"><div class="nm">Judge</div><div class="sb">等待</div></div></div>
+    <div class="pi-conn"></div>
+    <div class="pi pend" data-ph="human" onclick="goPhase('human')"><div class="pi-i">🧑</div><div class="pi-t"><div class="nm">人工决策</div><div class="sb">等待</div></div></div>
+  </div>
+
+  <!-- Center -->
+  <div id="center"><div id="content">
+
+    <!-- ─── Scout ─── -->
+    <div class="ph" id="ph-scout">
+      <div class="ph-hd"><h2>🔍 Context Scout — 项目信息收集</h2><span class="tag tag-done">✓ 完成</span></div>
+      <div class="card">
+        <div class="card-hd"><div class="av" style="background:rgba(34,211,238,.15)">🔍</div><div><div class="nm" style="color:var(--cy)">Context Scout</div><div class="rl">项目上下文探索 Agent</div></div><span class="tag tag-done" style="margin-left:auto">已完成</span></div>
+        <div class="card-bd">
+          <div class="s-msg"><div class="s-line">正在分析目标仓库 <strong>cx-ai/data-sync</strong> ...</div></div>
+          <div class="s-msg"><div class="s-tool"><span class="tn">listFiles</span><span class="ts">✓</span><div class="tr">找到 847 个文件，识别 12 个核心模块</div></div></div>
+          <div class="s-msg"><div class="s-line hl">关键发现: 项目使用 MySQL 5.6，当前数据同步采用全量拉取方案</div></div>
+          <div class="s-msg"><div class="s-tool"><span class="tn">searchText</span><span class="ts">✓</span><div class="tr">搜索 "sync" 关键词，命中 23 个文件、67 处引用</div></div></div>
+          <div class="s-msg"><div class="s-tool"><span class="tn">readLines</span><span class="ts">✓</span><div class="tr">SyncService.java:1-150 — 无增量逻辑，无冲突处理</div></div></div>
+          <div class="s-msg"><div class="s-tool"><span class="tn">findSymbol</span><span class="ts">✓</span><div class="tr">定位 DataSyncController, SyncService, SyncTask, SyncConfig</div></div></div>
+          <div class="s-msg"><div class="s-line hl"><strong>Scout 报告摘要:</strong></div><div class="s-line dim">1. 技术栈: Spring Boot 3.2 + MyBatis + MySQL 5.6</div><div class="s-line dim">2. 当前同步方案: 全量拉取，无增量机制</div><div class="s-line dim">3. 数据模型: 无版本号字段，无 updated_at 时间戳</div><div class="s-line dim">4. 基准 QPS: 峰值 12k，触发过告警</div><div class="s-line dim">5. 依赖: 无 Redis，无消息队列，纯 MySQL 方案</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Director ─── -->
+    <div class="ph" id="ph-director">
+      <div class="ph-hd"><h2>🎬 Director — 评审规划</h2><span class="tag tag-done">✓ 完成</span></div>
+      <div class="card">
+        <div class="card-hd"><div class="av" style="background:rgba(108,140,255,.15)">🎬</div><div><div class="nm" style="color:var(--ac)">Director 协调者</div><div class="rl">评审流程编排 Agent</div></div><span class="tag tag-done" style="margin-left:auto">已完成</span></div>
+        <div class="card-bd">
+          <div class="s-msg"><div class="s-line">基于 Scout 报告，分析需求涉及的技术领域...</div></div>
+          <div class="s-msg"><div class="s-line"><strong>🤖 角色自动选择:</strong></div><div class="s-line dim">需求涉及"增量同步"和"冲突解决" → 需要 <span style="color:var(--or)">⚙️ 后端开发</span></div><div class="s-line dim">需求涉及"前端增量展示" → 需要 <span style="color:var(--pu)">🎨 前端开发</span></div><div class="s-line dim">需求涉及"业务价值"和"验收标准" → 需要 <span style="color:var(--cy)">💡 产品经理</span> + <span style="color:var(--yl)">🧪 测试工程师</span></div><div class="s-line dim">需求不涉及安全敏感操作 → 跳过 <span style="opacity:.4">🔒 安全专家</span></div><div class="s-line dim">需求不涉及架构变更 → 跳过 <span style="opacity:.4">🏗️ 架构师</span></div></div>
+          <div class="s-msg"><div class="s-line"><strong>📋 评审任务清单:</strong></div><div class="s-line dim">1. 增量同步方案的技术可行性评估</div><div class="s-line dim">2. 数据冲突解决策略的完整性审查</div><div class="s-line dim">3. 前端增量数据展示的交互方案</div><div class="s-line dim">4. 测试覆盖与验收标准的充分性</div></div>
+          <div class="s-msg"><div class="s-line"><strong>👥 角色分配:</strong></div><div class="s-line dim">• 产品经理 → 任务 1, 2 (业务价值 + 需求完整性)</div><div class="s-line dim">• 前端开发 → 任务 3 (交互方案可行性)</div><div class="s-line dim">• 后端开发 → 任务 1, 2 (技术方案 + 数据一致性)</div><div class="s-line dim">• 测试工程师 → 任务 4 (测试路径 + 验收标准)</div></div>
+          <div class="s-msg"><div class="s-line hl">已选择 4 个角色，计划发布，开始独立审查...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Review ─── -->
+    <div class="ph" id="ph-review">
+      <div class="ph-hd"><h2>👥 独立审查 — 4 角色并行分析</h2><span class="tag tag-done">✓ 完成 · 7 Claim</span></div>
+      <div class="ag-grid">
+        <div class="ag" onclick="toggleAg(this)"><div class="ag-h"><div class="av" style="background:rgba(34,211,238,.15)">💡</div><div class="nm" style="color:var(--cy)">产品经理</div><span class="badge" style="background:rgba(52,211,153,.15);color:var(--gn)">✅ 支持</span></div><div class="ag-s">2 个 Claim · P1: 增量同步是核心诉求 · P2: 分阶段上线</div><div class="ag-b"><div class="s-tool"><span class="tn">searchText</span><span class="ts">✓</span><div class="tr">搜索竞品同步方案...</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #1 [P1]:</strong> 增量同步是核心业务诉求，必须在 V1 实现</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #2 [P2]:</strong> 建议分阶段上线 — V1 用 LWW 策略，V2 引入向量时钟</div></div></div></div>
+        <div class="ag" onclick="toggleAg(this)"><div class="ag-h"><div class="av" style="background:rgba(167,139,250,.15)">🎨</div><div class="nm" style="color:var(--pu)">前端开发</div><span class="badge" style="background:rgba(52,211,153,.15);color:var(--gn)">✅ 支持</span></div><div class="ag-s">1 个 Claim · P2: DiffViewer 已就绪，增量展示可行</div><div class="ag-b"><div class="s-tool"><span class="tn">listFiles</span><span class="ts">✓</span><div class="tr">发现 src/components/DiffViewer.vue</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #3 [P2]:</strong> 前端已实现 DiffViewer，增量数据展示无技术障碍</div></div></div></div>
+        <div class="ag" onclick="toggleAg(this)"><div class="ag-h"><div class="av" style="background:rgba(251,146,60,.15)">⚙️</div><div class="nm" style="color:var(--or)">后端开发</div><span class="badge" style="background:rgba(248,113,113,.15);color:var(--rd)">❌ 反对</span></div><div class="ag-s">2 个 Claim · P0: 冲突策略未定义 · P1: MySQL 5.6 约束</div><div class="ag-b"><div class="s-tool"><span class="tn">findSymbol</span><span class="ts">✓</span><div class="tr">SyncService — 无版本号字段，无乐观锁</div></div><div class="s-tool"><span class="tn">readLines</span><span class="ts">✓</span><div class="tr">DDL: 无 version, 无 updated_at</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #4 [P0]:</strong> 冲突解决策略未定义，并发写入下数据一致性无法保证</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #5 [P1]:</strong> MySQL 5.6 不支持 SKIP LOCKED，需引入 Redis 分布式锁</div></div></div></div>
+        <div class="ag" onclick="toggleAg(this)"><div class="ag-h"><div class="av" style="background:rgba(251,191,36,.15)">🧪</div><div class="nm" style="color:var(--yl)">测试工程师</div><span class="badge" style="background:rgba(248,113,113,.15);color:var(--rd)">❌ 反对</span></div><div class="ag-s">2 个 Claim · P1: 缺少断点续传 · P2: 验收标准不充分</div><div class="ag-b"><div class="s-tool"><span class="tn">searchText</span><span class="ts">✓</span><div class="tr">搜索 "断点续传" / "checkpoint" — 0 结果</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #6 [P1]:</strong> 缺乏断点续传/重连恢复的验收标准</div></div><div class="s-msg"><div class="s-line hl"><strong>Claim #7 [P2]:</strong> 缺少性能基准指标（吞吐量、延迟 P99）</div></div></div></div>
+      </div>
+    </div>
+
+    <!-- ─── Conflict ─── -->
+    <div class="ph" id="ph-conflict">
+      <div class="ph-hd"><h2>⚡ 冲突检测</h2><span class="tag tag-done">✓ 完成</span></div>
+      <div class="card" style="margin-bottom:14px"><div class="card-bd">
+        <div style="font-size:12px;font-weight:700;color:var(--td);margin-bottom:10px">🔍 ConflictDetector 发现 3 组冲突</div>
+        <div style="background:var(--s2);border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid var(--rd);font-size:12px"><div style="font-weight:700;color:var(--rd);margin-bottom:2px"><span class="badge b-p0">P0</span> 冲突 #1</div><span style="color:var(--cy)">产品</span> "增量同步必须上线" vs <span style="color:var(--or)">后端</span> "冲突策略未定义，一致性无法保证"</div>
+        <div style="background:var(--s2);border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid var(--yl);font-size:12px"><div style="font-weight:700;color:var(--yl);margin-bottom:2px"><span class="badge b-p1">P1</span> 冲突 #2</div><span style="color:var(--cy)">产品</span> "LWW 够用" vs <span style="color:var(--yl)">测试</span> "LWW 无法验证正确性"</div>
+        <div style="background:var(--s2);border-radius:8px;padding:12px;border-left:3px solid var(--ac);font-size:12px"><div style="font-weight:700;color:var(--ac);margin-bottom:2px"><span class="badge b-p1">P1</span> 冲突 #3</div><span style="color:var(--or)">后端</span> "需 Redis 分布式锁" vs <span style="color:var(--cy)">产品</span> "不增加新基础设施依赖"</div>
+      </div></div>
+      <div class="card"><div class="card-hd"><div class="av" style="background:rgba(108,140,255,.15)">🎬</div><div><div class="nm" style="color:var(--ac)">Director</div><div class="rl">冲突处置决策</div></div><span class="tag tag-done" style="margin-left:auto">已完成</span></div>
+      <div class="card-bd"><div class="s-msg"><div class="s-line">检测到 3 组冲突，其中 1 组 P0 级别。启动结构化辩论流程，最多 3 轮。</div></div><div class="s-msg"><div class="s-line hl">将 3 组冲突合并为 1 个辩论议题: "数据冲突解决策略"。辩论开始。</div></div></div></div>
+    </div>
+
+    <!-- ─── Debate (default active) ─── -->
+    <div class="ph on" id="ph-debate">
+      <div class="ph-hd"><h2>⚖️ 多轮辩论 — 数据冲突解决策略</h2><span class="tag tag-run">● R2 进行中</span></div>
+      <div class="rtabs">
+        <button class="rtab" onclick="setRound(1)">R1 初始立场</button>
+        <button class="rtab active" onclick="setRound(2)">R2 交锋</button>
+        <button class="rtab" onclick="setRound(3)">R3 收敛</button>
+      </div>
+      <div class="court">
+        <div class="court-side pro"><div class="court-label">🟢 支持方</div>
+          <div class="dc c-r" data-r="1,2,3"><div class="dch"><span class="av" style="background:rgba(34,211,238,.15)">💡</span><span style="font-size:11px;font-weight:700;color:var(--cy)">产品</span><span class="badge b-p1" style="margin-left:auto">P1</span></div>增量同步是核心诉求</div>
+          <div class="dc c-r" data-r="2,3"><div class="dch"><span class="av" style="background:rgba(34,211,238,.15)">💡</span><span style="font-size:11px;font-weight:700;color:var(--cy)">产品</span><span class="badge b-p2" style="margin-left:auto">P2</span></div>先 LWW 快速交付</div>
+          <div class="dc c-r" data-r="1,2,3"><div class="dch"><span class="av" style="background:rgba(167,139,250,.15)">🎨</span><span style="font-size:11px;font-weight:700;color:var(--pu)">前端</span><span class="badge b-p2" style="margin-left:auto">P2</span></div>DiffViewer 已就绪</div>
+          <div class="dc c-r" data-r="3" style="border:1px solid var(--gn);background:rgba(52,211,153,.05)"><div class="dch"><span class="av" style="background:rgba(251,191,36,.15)">🧪</span><span style="font-size:11px;font-weight:700;color:var(--yl)">测试</span><span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(52,211,153,.15);color:var(--gn);margin-left:auto">立场转变</span></div>接受分阶段，前提有并发测试</div>
+        </div>
+        <div style="background:var(--s2);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px 8px">
+          <div style="position:relative;width:80px;height:80px;margin-bottom:6px"><svg viewBox="0 0 100 100" style="width:100%;height:100%;transform:rotate(-90deg)"><circle cx="50" cy="50" r="42" fill="none" stroke="var(--bd)" stroke-width="7"/><circle cx="50" cy="50" r="42" fill="none" stroke="var(--yl)" stroke-width="7" stroke-linecap="round" stroke-dasharray="264" id="gauge" style="transition:1s"/></svg><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900" id="cv-val">45%</div></div>
+          <div style="font-size:10px;color:var(--td)">共识度</div>
+          <div style="font-size:16px;font-weight:900;color:var(--ac);margin-top:10px" id="rd-val">R2</div><div style="font-size:10px;color:var(--td)">/ 3</div>
+        </div>
+        <div class="court-side con"><div class="court-label">🔴 质疑方</div>
+          <div class="dc c-r" data-r="1,2,3"><div class="dch"><span class="av" style="background:rgba(251,146,60,.15)">⚙️</span><span style="font-size:11px;font-weight:700;color:var(--or)">后端</span><span class="badge b-p0" style="margin-left:auto">P0</span></div>冲突策略未定义</div>
+          <div class="dc c-r" data-r="1,2"><div class="dch"><span class="av" style="background:rgba(251,146,60,.15)">⚙️</span><span style="font-size:11px;font-weight:700;color:var(--or)">后端</span><span class="badge b-p1" style="margin-left:auto">P1</span></div>MySQL 5.6 不支持 SKIP LOCKED</div>
+          <div class="dc c-r" data-r="1,2,3"><div class="dch"><span class="av" style="background:rgba(251,191,36,.15)">🧪</span><span style="font-size:11px;font-weight:700;color:var(--yl)">测试</span><span class="badge b-p1" style="margin-left:auto">P1</span></div>断点续传未定义</div>
+          <div class="dc c-r" data-r="3" style="border:1px solid var(--or);background:rgba(251,146,60,.05)"><div class="dch"><span class="av" style="background:rgba(251,146,60,.15)">⚙️</span><span style="font-size:11px;font-weight:700;color:var(--or)">后端</span><span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(251,146,60,.15);color:var(--or);margin-left:auto">让步</span></div>接受乐观锁替代 Redis</div>
+        </div>
+      </div>
+      <!-- Verdict draft -->
+      <div class="vb">
+        <span class="vb-tag" style="background:rgba(251,191,36,.15);color:var(--yl)">⚖️ 裁决草案</span>
+        <span class="vb-txt">CONDITIONAL — 补充并发方案 + 断点续传验收标准后通过</span>
+        <div class="vb-btns"><button class="btn success" style="font-size:11px;padding:5px 12px">✅ 通过</button><button class="btn warn" style="font-size:11px;padding:5px 12px">⚠️ 有条件</button><button class="btn danger" style="font-size:11px;padding:5px 12px">❌ 驳回</button><button class="btn" style="font-size:11px;padding:5px 12px">↩️ 退回</button></div>
+      </div>
+      <!-- Convergence -->
+      <div style="background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:14px;margin-top:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--td);margin-bottom:10px">📈 多轮立场收敛</div>
+        <div class="cv-row"><div class="cv-lb" style="color:var(--rd)">R1</div><div class="cv-tr"><div class="cv-dot" style="left:82%;background:var(--cy)">💡</div><div class="cv-dot" style="left:70%;background:var(--pu)">🎨</div><div class="cv-dot" style="left:25%;background:var(--yl)">🧪</div><div class="cv-dot" style="left:12%;background:var(--or)">⚙️</div></div></div><div class="cv-ends"><span>❌ 反对</span><span>✅ 支持</span></div>
+        <div class="cv-row"><div class="cv-lb" style="color:var(--yl)">R2</div><div class="cv-tr"><div class="cv-dot" style="left:70%;background:var(--cy)">💡</div><div class="cv-dot" style="left:62%;background:var(--pu)">🎨</div><div class="cv-dot" style="left:40%;background:var(--yl)">🧪</div><div class="cv-dot" style="left:35%;background:var(--or)">⚙️</div></div></div><div class="cv-ends"><span>❌ 反对</span><span>✅ 支持</span></div>
+        <div class="cv-row"><div class="cv-lb" style="color:var(--gn)">R3</div><div class="cv-tr"><div class="cv-dot" style="left:58%;background:var(--cy)">💡</div><div class="cv-dot" style="left:55%;background:var(--pu)">🎨</div><div class="cv-dot" style="left:52%;background:var(--yl)">🧪</div><div class="cv-dot" style="left:48%;background:var(--or)">⚙️</div></div></div><div class="cv-ends"><span>❌ 反对</span><span>✅ 支持</span></div>
+        <div style="text-align:center;font-size:12px;color:var(--td);margin-top:10px;padding-top:8px;border-top:1px solid var(--bd)">从 <strong style="color:var(--rd)">70% 跨度</strong> 收敛到 <strong style="color:var(--gn)">10%</strong></div>
+      </div>
+    </div>
+
+    <!-- ─── Judge ─── -->
+    <div class="ph" id="ph-judge">
+      <div class="ph-hd"><h2>👨‍⚖️ Judge 裁决</h2><span class="tag tag-run">● 进行中</span></div>
+      <div class="card"><div class="card-hd"><div class="av" style="background:rgba(244,114,182,.15)">👨‍⚖️</div><div><div class="nm" style="color:var(--pk)">Judge 裁决者</div><div class="rl">仅基于已持久化的 Claim 和证据</div></div><span class="tag tag-run" style="margin-left:auto">思考中...</span></div>
+      <div class="card-bd">
+        <div class="s-msg"><div class="s-line">审查全部 7 个 Claim、3 组冲突、6 轮辩论记录...</div></div>
+        <div class="s-msg"><div class="s-tool"><span class="tn">submit_judgement</span><span class="ts">✓</span><div class="tr">Judgement #1: 并发一致性方案必须在 V1 就绪</div></div></div>
+        <div class="s-msg"><div class="s-tool"><span class="tn">submit_judgement</span><span class="ts">✓</span><div class="tr">Judgement #2: version 字段 + 乐观锁可接受</div></div></div>
+        <div class="s-msg"><div class="s-tool"><span class="tn">draft_gate</span><span class="cursor"></span></div></div>
+      </div></div>
+      <div class="vb" style="margin-top:14px">
+        <span class="vb-tag" style="background:rgba(251,191,36,.15);color:var(--yl)">⚖️ AI 裁决</span>
+        <span class="vb-txt">CONDITIONAL — sync_data 加 version 字段，LWW 限非关键字段，补充断点续传验收标准</span>
+        <div class="vb-btns"><button class="btn primary" style="font-size:11px;padding:5px 12px" onclick="goPhase('human')">→ 交人工决策</button></div>
+      </div>
+    </div>
+
+    <!-- ─── Human ─── -->
+    <div class="ph" id="ph-human">
+      <div class="ph-hd"><h2>🧑 人工决策 — 最终 Gate</h2><span class="tag tag-wait">⏳ 等待人工</span></div>
+      <div class="card" style="margin-bottom:14px"><div class="card-bd">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px">⚖️ AI 裁决草案</div>
+        <div style="font-size:12px;line-height:1.8"><div><strong>结论:</strong> CONDITIONAL — 有条件通过</div><div style="margin-top:6px;color:var(--td)"><strong>条件清单:</strong><div style="padding-left:16px;margin-top:4px">1. sync_data 表必须新增 version 字段 + updated_at 时间戳<br>2. 冲突策略文档化: LWW 仅限非关键字段，关键字段用乐观锁<br>3. 补充断点续传验收标准和性能基准指标</div></div></div>
+      </div></div>
+      <div class="card" style="margin-bottom:14px"><div class="card-bd">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px">📝 人工评审意见</div>
+        <textarea style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--bd);background:var(--s2);color:var(--tx);font-size:13px;font-family:var(--font);min-height:80px;resize:vertical" placeholder="请输入您的评审意见（可选）...">同意 AI 裁决草案。补充要求：V1 必须包含并发写入的集成测试用例，覆盖率不低于 80%。</textarea>
+      </div></div>
+      <div class="vb">
+        <span class="vb-tag" style="background:rgba(108,140,255,.15);color:var(--ac)">🧑 人工决策</span>
+        <span class="vb-txt">系统已暂停 AI 输出，等待人类做出最终版本化决策</span>
+        <div class="vb-btns">
+          <button class="btn success" onclick="finalizeGate('PASS')">✅ 通过</button>
+          <button class="btn warn" onclick="finalizeGate('CONDITIONAL')">⚠️ 有条件通过</button>
+          <button class="btn danger" onclick="finalizeGate('BLOCK')">❌ 驳回</button>
+          <button class="btn" onclick="finalizeGate('RETURN')">↩️ 退回修改</button>
+          <button class="btn purple" onclick="finalizeGate('OVERRIDE')">🔮 覆盖</button>
+        </div>
+      </div>
+    </div>
+
+  </div></div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sb-tabs"><button class="sb-tab active" onclick="sbTab('tl')">📜 事件流</button><button class="sb-tab" onclick="sbTab('ev')">📎 证据</button><button class="sb-tab" onclick="sbTab('tr')">🔍 跟踪</button></div>
+    <div class="sb-panel active" id="sb-tl">
+      <div class="tl-item"><div class="tl-dot" style="background:var(--gn)"></div><div class="tl-body"><div class="tl-t">Scout 完成</div><div class="tl-s">5 条关键发现</div><div class="tl-time">14:23</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--gn)"></div><div class="tl-body"><div class="tl-t">Director 计划</div><div class="tl-s">4 任务 · 4 角色</div><div class="tl-time">14:25</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--gn)"></div><div class="tl-body"><div class="tl-t">独立审查完成</div><div class="tl-s">7 Claim 提交</div><div class="tl-time">14:38</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--gn)"></div><div class="tl-body"><div class="tl-t">冲突检测</div><div class="tl-s">3 组冲突</div><div class="tl-time">14:39</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--yl)"></div><div class="tl-body"><div class="tl-t">R1 完成</div><div class="tl-s">共识度 15%</div><div class="tl-time">14:45</div></div></div>
+      <div class="tl-item" style="background:rgba(108,140,255,.05);border-radius:6px;padding:8px;margin:0 -8px"><div class="tl-dot" style="background:var(--ac)"></div><div class="tl-body"><div class="tl-t">R2 进行中</div><div class="tl-s">后端接受乐观锁方案</div><div class="tl-time">14:52</div></div></div>
+    </div>
+    <div class="sb-panel" id="sb-ev">
+      <div style="background:var(--s2);border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid var(--ac);font-size:12px"><div style="font-family:var(--mono);font-size:11px;color:var(--ac);margin-bottom:4px">📄 SyncService.java:45</div><div style="font-family:var(--mono);font-size:11px;color:var(--td);background:var(--bg);padding:6px;border-radius:4px">public void syncAll() {\n    List&lt;Data&gt; all = repo.findAll();\n    targetRepo.saveAll(all);\n    // 无版本检查\n}</div></div>
+      <div style="background:var(--s2);border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid var(--ac);font-size:12px"><div style="font-family:var(--mono);font-size:11px;color:var(--ac);margin-bottom:4px">📄 V3__add_sync_data.sql</div><div style="font-family:var(--mono);font-size:11px;color:var(--td);background:var(--bg);padding:6px;border-radius:4px">CREATE TABLE sync_data (\n    id BIGINT PRIMARY KEY,\n    content TEXT,\n    created_at DATETIME\n    -- 缺失: version, updated_at\n);</div></div>
+      <div style="background:var(--s2);border-radius:8px;padding:10px;border-left:3px solid var(--ac);font-size:12px"><div style="font-family:var(--mono);font-size:11px;color:var(--ac);margin-bottom:4px">📄 竞品分析</div><div style="font-size:11px;color:var(--td)">竞品 A: WAL 日志回放 · 竞品 B: checkpoint 机制</div></div>
+    </div>
+    <div class="sb-panel" id="sb-tr">
+      <div class="s-msg"><div class="s-tool"><span class="tn">submit_claim</span><span class="ts">✓</span><div class="tr">后端 · #4 · P0 · OPPOSE · "冲突策略未定义"</div></div></div>
+      <div class="s-msg"><div class="s-tool"><span class="tn">submit_claim</span><span class="ts">✓</span><div class="tr">产品 · #1 · P1 · SUPPORT · "增量同步核心诉求"</div></div></div>
+      <div class="s-msg"><div class="s-tool"><span class="tn">submit_challenge</span><span class="ts">✓</span><div class="tr">后端 → 产品 · "并发冲突?"</div></div></div>
+      <div class="s-msg"><div class="s-tool"><span class="tn">submit_rebuttal</span><span class="ts">✓</span><div class="tr">产品 → 后端 · "非财务可接受"</div></div></div>
+      <div class="s-msg"><div class="s-tool"><span class="tn">submit_evidence</span><span class="ts">✓</span><div class="tr">测试 · 竞品 A/B 分析</div></div></div>
+      <div class="s-msg"><div class="s-tool"><span class="tn">change_claim_position</span><span class="ts">✓</span><div class="tr">后端 · #5 · 让步 · 乐观锁方案</div></div></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- PAGE 3: 评审报告 -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="page" id="page-report">
+<style>
+#report-body{flex:1;overflow-y:auto;padding:24px 40px;max-width:900px;margin:0 auto;width:100%}
+.report-hd{margin-bottom:24px}
+.report-hd h1{font-size:22px;font-weight:800;margin-bottom:4px}
+.report-hd .meta{font-size:12px;color:var(--td)}
+.report-section{margin-bottom:24px}
+.report-section h3{font-size:15px;font-weight:700;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+.report-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.report-kpi{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:14px;text-align:center}
+.report-kpi .num{font-size:28px;font-weight:900}.report-kpi .lbl{font-size:11px;color:var(--td);margin-top:2px}
+.claim-table{width:100%;border-collapse:collapse;font-size:12px}
+.claim-table th{text-align:left;padding:8px 10px;background:var(--s2);color:var(--td);font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--bd)}
+.claim-table td{padding:8px 10px;border-bottom:1px solid var(--bd)}
+.gate-box{background:var(--s1);border:2px solid var(--yl);border-radius:12px;padding:20px;text-align:center}
+.gate-box .gate-tag{display:inline-block;font-size:16px;font-weight:900;padding:6px 24px;border-radius:20px;background:rgba(251,191,36,.15);color:var(--yl);margin-bottom:8px}
+.gate-box .gate-txt{font-size:13px;color:var(--td);line-height:1.8}
+</style>
+
+<div class="topbar">
+  <div class="logo">重明</div>
+  <div class="title">评审报告 #2026-0731</div>
+  <div class="status"><div class="dot" style="background:var(--gn)"></div><span style="color:var(--gn)">已完成</span></div>
+  <button class="back" onclick="navigate('workbench')">← 返回工作台</button>
+</div>
+
+<div id="report-body">
+  <div class="report-hd">
+    <h1>📊 评审报告: 数据同步模块增量同步需求</h1>
+    <div class="meta">评审 #2026-0731 · 创建于 2026-07-31 14:20 · 完成于 15:05 · 耗时 45 分钟</div>
+  </div>
+
+  <!-- KPIs -->
+  <div class="report-section">
+    <h3>📈 评审概览</h3>
+    <div class="report-grid">
+      <div class="report-kpi"><div class="num" style="color:var(--ac)">7</div><div class="lbl">Claim 提交</div></div>
+      <div class="report-kpi"><div class="num" style="color:var(--rd)">3</div><div class="lbl">冲突发现</div></div>
+      <div class="report-kpi"><div class="num" style="color:var(--yl)">3</div><div class="lbl">辩论轮次</div></div>
+      <div class="report-kpi"><div class="num" style="color:var(--gn)">85%</div><div class="lbl">最终共识度</div></div>
+    </div>
+  </div>
+
+  <!-- Claims -->
+  <div class="report-section">
+    <h3>📋 Claim 清单</h3>
+    <table class="claim-table">
+      <tr><th>#</th><th>角色</th><th>严重度</th><th>立场</th><th>内容</th><th>辩论后</th></tr>
+      <tr><td>1</td><td style="color:var(--cy)">💡 产品</td><td><span class="badge b-p1">P1</span></td><td style="color:var(--gn)">✅ 支持</td><td>增量同步是核心诉求</td><td style="color:var(--gn)">维持</td></tr>
+      <tr><td>2</td><td style="color:var(--cy)">💡 产品</td><td><span class="badge b-p2">P2</span></td><td style="color:var(--gn)">✅ 支持</td><td>分阶段: 先 LWW 后向量时钟</td><td style="color:var(--yl)">调整: 标注范围</td></tr>
+      <tr><td>3</td><td style="color:var(--pu)">🎨 前端</td><td><span class="badge b-p2">P2</span></td><td style="color:var(--gn)">✅ 支持</td><td>DiffViewer 已就绪</td><td style="color:var(--gn)">维持</td></tr>
+      <tr><td>4</td><td style="color:var(--or)">⚙️ 后端</td><td><span class="badge b-p0">P0</span></td><td style="color:var(--rd)">❌ 反对</td><td>冲突策略未定义</td><td style="color:var(--yl)">让步: 乐观锁可接受</td></tr>
+      <tr><td>5</td><td style="color:var(--or)">⚙️ 后端</td><td><span class="badge b-p1">P1</span></td><td style="color:var(--rd)">❌ 反对</td><td>MySQL 5.6 约束</td><td style="color:var(--yl)">让步: 放弃 Redis</td></tr>
+      <tr><td>6</td><td style="color:var(--yl)">🧪 测试</td><td><span class="badge b-p1">P1</span></td><td style="color:var(--rd)">❌ 反对</td><td>缺少断点续传标准</td><td style="color:var(--yl)">转变: 接受分阶段</td></tr>
+      <tr><td>7</td><td style="color:var(--yl)">🧪 测试</td><td><span class="badge b-p2">P2</span></td><td style="color:var(--rd)">❌ 反对</td><td>性能基准缺失</td><td style="color:var(--gn)">已补充</td></tr>
+    </table>
+  </div>
+
+  <!-- Convergence -->
+  <div class="report-section">
+    <h3>📈 立场收敛</h3>
+    <div class="card"><div class="card-bd">
+      <div class="cv-row"><div class="cv-lb" style="color:var(--rd)">R1</div><div class="cv-tr"><div class="cv-dot" style="left:82%;background:var(--cy)">💡</div><div class="cv-dot" style="left:70%;background:var(--pu)">🎨</div><div class="cv-dot" style="left:25%;background:var(--yl)">🧪</div><div class="cv-dot" style="left:12%;background:var(--or)">⚙️</div></div></div><div class="cv-ends"><span>❌ 反对</span><span>✅ 支持</span></div>
+      <div class="cv-row"><div class="cv-lb" style="color:var(--yl)">R2</div><div class="cv-tr"><div class="cv-dot" style="left:70%;background:var(--cy)">💡</div><div class="cv-dot" style="left:62%;background:var(--pu)">🎨</div><div class="cv-dot" style="left:40%;background:var(--yl)">🧪</div><div class="cv-dot" style="left:35%;background:var(--or)">⚙️</div></div></div><div class="cv-ends"><span>❌ 反对</span><span>✅ 支持</span></div>
+      <div class="cv-row"><div class="cv-lb" style="color:var(--gn)">R3</div><div class="cv-tr"><div class="cv-dot" style="left:58%;background:var(--cy)">💡</div><div class="cv-dot" style="left:55%;background:var(--pu)">🎨</div><div class="cv-dot" style="left:52%;background:var(--yl)">🧪</div><div class="cv-dot" style="left:48%;background:var(--or)">⚙️</div></div></div><div class="cv-ends"><span>❌ 反对</span><span>✅ 支持</span></div>
+      <div style="text-align:center;font-size:12px;color:var(--td);margin-top:10px;padding-top:8px;border-top:1px solid var(--bd)">70% 跨度 → <strong style="color:var(--gn)">10% 跨度</strong> · 关键转折: R2 后端接受乐观锁方案</div>
+    </div></div>
+  </div>
+
+  <!-- Gate -->
+  <div class="report-section">
+    <h3>⚖️ 最终 Gate</h3>
+    <div class="gate-box">
+      <div class="gate-tag">⚠️ CONDITIONAL — 有条件通过</div>
+      <div class="gate-txt">
+        <strong>决策者:</strong> 人类审核员 (张工)<br>
+        <strong>决策时间:</strong> 2026-07-31 15:05<br><br>
+        <strong>条件清单:</strong><br>
+        1. sync_data 表必须新增 version 字段 + updated_at 时间戳<br>
+        2. 冲突策略文档化: LWW 仅限非关键字段，关键字段用乐观锁<br>
+        3. 补充断点续传验收标准和性能基准指标<br>
+        4. V1 必须包含并发写入的集成测试用例，覆盖率 ≥ 80%
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- Scripts -->
+<!-- ════════════════════════════════════════════════════ -->
+<script>
+// ── Navigation ──
+function navigate(page){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  window.scrollTo(0,0);
+}
+
+// ── Create page ──
+let uploaded=false;
+function toggleUpload(){
+  uploaded=!uploaded;
+  const z=document.getElementById('uploadZone');
+  const i=document.getElementById('uploadIcon');
+  const t=document.getElementById('uploadTxt');
+  const h=document.getElementById('uploadHint');
+  if(uploaded){z.classList.add('has-file');i.textContent='✅';t.textContent='数据同步模块需求 v2.1.md';h.textContent='12.3 KB · 已就绪';}
+  else{z.classList.remove('has-file');i.textContent='📄';t.textContent='点击或拖拽上传 Markdown 需求文档';h.textContent='支持 .md 格式，最大 2MB';}
+}
+function startReview(){
+  if(!uploaded){alert('请先上传需求文档');return;}
+  const repo=document.getElementById('repoSelect').value;
+  if(!repo){alert('请选择目标仓库');return;}
+  navigate('workbench');
+}
+
+// ── Workbench: phase switching ──
+const phases=['scout','director','review','conflict','debate','judge','human'];
+function goPhase(ph){
+  document.querySelectorAll('#pipe .pi').forEach(e=>e.classList.remove('on'));
+  const idx=phases.indexOf(ph);
+  if(idx>=0){const items=document.querySelectorAll('#pipe .pi');if(items[idx])items[idx].classList.add('on');}
+  document.querySelectorAll('#content .ph').forEach(e=>e.classList.remove('on'));
+  document.getElementById('ph-'+ph).classList.add('on');
+  // update status
+  const statusMap={scout:'Scout 运行中',director:'Director 规划中',review:'独立审查中',conflict:'冲突检测中',debate:'辩论 R2 进行中',judge:'Judge 裁决中',human:'等待人工决策'};
+  const statusEl=document.getElementById('ws-status');
+  if(ph==='human'){statusEl.innerHTML='<div class="dot" style="background:var(--yl)"></div><span style="color:var(--yl)">等待人工决策</span>';}
+  else if(ph==='debate'){statusEl.innerHTML='<div class="dot" style="background:var(--ac)"></div><span style="color:var(--ac)">辩论 R2 进行中</span>';}
+  else{statusEl.innerHTML='<div class="dot" style="background:var(--ac)"></div><span style="color:var(--ac)">'+statusMap[ph]+'</span>';}
+}
+
+// ── Agent card toggle ──
+function toggleAg(c){const w=c.classList.contains('open');document.querySelectorAll('.ag').forEach(e=>e.classList.remove('open'));if(!w)c.classList.add('open');}
+
+// ── Debate round ──
+const rdData={1:{cv:15,off:224,col:'var(--rd)'},2:{cv:45,off:145,col:'var(--yl)'},3:{cv:85,off:40,col:'var(--gn)'}};
+function setRound(r){
+  document.querySelectorAll('.rtab').forEach((t,i)=>t.classList.toggle('active',i===r-1));
+  const d=rdData[r];
+  document.getElementById('gauge').style.strokeDashoffset=d.off;
+  document.getElementById('gauge').style.stroke=d.col;
+  document.getElementById('cv-val').textContent=d.cv+'%';
+  document.getElementById('rd-val').textContent='R'+r;
+  document.querySelectorAll('.c-r').forEach(c=>{const rs=c.dataset.r.split(',').map(Number);c.style.display=rs.includes(r)?'':'none';});
+}
+
+// ── Sidebar tabs ──
+function sbTab(t){document.querySelectorAll('.sb-tab').forEach((b,i)=>b.classList.toggle('active',['tl','ev','tr'][i]===t));document.querySelectorAll('.sb-panel').forEach(p=>p.classList.toggle('active',p.id==='sb-'+t));}
+
+// ── Finalize gate ──
+function finalizeGate(decision){
+  const labels={PASS:'✅ 通过',CONDITIONAL:'⚠️ 有条件通过',BLOCK:'❌ 驳回',RETURN:'↩️ 退回修改',OVERRIDE:'🔮 覆盖'};
+  alert('Gate 决策: '+labels[decision]+'\n\n版本号: v1\n决策时间: 2026-07-31 15:05\n\n正在生成报告...');
+  navigate('report');
+}
+
+// ── Init ──
+goPhase('debate');
+setRound(2);
+</script>
+</body>
+</html>
