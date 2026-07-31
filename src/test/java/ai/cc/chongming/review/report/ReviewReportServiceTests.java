@@ -58,7 +58,8 @@ class ReviewReportServiceTests {
         when(queryService.findSummary(reviewId)).thenReturn(java.util.Optional.of(new ReviewQueryService.ReviewSummary(
                 reviewId.value(), 1, "NOTIFYING", 95, 9L, 5L, "2026-07-16 16:00:00",
                 new ReviewQueryService.GateView("PASS", "FINAL", "HUMAN", "approved for release",
-                        "2026-07-16 16:00:00"))));
+                        "2026-07-16 16:00:00"),
+                null)));
         when(queryService.findPlans(reviewId, 0L, 500)).thenReturn(new ReviewQueryService.EventPage(List.of(), null));
         when(queryService.findDebates(reviewId)).thenReturn(List.of());
         service = new ReviewReportService(

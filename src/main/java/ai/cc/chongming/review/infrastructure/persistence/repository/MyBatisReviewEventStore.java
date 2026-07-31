@@ -77,6 +77,28 @@ public class MyBatisReviewEventStore implements ReviewEventStore {
         return Optional.ofNullable(mapper.findLatestReviewEvent(reviewId.value().toString())).map(this::toEvent);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<ReviewEvent> findLatestByType(ReviewId reviewId, ReviewEventType eventType) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(eventType, "eventType must not be null");
+        return Optional.ofNullable(mapper.findLatestReviewEventByType(
+                reviewId.value().toString(), eventType.name())).map(this::toEvent);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<ReviewEvent> findLatestByTypeAndAttempt(
+            ReviewId reviewId, ReviewEventType eventType, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(eventType, "eventType must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        return Optional.ofNullable(mapper.findLatestReviewEventByTypeAndAttempt(
+                reviewId.value().toString(), eventType.name(), attemptNo)).map(this::toEvent);
+    }
+
     private ReviewPersistenceMapper.ReviewEventRow toRow(ReviewEvent event) {
         return new ReviewPersistenceMapper.ReviewEventRow(
                 event.eventId().toString(),

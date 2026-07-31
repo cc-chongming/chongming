@@ -31,13 +31,18 @@ describe('review SSE subscription', () => {
         });
         const first = FakeEventSource.instances[0];
         first.emit('PLAN_CREATED', { reviewId: '11111111-1111-1111-1111-111111111111', sequence: 8 });
+        first.emit('CONTEXT_SCOUT_DEGRADED', {
+            reviewId: '11111111-1111-1111-1111-111111111111',
+            sequence: 9,
+            type: 'CONTEXT_SCOUT_DEGRADED'
+        });
         first.emit('PLAN_CREATED', { reviewId: 'wrong', sequence: 9 });
         first.onerror();
         scheduled[0].callback();
 
-        expect(seen).toEqual([8]);
+        expect(seen).toEqual([8, 9]);
         expect(scheduled[0].delay).toBe(1000);
-        expect(FakeEventSource.instances[1].url).toContain('afterSequence=8');
+        expect(FakeEventSource.instances[1].url).toContain('afterSequence=9');
         expect(states).toContain('reconnecting');
         subscription.close();
     });

@@ -190,6 +190,37 @@ public interface ReviewPersistenceMapper {
             """)
     ReviewEventRow findLatestReviewEvent(@Param("reviewId") String reviewId);
 
+    @Select("""
+            SELECT event_id AS eventId, review_id AS reviewId, attempt_no AS attemptNo,
+                   event_sequence AS sequence, event_type AS eventType, event_category AS eventCategory,
+                   stage, actor_role AS actorRole, target_role AS targetRole, topic_id AS topicId,
+                   claim_id AS claimId, turn_id AS turnId, debate_round AS round, progress,
+                   payload_version AS payloadVersion, payload_json AS payloadJson, occurred_at AS occurredAt
+            FROM review_event
+            WHERE review_id = #{reviewId} AND event_type = #{eventType}
+            ORDER BY event_sequence DESC
+            LIMIT 1
+            """)
+    ReviewEventRow findLatestReviewEventByType(
+            @Param("reviewId") String reviewId,
+            @Param("eventType") String eventType);
+
+    @Select("""
+            SELECT event_id AS eventId, review_id AS reviewId, attempt_no AS attemptNo,
+                   event_sequence AS sequence, event_type AS eventType, event_category AS eventCategory,
+                   stage, actor_role AS actorRole, target_role AS targetRole, topic_id AS topicId,
+                   claim_id AS claimId, turn_id AS turnId, debate_round AS round, progress,
+                   payload_version AS payloadVersion, payload_json AS payloadJson, occurred_at AS occurredAt
+            FROM review_event
+            WHERE review_id = #{reviewId} AND event_type = #{eventType} AND attempt_no = #{attemptNo}
+            ORDER BY event_sequence DESC
+            LIMIT 1
+            """)
+    ReviewEventRow findLatestReviewEventByTypeAndAttempt(
+            @Param("reviewId") String reviewId,
+            @Param("eventType") String eventType,
+            @Param("attemptNo") int attemptNo);
+
     /**
      * [AIREVIEW-PLAN-010#1.2] Row for the complete, append-only event envelope.
      *

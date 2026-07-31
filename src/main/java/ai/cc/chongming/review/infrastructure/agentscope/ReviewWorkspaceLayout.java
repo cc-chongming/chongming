@@ -85,6 +85,22 @@ public class ReviewWorkspaceLayout {
     }
 
     /**
+     * Creates a private, writable upper layer for a Context Scout run. Repository code is mounted
+     * separately as the read-only lower layer of the AgentScope filesystem.
+     */
+    public Path scoutWorkspace(ReviewWorkspace workspace, String runId) {
+        Objects.requireNonNull(workspace, "workspace must not be null");
+        requirePathSegment(runId, "runId");
+        Path scoutPath = resolveUnder(workspace.roles(), "context-scout", runId);
+        try {
+            Files.createDirectories(scoutPath);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Unable to initialize Context Scout workspace", exception);
+        }
+        return scoutPath;
+    }
+
+    /**
      * Writes a public workspace artifact with a schema version and SHA-256 integrity hash.
      */
     public WorkspaceArtifact writeArtifact(
@@ -151,6 +167,13 @@ public class ReviewWorkspaceLayout {
         if (filename == null || filename.isBlank() || filename.contains("/") || filename.contains("\\")
                 || filename.equals(".") || filename.equals("..")) {
             throw new IllegalArgumentException("filename must be a single safe name");
+        }
+    }
+
+    private static void requirePathSegment(String value, String name) {
+        if (value == null || value.isBlank() || value.contains("/") || value.contains("\\")
+                || value.equals(".") || value.equals("..")) {
+            throw new IllegalArgumentException(name + " must be one safe path segment");
         }
     }
 

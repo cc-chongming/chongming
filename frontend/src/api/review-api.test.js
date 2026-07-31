@@ -41,3 +41,21 @@ describe('review lifecycle API', () => {
         expect(fetchMock.mock.calls[2][0]).toBe(`/api/reviews/${reviewId}/retry?expectedVersion=5`);
     });
 });
+
+describe('Context Scout preview API', () => {
+    it('starts an isolated preview against the selected review attempt', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(response({
+            previewId: 'preview-001', runtimeId: 'runtime-001', reviewId, attemptNo: 2
+        }));
+        globalThis.fetch = fetchMock;
+
+        await reviewApi.startScoutPreview(reviewId, 2, { userId: 'scout-preview', traceId: 'scout-trace-001' });
+
+        expect(fetchMock.mock.calls[0][0]).toBe(`/api/reviews/${reviewId}/attempts/2/scout-previews`);
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+        expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+            'Content-Type': 'application/json', 'X-Trace-Id': 'scout-trace-001'
+        });
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ userId: 'scout-preview' });
+    });
+});

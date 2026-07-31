@@ -98,18 +98,12 @@ public class ReviewRepositoryToolFactory {
     }
 
     /**
-     * Provides the independent Context Scout with the complete read-only snapshot surface.
-     * It is deliberately not exposed through any RolePack and cannot submit review-domain commands.
+     * Resolves the frozen shared snapshot used as the lower layer of the Context Scout's native
+     * AgentScope filesystem. Physical paths remain inside server-side Harness construction.
      */
-    public List<AgentTool> scoutReadTools(ReviewRuntimeContext runtimeContext) {
+    public RepositorySnapshot requireSnapshot(ReviewRuntimeContext runtimeContext) {
         Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
-        RepositoryToolContext context = toolContext(runtimeContext, RoleType.DIRECTOR, Set.of(""));
-        return List.of(
-                new ListFilesTool(context, runtimeContext.cancellation(), null),
-                new SearchTextTool(context, runtimeContext.cancellation(), null),
-                new FindSymbolTool(context, runtimeContext.cancellation(), null),
-                new ReadLinesTool(context, runtimeContext.cancellation(), null),
-                new FileMetadataTool(context, runtimeContext.cancellation(), null));
+        return toolContext(runtimeContext, RoleType.DIRECTOR, Set.of("")).snapshot();
     }
 
     /**

@@ -3,6 +3,7 @@ package ai.cc.chongming.review.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.inOrder;
@@ -19,7 +20,9 @@ import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.event.InMemoryReviewEventStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,6 +84,7 @@ class ReviewCommandServiceTests {
                 java.nio.file.Path.of("build/snapshot"), "c".repeat(40), "main", false,
                 "d".repeat(64), 1, java.time.Instant.now());
         when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirement);
+        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository")).thenReturn(Optional.empty());
         when(snapshotService.bindSnapshot(reviewId, 1, "approved-repository", requirement.contentHash(),
                 IntakeCancellation.neverCancelled())).thenReturn(repositorySnapshot);
         when(orchestrationService.start(any())).thenReturn(Mono.never());
@@ -100,6 +104,60 @@ class ReviewCommandServiceTests {
         order.verify(snapshotService, timeout(1_000)).bindSnapshot(
                 reviewId, 1, "approved-repository", requirement.contentHash(), IntakeCancellation.neverCancelled());
         order.verify(orchestrationService, timeout(1_000)).start(any());
+    }
+
+    @Test
+    void startReusesThePreviewSnapshotWithoutRebindingIt() {
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
+        when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
+        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+                .thenReturn(Optional.of(repositorySnapshot()));
+        when(orchestrationService.start(any())).thenReturn(Mono.never());
+        commandService = commandService(intakeService, snapshotService);
+
+        commandService.start(reviewId, startCommand(0L, "start-reuse-preview-001"));
+
+        verify(orchestrationService, timeout(1_000)).start(any());
+        verify(snapshotService, never()).bindSnapshot(
+                any(), any(Integer.class), any(), any(), any());
+    }
+
+    @Test
+    void scoutPreviewReusesTheAttemptSnapshotWithoutRebindingIt() {
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
+        RepositorySnapshot snapshot = repositorySnapshot();
+        when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
+        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+                .thenReturn(Optional.of(snapshot));
+        commandService = commandService(intakeService, snapshotService);
+
+        RepositorySnapshot result = commandService.prepareSnapshotForScoutPreview(reviewId, 1);
+
+        assertThat(result).isSameAs(snapshot);
+        verify(snapshotService, never()).bindSnapshot(
+                any(), any(Integer.class), any(), any(), any());
+    }
+
+    @Test
+    void scoutPreviewDoesNotInitializeAChangedAttemptAfterPlanningHasStarted() {
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
+        when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
+        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+                .thenReturn(Optional.empty());
+        commandService = commandService(intakeService, snapshotService);
+        review.transitionTo(stateMachine, ReviewStage.SNAPSHOTTING);
+        review.transitionTo(stateMachine, ReviewStage.PLANNING);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> commandService.prepareSnapshotForScoutPreview(reviewId, 1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("only initialize a snapshot while the attempt is PENDING");
+
+        verify(snapshotService, never()).bindSnapshot(
+                any(), any(Integer.class), any(), any(), any());
     }
 
     @Test
@@ -123,6 +181,28 @@ class ReviewCommandServiceTests {
                             .doesNotContainKey("failureMessage")
                             .doesNotContainValue("password=secret");
                 });
+        verify(orchestrationService, timeout(1_000)).releaseRuntime(reviewId, 1);
+    }
+
+    @Test
+    void startupCancellationDoesNotTurnTheReviewIntoFailure() throws InterruptedException {
+        CountDownLatch completed = new CountDownLatch(1);
+        when(orchestrationService.start(any())).thenReturn(Mono.<ReviewOrchestrationService.StartResult>error(
+                new CancellationException("runtime cancellation requested"))
+                .doFinally(signal -> completed.countDown()));
+        when(orchestrationService.releaseRuntime(reviewId, 1)).thenReturn(Mono.empty());
+        when(orchestrationService.requestRuntimeCancellation(reviewId, 1)).thenReturn(Mono.empty());
+
+        commandService.start(reviewId, startCommand(0L, "start-cancelled-001"));
+
+        assertThat(completed.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
+        assertThat(eventService.replay(reviewId, 0L, 10))
+                .noneMatch(event -> event.type() == ReviewEventType.REVIEW_FAILED);
+
+        commandService.cancel(reviewId, review.version()).block();
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.CANCELLED);
         verify(orchestrationService, timeout(1_000)).releaseRuntime(reviewId, 1);
     }
 
@@ -174,5 +254,32 @@ class ReviewCommandServiceTests {
                 List.of("Review the acceptance criteria"),
                 "Initial total plan",
                 "Begin review");
+    }
+
+    private ReviewCommandService commandService(
+            ReviewIntakeService intakeService, RepositorySnapshotService snapshotService) {
+        return new ReviewCommandService(
+                reviewRegistry,
+                new ReviewLifecycleService(new InMemoryReviewDebateStore(), stateMachine, eventService),
+                orchestrationService,
+                stateMachine,
+                eventService,
+                new ai.cc.chongming.review.config.ReviewDiagnosticsProperties(false),
+                intakeService,
+                snapshotService);
+    }
+
+    private RequirementSnapshot requirementSnapshot() {
+        return new RequirementSnapshot(
+                UUID.randomUUID(), reviewId, 1, "user-001", "approved-repository", null, null,
+                "requirement.md", "a".repeat(64), "b".repeat(64), "test",
+                new RequirementSnapshot.RequirementDocument(List.of(), List.of(), 0, 0, false), java.time.Instant.now());
+    }
+
+    private RepositorySnapshot repositorySnapshot() {
+        return new RepositorySnapshot(
+                UUID.randomUUID(), reviewId, "approved-repository", java.nio.file.Path.of("build/source"),
+                java.nio.file.Path.of("build/snapshot"), "c".repeat(40), "main", false,
+                "d".repeat(64), 1, java.time.Instant.now());
     }
 }

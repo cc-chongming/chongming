@@ -115,7 +115,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                 <h1>{{ reviewId }}</h1>
                 <p class="connection" :data-status="state.connection.status"><span aria-hidden="true">●</span>{{ connectionText }}<template v-if="state.connection.retryDelayMs">，{{ Math.ceil(state.connection.retryDelayMs / 1000) }} 秒后重试</template></p>
             </div>
-            <div class="workbench-actions"><RouterLink class="button" :to="{ name: 'review-live', params: { reviewId } }">进入实时观察台</RouterLink><RouterLink class="button secondary" :to="{ name: 'review-report', params: { reviewId } }">查看最终报告</RouterLink></div>
+            <div class="workbench-actions"><RouterLink class="button" :to="{ name: 'review-live', params: { reviewId } }">进入实时观察台</RouterLink><RouterLink class="button secondary" :to="{ name: 'context-scout-preview', params: { reviewId } }">调试 Context Scout</RouterLink><RouterLink class="button secondary" :to="{ name: 'review-report', params: { reviewId } }">查看最终报告</RouterLink></div>
         </header>
 
         <p v-if="state.error" class="error-banner" role="alert">{{ formatApiError(state.error) }}</p>

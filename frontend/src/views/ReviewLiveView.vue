@@ -22,11 +22,15 @@ const roundtableRoles = computed(() => {
 });
 
 const scoutStatus = computed(() => {
+    const degradation = store.state.summary?.contextScout;
+    if (degradation?.status === 'DEGRADED') {
+        return `Context Scout 已降级（${degradation.reasonCode}）：${degradation.publicSummary}`;
+    }
     const events = runtimeTrace.byRole.value.get('CONTEXT_SCOUT') ?? [];
     if (!events.length) return '等待 Context Scout 初始化共享项目上下文';
     const last = events.at(-1);
     if (last?.type === 'RUN_FINISHED') return 'Context Scout 已完成共享项目上下文准备';
-    if (last?.type === 'RUN_ERROR') return 'Context Scout 上下文准备失败，评审不会继续激活角色';
+    if (last?.type === 'RUN_ERROR') return 'Context Scout 出现运行异常，正在降级为由 Director 继续评审';
     return 'Context Scout 正在只读检索冻结快照，准备角色定向上下文';
 });
 

@@ -19,6 +19,9 @@ review:
   diagnostics:
     # Only enables a redacted startup-failure summary in server logs; keep disabled outside a controlled local debugging session.
     log-startup-failure-stack: false
+    # The standalone Scout preview may invoke a configured model and expose review-scoped trace data.
+    # Enable only in a controlled local diagnostic profile.
+    context-scout-preview-enabled: false
   repositories:
     # Intentionally empty by default. Deployments must map opaque repository IDs to local Git roots.
     allowed: []

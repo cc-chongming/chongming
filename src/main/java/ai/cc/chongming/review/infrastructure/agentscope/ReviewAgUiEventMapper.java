@@ -8,8 +8,11 @@ import io.agentscope.core.event.AgentEventType;
 import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.message.ToolResultState;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,6 +23,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class ReviewAgUiEventMapper {
 
+    public static final String SCOUT_TOOL_CALL_EVENT_NAME = "chongming.tool-call.v1";
+
     private final RuntimeTraceRedactor redactor;
 
     public ReviewAgUiEventMapper(RuntimeTraceRedactor redactor) {
@@ -27,8 +32,24 @@ public class ReviewAgUiEventMapper {
     }
 
     public List<AguiEvent> map(AgentEvent event, ReviewRuntimeContext context, RoleType role, String agentId) {
+        return map(event, context, role, agentId, null, null);
+    }
+
+    /**
+     * Maps a runtime event with an optional attempt-local native-tool observer. The observer is
+     * only passed by Context Scout previews; formal role traces retain their existing contract.
+     */
+    public List<AguiEvent> map(
+            AgentEvent event,
+            ReviewRuntimeContext context,
+            RoleType role,
+            String agentId,
+            String explicitRunId,
+            ScoutToolTraceCollector toolTraceCollector) {
         String threadId = "review:" + context.reviewId().value();
-        String runId = context.runtimeId() + ":" + agentId;
+        String runId = explicitRunId == null || explicitRunId.isBlank()
+                ? context.runtimeId() + ":" + agentId
+                : explicitRunId;
         if (event.getType() == AgentEventType.AGENT_START) {
             return List.of(
                     new AguiEvent.RunStarted(threadId, runId),
@@ -48,15 +69,75 @@ public class ReviewAgUiEventMapper {
                     new AguiEvent.RunFinished(threadId, runId));
         }
         if (event instanceof ToolCallStartEvent tool) {
-            return List.of(new AguiEvent.ToolCallStart(threadId, runId, tool.getToolCallId(), tool.getToolCallName()));
+            AguiEvent.ToolCallStart standard =
+                    new AguiEvent.ToolCallStart(threadId, runId, tool.getToolCallId(), tool.getToolCallName());
+            return toolTrace(toolTraceCollector, tool.getToolCallId())
+                    .map(trace -> List.<AguiEvent>of(
+                            standard,
+                            toolObservation(threadId, runId, context, tool.getToolCallId(), trace, "started", null)))
+                    .orElseGet(() -> List.of(standard));
         }
         if (event instanceof ToolResultEndEvent tool) {
             String summary = tool.getState() == null ? "工具执行结束" : "工具状态：" + tool.getState().name();
-            return List.of(
+            List<AguiEvent> standard = List.of(
                     new AguiEvent.ToolCallEnd(threadId, runId, tool.getToolCallId()),
                     new AguiEvent.ToolCallResult(threadId, runId, tool.getToolCallId(), summary, "tool", tool.getReplyId()));
+            return toolTrace(toolTraceCollector, tool.getToolCallId())
+                    .map(trace -> {
+                        List<AguiEvent> mapped = new java.util.ArrayList<>(standard);
+                        mapped.add(toolObservation(
+                                threadId,
+                                runId,
+                                context,
+                                tool.getToolCallId(),
+                                trace,
+                                trace.state() == ToolResultState.SUCCESS ? "completed" : "failed",
+                                tool.getState()));
+                        return List.copyOf(mapped);
+                    })
+                    .orElse(standard);
         }
         return List.of(identityEvent(threadId, runId, role, agentId, event));
+    }
+
+    private Optional<ScoutToolTraceCollector.ToolTrace> toolTrace(
+            ScoutToolTraceCollector collector, String toolCallId) {
+        return collector == null ? Optional.empty() : collector.find(toolCallId);
+    }
+
+    private AguiEvent.Custom toolObservation(
+            String threadId,
+            String runId,
+            ReviewRuntimeContext context,
+            String toolCallId,
+            ScoutToolTraceCollector.ToolTrace trace,
+            String phase,
+            ToolResultState terminalState) {
+        RuntimeTraceRedactor.TracePayload input = redactor.redactToolInput(trace.input());
+        boolean successful = terminalState == null || terminalState == ToolResultState.SUCCESS;
+        RuntimeTraceRedactor.TracePayload output = successful
+                ? redactor.redactToolOutput(trace.outputText())
+                : safeFailureOutput(terminalState);
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("schemaVersion", 1);
+        value.put("phase", phase);
+        value.put("reviewId", context.reviewId().value().toString());
+        value.put("attemptNo", context.attemptNo());
+        value.put("runtimeId", runId);
+        value.put("toolCallId", toolCallId);
+        value.put("toolName", trace.toolName());
+        value.put("input", input.value());
+        value.put("output", terminalState == null ? null : output.value());
+        value.put("status", terminalState == null ? "RUNNING" : terminalState.name());
+        value.put("elapsedMs", terminalState == null ? null : trace.elapsedMillis());
+        value.put("truncated", input.truncated() || output.truncated());
+        return new AguiEvent.Custom(threadId, runId, SCOUT_TOOL_CALL_EVENT_NAME, value);
+    }
+
+    private static RuntimeTraceRedactor.TracePayload safeFailureOutput(ToolResultState state) {
+        String status = state == null ? "UNKNOWN" : state.name();
+        return new RuntimeTraceRedactor.TracePayload(
+                Map.of("errorCode", "TOOL_" + status, "summary", "工具执行未成功，详细异常已隐藏。"), false);
     }
 
     public AguiEvent.Custom lifecycle(

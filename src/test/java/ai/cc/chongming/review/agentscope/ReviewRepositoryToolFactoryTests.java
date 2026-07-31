@@ -54,7 +54,7 @@ class ReviewRepositoryToolFactoryTests {
                 Set.of("listFiles", "searchText", "readLines", "submit_claim")))
                 .extracting(tool -> tool.getName())
                 .containsExactlyInAnyOrder("listFiles", "searchText", "readLines");
-        assertThat(factory.scoutReadTools(runtimeContext)).allSatisfy(tool -> assertThat(tool.isReadOnly()).isTrue());
+        assertThat(factory.requireSnapshot(runtimeContext)).isSameAs(repositorySnapshot);
     }
 
     @Test

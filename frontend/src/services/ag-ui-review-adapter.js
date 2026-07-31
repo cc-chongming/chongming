@@ -2,6 +2,7 @@ import { EventType } from '@ag-ui/core';
 
 /** [AIREVIEW-PLAN-012#1.4,#1.6] AG-UI compatibility boundary for public review dialogue. */
 export const REVIEW_DOMAIN_EVENT_NAME = 'chongming.review.domain-event.v1';
+export const SCOUT_TOOL_CALL_EVENT_NAME = 'chongming.tool-call.v1';
 
 const PUBLIC_DIALOGUE_EVENT_TYPES = new Set([
     'CLAIM_SUBMITTED',
@@ -63,7 +64,8 @@ export function createAgUiConversation(threadId) {
         runId: null,
         status: 'idle',
         error: null,
-        messages: []
+        messages: [],
+        items: []
     };
 }
 
@@ -100,31 +102,73 @@ export function applyAgUiEvent(conversation, event) {
             return;
         case EventType.MESSAGES_SNAPSHOT:
             conversation.messages = publicMessages(event.messages);
+            conversation.items = conversation.messages.map((message) => ({ type: 'message', ...message }));
             return;
         case EventType.TEXT_MESSAGE_START:
             if (event.role !== 'assistant') return;
             if (conversation.messages.some((message) => message.id === event.messageId)) return;
-            conversation.messages.push({
+            {
+                const message = {
                 id: event.messageId,
                 role: event.role,
                 name: event.rawEvent?.actorRole ?? null,
                 content: '',
                 status: 'streaming'
-            });
+                };
+                conversation.messages.push(message);
+                conversation.items.push({ type: 'message', ...message });
+            }
             return;
         case EventType.TEXT_MESSAGE_CONTENT: {
             const message = conversation.messages.find((item) => item.id === event.messageId);
             if (message && typeof event.delta === 'string') message.content += event.delta;
+            const item = conversation.items.find((candidate) => candidate.type === 'message' && candidate.id === event.messageId);
+            if (item && typeof event.delta === 'string') item.content += event.delta;
             return;
         }
         case EventType.TEXT_MESSAGE_END: {
             const message = conversation.messages.find((item) => item.id === event.messageId);
             if (message) message.status = 'completed';
+            const item = conversation.items.find((candidate) => candidate.type === 'message' && candidate.id === event.messageId);
+            if (item) item.status = 'completed';
             return;
         }
+        case EventType.CUSTOM:
+            applyScoutToolCallObservation(conversation, event);
+            return;
         default:
             return;
     }
+}
+
+function applyScoutToolCallObservation(conversation, event) {
+    if (event?.name !== SCOUT_TOOL_CALL_EVENT_NAME || !event.value || typeof event.value.toolCallId !== 'string') return;
+    const value = event.value;
+    const itemId = `tool:${value.toolCallId}`;
+    let item = conversation.items.find((candidate) => candidate.type === 'toolCall' && candidate.id === itemId);
+    if (!item) {
+        item = {
+            type: 'toolCall',
+            id: itemId,
+            toolCallId: value.toolCallId,
+            toolName: value.toolName ?? 'unknown_tool',
+            input: value.input ?? {},
+            output: value.output ?? null,
+            status: value.status ?? 'RUNNING',
+            phase: value.phase ?? 'started',
+            elapsedMs: value.elapsedMs ?? null,
+            truncated: Boolean(value.truncated)
+        };
+        conversation.items.push(item);
+        return;
+    }
+    item.toolName = value.toolName ?? item.toolName;
+    item.input = value.input ?? item.input;
+    item.output = value.output ?? item.output;
+    item.status = value.status ?? item.status;
+    item.phase = value.phase ?? item.phase;
+    item.elapsedMs = value.elapsedMs ?? item.elapsedMs;
+    item.truncated = Boolean(value.truncated ?? item.truncated);
 }
 
 export function reviewEventFromAgUiEvent(event) {

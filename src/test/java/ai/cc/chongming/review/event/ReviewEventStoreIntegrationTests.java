@@ -83,6 +83,40 @@ class ReviewEventStoreIntegrationTests {
         assertTrue(service.replay(reviewId, 0L, 10).contains(observed.getFirst()));
     }
 
+    @Test
+    void findsLatestFactOfATypeWithoutReplayingTheTimeline() {
+        InMemoryReviewEventStore store = new InMemoryReviewEventStore();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        store.append(draft(reviewId, 1, ReviewEventType.PLAN_CREATED, "plan"));
+        ReviewEvent degraded = store.append(draft(
+                reviewId, 1, ReviewEventType.CONTEXT_SCOUT_DEGRADED, "first-degradation"));
+        ReviewEvent latestDegraded = store.append(draft(
+                reviewId, 1, ReviewEventType.CONTEXT_SCOUT_DEGRADED, "latest-degradation"));
+        store.append(draft(reviewId, 1, ReviewEventType.PLAN_CREATED, "later-plan"));
+
+        assertEquals(latestDegraded, store.findLatestByType(
+                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED).orElseThrow());
+        assertEquals(latestDegraded, store.findLatestByTypeAndAttempt(
+                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, 1).orElseThrow());
+        assertTrue(store.findLatestByType(reviewId, ReviewEventType.ROLE_COMPLETED).isEmpty());
+        assertTrue(degraded.sequence() < latestDegraded.sequence());
+    }
+
+    @Test
+    void isolatesLatestFactOfATypeByAttempt() {
+        InMemoryReviewEventStore store = new InMemoryReviewEventStore();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewEvent firstAttempt = store.append(draft(
+                reviewId, 1, ReviewEventType.CONTEXT_SCOUT_DEGRADED, "first-attempt"));
+        ReviewEvent currentAttempt = store.append(draft(
+                reviewId, 2, ReviewEventType.CONTEXT_SCOUT_DEGRADED, "current-attempt"));
+
+        assertEquals(firstAttempt, store.findLatestByTypeAndAttempt(
+                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, 1).orElseThrow());
+        assertEquals(currentAttempt, store.findLatestByTypeAndAttempt(
+                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, 2).orElseThrow());
+    }
+
     private ReviewEvent get(Future<ReviewEvent> future) {
         try {
             return future.get();
@@ -92,10 +126,14 @@ class ReviewEventStoreIntegrationTests {
     }
 
     private ReviewEventDraft draft(ReviewId reviewId, int attemptNo, String value) {
+        return draft(reviewId, attemptNo, ReviewEventType.PLAN_CREATED, value);
+    }
+
+    private ReviewEventDraft draft(ReviewId reviewId, int attemptNo, ReviewEventType type, String value) {
         return new ReviewEventDraft(
                 reviewId,
                 attemptNo,
-                ReviewEventType.PLAN_CREATED,
+                type,
                 ReviewStage.PLANNING,
                 null,
                 null,

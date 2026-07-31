@@ -32,6 +32,9 @@ class ReviewPropertiesTests {
                     assertThat(reviewProperties.maxAgents()).isEqualTo(8);
                     assertThat(agentScopeProperties.persistSession()).isTrue();
                     assertThat(agentScopeProperties.directorMaxIterations()).isEqualTo(48);
+                    assertThat(agentScopeProperties.scoutMaxIterations()).isEqualTo(12);
+        assertThat(agentScopeProperties.scoutMaxToolCalls()).isEqualTo(9);
+                    assertThat(agentScopeProperties.scoutTimeout()).isEqualTo(java.time.Duration.ofSeconds(90));
                     assertThat(modelGatewayProperties.enabled()).isFalse();
                 });
     }
@@ -42,6 +45,21 @@ class ReviewPropertiesTests {
                 .withPropertyValues("review.agentscope.director-max-iterations=64")
                 .run(context -> assertThat(context.getBean(AgentScopeProperties.class).directorMaxIterations())
                         .isEqualTo(64));
+    }
+
+    @Test
+    void overridesScoutRuntimeLimits() {
+        contextRunner.withPropertyValues(baseProperties())
+                .withPropertyValues(
+                        "review.agentscope.scout-max-iterations=8",
+                        "review.agentscope.scout-max-tool-calls=9",
+                        "review.agentscope.scout-timeout=PT25S")
+                .run(context -> {
+                    AgentScopeProperties properties = context.getBean(AgentScopeProperties.class);
+                    assertThat(properties.scoutMaxIterations()).isEqualTo(8);
+                    assertThat(properties.scoutMaxToolCalls()).isEqualTo(9);
+                    assertThat(properties.scoutTimeout()).isEqualTo(java.time.Duration.ofSeconds(25));
+                });
     }
 
     @Test

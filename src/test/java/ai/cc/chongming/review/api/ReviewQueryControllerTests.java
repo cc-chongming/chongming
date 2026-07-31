@@ -49,7 +49,12 @@ class ReviewQueryControllerTests {
                 16L,
                 4L,
                 "2026-07-16 14:00:00",
-                new ReviewQueryService.GateView("CONDITIONAL", "DRAFT", "AI", "needs review", "2026-07-16 14:00:00"))));
+                new ReviewQueryService.GateView("CONDITIONAL", "DRAFT", "AI", "needs review", "2026-07-16 14:00:00"),
+                new ReviewQueryService.ContextScoutView(
+                        "DEGRADED",
+                        "MODEL_CALL_TIMEOUT",
+                        "Context Scout 模型调用超时，Director 将继续评审。",
+                        "2026-07-16 13:59:00"))));
 
         mockMvc.perform(get("/api/reviews/{reviewId}", reviewId))
                 .andExpect(status().isOk())
@@ -57,7 +62,9 @@ class ReviewQueryControllerTests {
                 .andExpect(jsonPath("$.stage").value("JUDGING"))
                 .andExpect(jsonPath("$.reviewVersion").value(4))
                 .andExpect(jsonPath("$.occurredAt").value("2026-07-16 14:00:00"))
-                .andExpect(jsonPath("$.gate.result").value("CONDITIONAL"));
+                .andExpect(jsonPath("$.gate.result").value("CONDITIONAL"))
+                .andExpect(jsonPath("$.contextScout.status").value("DEGRADED"))
+                .andExpect(jsonPath("$.contextScout.reasonCode").value("MODEL_CALL_TIMEOUT"));
     }
 
     @Test

@@ -2,21 +2,35 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.ReviewCancellationToken;
 import ai.cc.chongming.review.application.InitialReviewProgressService;
+import ai.cc.chongming.review.application.ReviewEventDrafts;
+import ai.cc.chongming.review.application.ReviewEventPublisher;
 import ai.cc.chongming.review.application.ReviewRuntimeTraceRegistry;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.config.AgentScopeProperties;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
+import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
+import io.agentscope.core.event.ExceedMaxItersEvent;
+import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.harness.agent.HarnessAgent;
+import java.time.Duration;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -30,6 +44,11 @@ import reactor.core.publisher.Sinks;
 @Component
 public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
+    private static final Map<String, Integer> SCOUT_INIT_TOOL_LIMITS = Map.of(
+            "glob_files", 2,
+            "grep_files", 3,
+            "read_file", 4);
+
     private final ReviewDirectorHarnessFactory directorFactory;
     private final RoleSubagentFactory roleSubagentFactory;
     private final AgentEventAdapter eventAdapter;
@@ -38,6 +57,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     private final ReviewRuntimeTraceRegistry runtimeTraceRegistry;
     private final ReviewAgUiEventMapper agUiEventMapper;
     private final ContextScoutHarnessFactory contextScoutHarnessFactory;
+    private final ReviewEventPublisher eventPublisher;
+    private final AgentScopeProperties agentScopeProperties;
     private final ConcurrentMap<String, RuntimeState> runtimes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> activeRuntimeByReview = new ConcurrentHashMap<>();
     private final Set<String> cancelledRuntimeIds = ConcurrentHashMap.newKeySet();
@@ -46,7 +67,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ReviewDirectorHarnessFactory directorFactory,
             RoleSubagentFactory roleSubagentFactory,
             AgentEventAdapter eventAdapter) {
-        this(directorFactory, roleSubagentFactory, eventAdapter, null, null, null, null, null);
+        this(directorFactory, roleSubagentFactory, eventAdapter, null, null, null, null, null,
+                ReviewEventPublisher.noop(), defaultAgentScopeProperties());
     }
 
     public AgentScopeReviewRuntimeAdapter(
@@ -55,7 +77,23 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             AgentEventAdapter eventAdapter,
             ReviewRegistry reviewRegistry,
             InitialReviewProgressService initialReviewProgressService) {
-        this(directorFactory, roleSubagentFactory, eventAdapter, reviewRegistry, initialReviewProgressService, null, null, null);
+        this(directorFactory, roleSubagentFactory, eventAdapter, reviewRegistry, initialReviewProgressService,
+                null, null, null, ReviewEventPublisher.noop(), defaultAgentScopeProperties());
+    }
+
+    public AgentScopeReviewRuntimeAdapter(
+            ReviewDirectorHarnessFactory directorFactory,
+            RoleSubagentFactory roleSubagentFactory,
+            AgentEventAdapter eventAdapter,
+            ReviewRegistry reviewRegistry,
+            InitialReviewProgressService initialReviewProgressService,
+            ReviewRuntimeTraceRegistry runtimeTraceRegistry,
+            ReviewAgUiEventMapper agUiEventMapper,
+            ContextScoutHarnessFactory contextScoutHarnessFactory,
+            ReviewEventPublisher eventPublisher) {
+        this(directorFactory, roleSubagentFactory, eventAdapter, reviewRegistry, initialReviewProgressService,
+                runtimeTraceRegistry, agUiEventMapper, contextScoutHarnessFactory, eventPublisher,
+                defaultAgentScopeProperties());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -67,7 +105,9 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             InitialReviewProgressService initialReviewProgressService,
             ReviewRuntimeTraceRegistry runtimeTraceRegistry,
             ReviewAgUiEventMapper agUiEventMapper,
-            ContextScoutHarnessFactory contextScoutHarnessFactory) {
+            ContextScoutHarnessFactory contextScoutHarnessFactory,
+            ReviewEventPublisher eventPublisher,
+            AgentScopeProperties agentScopeProperties) {
         this.directorFactory = Objects.requireNonNull(directorFactory, "directorFactory must not be null");
         this.roleSubagentFactory = Objects.requireNonNull(roleSubagentFactory, "roleSubagentFactory must not be null");
         this.eventAdapter = Objects.requireNonNull(eventAdapter, "eventAdapter must not be null");
@@ -76,6 +116,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         this.runtimeTraceRegistry = runtimeTraceRegistry;
         this.agUiEventMapper = agUiEventMapper;
         this.contextScoutHarnessFactory = contextScoutHarnessFactory;
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
     }
 
     @Override
@@ -113,8 +155,10 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             }
             state.emit(AgentRuntimeEventType.STARTED, context.directorLabel(), "director-created");
             Mono<Void> scout = runScout(state, context, director.workspace());
-            return scout.then(run(state, director.agent(), RoleType.DIRECTOR, context.directorLabel(),
-                    context.directorSessionId(), ReviewStage.PLANNING, request.initialMessage()))
+            return scout.then(Mono.defer(() -> state.cancelled()
+                    ? Mono.error(new CancellationException("review runtime was cancelled before Director execution"))
+                    : run(state, director.agent(), RoleType.DIRECTOR, context.directorLabel(),
+                            context.directorSessionId(), ReviewStage.PLANNING, request.initialMessage())))
                     .thenReturn(new AgentRuntimeSession(request.runtimeId(), request.userId(), request.sessionId()));
         });
     }
@@ -124,27 +168,142 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         if (contextScoutHarnessFactory == null) {
             return Mono.empty();
         }
-        HarnessAgent scout = contextScoutHarnessFactory.create(context, workspace);
-        state.emit(AgentRuntimeEventType.ROLE_REGISTERED, "CONTEXT_SCOUT", "CONTEXT_SCOUT");
-        return scout.streamEvents("请准备本次评审的公开项目上下文。", agentContext(context, context.runtimeId() + ":context-scout"))
-                .doOnNext(event -> {
-                    if (event instanceof AgentResultEvent result && result.getResult() != null) {
-                        String visibleResult = result.getResult().getTextContent();
-                        if (visibleResult != null && !visibleResult.isBlank()) {
-                            contextScoutHarnessFactory.recordResult(context, workspace, visibleResult);
-                        }
-                    }
-                    emitRawObservation(
-                            state, event, RoleType.DIRECTOR, "CONTEXT_SCOUT", context.runtimeId() + ":context-scout",
-                            ReviewStage.PLANNING);
-                })
-                .doOnError(exception -> {
-                    publishLifecycle(state, RoleType.DIRECTOR, "CONTEXT_SCOUT", "FAILED");
-                    state.emit(AgentRuntimeEventType.FAILED, "CONTEXT_SCOUT", "context-scout-failed");
-                })
-                .then()
-                .doOnSuccess(ignored -> state.emit(AgentRuntimeEventType.MESSAGE_SENT, "CONTEXT_SCOUT", "completed"))
-                .doFinally(signal -> scout.close());
+        return Mono.defer(() -> {
+            if (state.cancelled()) {
+                return Mono.empty();
+            }
+            AtomicBoolean degraded = new AtomicBoolean();
+            ScoutInitToolBudget nativeToolBudget = new ScoutInitToolBudget(agentScopeProperties.scoutMaxToolCalls());
+            Mono<Void> execution;
+            try {
+                HarnessAgent scout = contextScoutHarnessFactory.create(context, workspace);
+                state.emit(AgentRuntimeEventType.ROLE_REGISTERED, "CONTEXT_SCOUT", "CONTEXT_SCOUT");
+                execution = scout.streamEvents(
+                                "请准备本次评审的公开项目上下文。",
+                                agentContext(context, context.runtimeId() + ":context-scout"))
+                        .doOnNext(event -> {
+                            if (event instanceof ToolCallStartEvent toolCallStart) {
+                                nativeToolBudget.consume(toolCallStart.getToolCallName());
+                            }
+                            if (event instanceof AgentResultEvent result && result.getResult() != null) {
+                                String visibleResult = result.getResult().getTextContent();
+                                if (visibleResult != null && !visibleResult.isBlank()) {
+                                    contextScoutHarnessFactory.recordResult(context, workspace, visibleResult);
+                                }
+                            }
+                            emitRawObservation(
+                                    state, event, RoleType.DIRECTOR, "CONTEXT_SCOUT",
+                                    context.runtimeId() + ":context-scout", ReviewStage.PLANNING);
+                        })
+                        .timeout(agentScopeProperties.scoutTimeout())
+                        .onErrorMap(TimeoutException.class,
+                                ignored -> new ScoutLimitExceededException("CONTEXT_SCOUT_TIMEOUT"))
+                        .then()
+                        .onErrorResume(exception -> recoverScoutFailure(state, exception, degraded))
+                        .doFinally(signal -> scout.close());
+            } catch (RuntimeException exception) {
+                execution = recoverScoutFailure(state, exception, degraded);
+            }
+            return execution.doOnSuccess(ignored -> {
+                if (state.cancelled()) {
+                    return;
+                }
+                state.emit(
+                        degraded.get() ? AgentRuntimeEventType.DEGRADED : AgentRuntimeEventType.MESSAGE_SENT,
+                        "CONTEXT_SCOUT",
+                        degraded.get() ? "context-scout-degraded" : "completed");
+            });
+        });
+    }
+
+    private Mono<Void> recoverScoutFailure(RuntimeState state, Throwable failure, AtomicBoolean degraded) {
+        if (isScoutCancellation(state, failure)) {
+            return Mono.error(failure);
+        }
+        degraded.set(true);
+        recordScoutDegradation(state, failure);
+        return Mono.empty();
+    }
+
+    /**
+     * A Scout failure is advisory: record a safe, replayable warning and let Director continue.
+     * Cancellation is deliberately excluded because it terminates the attempt rather than degrading it.
+     */
+    private void recordScoutDegradation(RuntimeState state, Throwable failure) {
+        String reasonCode = scoutFailureCode(failure);
+        String publicSummary = scoutFailureSummary(reasonCode);
+        publishLifecycle(state, RoleType.DIRECTOR, "CONTEXT_SCOUT", "DEGRADED");
+        if (reviewRegistry == null) {
+            return;
+        }
+        reviewRegistry.find(state.context().reviewId()).ifPresent(review -> {
+            synchronized (review) {
+                if (state.cancelled()
+                        || review.attemptNo() != state.context().attemptNo()
+                        || review.stage().isTerminal()) {
+                    return;
+                }
+                eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                        review,
+                        ReviewEventType.CONTEXT_SCOUT_DEGRADED,
+                        RoleType.DIRECTOR,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of(
+                                "status", "DEGRADED",
+                                "reasonCode", reasonCode,
+                                "publicSummary", publicSummary)));
+            }
+        });
+    }
+
+    private static boolean isScoutCancellation(RuntimeState state, Throwable failure) {
+        if (state.cancelled()) {
+            return true;
+        }
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof CancellationException) {
+                return true;
+            }
+            if (current instanceof ModelGatewayException modelFailure
+                    && modelFailure.code() == ModelGatewayException.Code.MODEL_CANCELLED) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static String scoutFailureCode(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof ModelGatewayException modelFailure) {
+                return modelFailure.code().name();
+            }
+            if (current instanceof ScoutLimitExceededException scoutLimitExceeded) {
+                return scoutLimitExceeded.reasonCode();
+            }
+            current = current.getCause();
+        }
+        return "CONTEXT_SCOUT_UNAVAILABLE";
+    }
+
+    private static String scoutFailureSummary(String reasonCode) {
+        return switch (reasonCode) {
+            case "MODEL_CALL_TIMEOUT" -> "Context Scout 模型调用超时，已跳过项目上下文预处理，Director 将继续评审。";
+            case "MODEL_RATE_LIMITED" -> "Context Scout 当前受模型限流影响，已跳过项目上下文预处理，Director 将继续评审。";
+            case "MODEL_REQUEST_REJECTED" -> "Context Scout 模型请求未被接受，已跳过项目上下文预处理，Director 将继续评审。";
+            case "MODEL_NETWORK_ERROR", "MODEL_PROVIDER_ERROR" -> "Context Scout 模型服务暂不可用，已跳过项目上下文预处理，Director 将继续评审。";
+            case "CONTEXT_SCOUT_TOOL_BUDGET_EXCEEDED" -> "Context Scout 检索范围未在预算内收敛，已跳过项目上下文预处理，Director 将继续评审。";
+            case "CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED" -> "Context Scout 未遵守受限初始化检索契约，已跳过项目上下文预处理，Director 将继续评审。";
+            case "CONTEXT_SCOUT_TIMEOUT" -> "Context Scout 在限定时间内未完成，已跳过项目上下文预处理，Director 将继续评审。";
+            default -> "Context Scout 未能完成项目上下文预处理，Director 将继续评审。";
+        };
     }
 
     @Override
@@ -259,15 +418,57 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             String sessionId,
             ReviewStage stage,
             String message) {
+        AtomicBoolean initialReviewBudgetExhausted = new AtomicBoolean();
         return agent.streamEvents(message, agentContext(state.context(), sessionId))
-                .doOnNext(event -> emitRawObservation(state, event, roleType, agentId, sessionId, stage))
+                .doOnNext(event -> {
+                    if (event instanceof ExceedMaxItersEvent) {
+                        initialReviewBudgetExhausted.set(true);
+                    }
+                    emitRawObservation(state, event, roleType, agentId, sessionId, stage);
+                })
                 .doOnError(exception -> {
                     publishLifecycle(state, roleType, agentId, "FAILED");
                     state.emit(AgentRuntimeEventType.FAILED, agentId, "agent-run-failed");
                 })
                 .then()
+                .then(Mono.defer(() -> runInitialReviewFinalizerIfNeeded(
+                        state, roleType, agentId, sessionId, stage, initialReviewBudgetExhausted.get())))
                 .then(Mono.<Void>fromRunnable(() -> verifyInitialReviewCompletion(state, roleType)))
                 .doOnSuccess(ignored -> state.emit(AgentRuntimeEventType.MESSAGE_SENT, agentId, "completed"));
+    }
+
+    private Mono<Void> runInitialReviewFinalizerIfNeeded(
+            RuntimeState state,
+            RoleType roleType,
+            String agentId,
+            String sessionId,
+            ReviewStage stage,
+            boolean budgetExhausted) {
+        if (!budgetExhausted || stage != ReviewStage.INITIAL_REVIEW
+                || roleType == RoleType.DIRECTOR || roleType == RoleType.JUDGE
+                || !requiresInitialReviewCompletion(state, roleType)) {
+            return Mono.empty();
+        }
+        Review review = reviewRegistry == null ? null : reviewRegistry.find(state.context().reviewId()).orElse(null);
+        if (review == null || review.stage() != ReviewStage.INITIAL_REVIEW
+                || review.roleActivations().stream().anyMatch(activation -> activation.roleType() == roleType
+                        && activation.initialReviewCompleted())
+                || !state.initialReviewFinalizingRoles().add(roleType)) {
+            return Mono.empty();
+        }
+        RoleSubagentFactory.RoleRuntime roleRuntime = state.roles().get(agentId);
+        if (roleRuntime == null) {
+            return Mono.empty();
+        }
+        HarnessAgent finalizer = roleSubagentFactory.createInitialReviewFinalizer(state.context(), roleRuntime);
+        return finalizer.streamEvents(
+                        "调查轮次已结束。现在仅执行协议收尾：提交已有发现并调用 complete_initial_review。",
+                        agentContext(state.context(), sessionId))
+                .doOnNext(event -> emitRawObservation(
+                        state, event, roleType, roleRuntime.label() + "-finalizer", sessionId, stage))
+                .then()
+                .timeout(Duration.ofMinutes(15))
+                .doFinally(signal -> finalizer.close());
     }
 
     private void verifyInitialReviewCompletion(RuntimeState state, RoleType roleType) {
@@ -275,9 +476,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 || state.cancelled() || reviewRegistry == null || initialReviewProgressService == null) {
             return;
         }
-        boolean completionRequired = state.roles().values().stream()
-                .filter(role -> role.roleType() == roleType)
-                .anyMatch(role -> role.rolePack().allowedTools().contains("complete_initial_review"));
+        boolean completionRequired = requiresInitialReviewCompletion(state, roleType);
         if (!completionRequired) {
             return;
         }
@@ -293,6 +492,12 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                                 + " ended without complete_initial_review");
                     }
                 });
+    }
+
+    private boolean requiresInitialReviewCompletion(RuntimeState state, RoleType roleType) {
+        return state.roles().values().stream()
+                .filter(role -> role.roleType() == roleType)
+                .anyMatch(role -> role.rolePack().allowedTools().contains("complete_initial_review"));
     }
 
     private void markCancellation(RuntimeState state) {
@@ -367,12 +572,58 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         }
     }
 
+    private static AgentScopeProperties defaultAgentScopeProperties() {
+        return new AgentScopeProperties(false, ".agentscope/state");
+    }
+
+    private static final class ScoutLimitExceededException extends RuntimeException {
+
+        private final String reasonCode;
+
+        private ScoutLimitExceededException(String reasonCode) {
+            super(reasonCode);
+            this.reasonCode = reasonCode;
+        }
+
+        private String reasonCode() {
+            return reasonCode;
+        }
+    }
+
+    /** Enforces the fixed init-style retrieval sequence independently of model prompt compliance. */
+    private static final class ScoutInitToolBudget {
+
+        private final int totalLimit;
+        private final Map<String, Integer> callsByTool = new HashMap<>();
+        private int totalCalls;
+
+        private ScoutInitToolBudget(int totalLimit) {
+            this.totalLimit = totalLimit;
+        }
+
+        private synchronized void consume(String toolName) {
+            Integer perToolLimit = SCOUT_INIT_TOOL_LIMITS.get(toolName);
+            if (perToolLimit == null) {
+                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED");
+            }
+            int nextToolCalls = callsByTool.getOrDefault(toolName, 0) + 1;
+            if (nextToolCalls > perToolLimit) {
+                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED");
+            }
+            if (++totalCalls > totalLimit) {
+                throw new ScoutLimitExceededException("CONTEXT_SCOUT_TOOL_BUDGET_EXCEEDED");
+            }
+            callsByTool.put(toolName, nextToolCalls);
+        }
+    }
+
     private static final class RuntimeState {
 
         private final ReviewRuntimeContext context;
         private final ReviewCancellationToken cancellation;
         private final ReviewDirectorHarnessFactory.DirectorRuntime director;
         private final ConcurrentMap<String, RoleSubagentFactory.RoleRuntime> roles = new ConcurrentHashMap<>();
+        private final Set<RoleType> initialReviewFinalizingRoles = ConcurrentHashMap.newKeySet();
         private final AtomicLong sequence = new AtomicLong();
         private final Sinks.Many<AgentRuntimeEvent> events = Sinks.many().replay().all();
 
@@ -403,6 +654,10 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
         private ConcurrentMap<String, RoleSubagentFactory.RoleRuntime> roles() {
             return roles;
+        }
+
+        private Set<RoleType> initialReviewFinalizingRoles() {
+            return initialReviewFinalizingRoles;
         }
 
         private Sinks.Many<AgentRuntimeEvent> events() {

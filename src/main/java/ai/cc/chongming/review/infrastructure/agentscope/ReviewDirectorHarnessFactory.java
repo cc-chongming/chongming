@@ -14,6 +14,8 @@ import io.agentscope.core.tool.Toolkit;
 import java.util.List;
 import io.agentscope.harness.agent.DistributedStore;
 import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.filesystem.spec.LocalFilesystemSpec;
+import io.agentscope.harness.agent.workspace.LocalFsMode;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
@@ -87,6 +89,7 @@ public class ReviewDirectorHarnessFactory {
                 .description("Coordinates an evidence-driven requirement review within ReviewProtocolGuard boundaries")
                 .defaultSessionId(runtimeContext.directorSessionId())
                 .workspace(workspace.attempt())
+                .filesystem(attemptFilesystem(workspace))
                 .model(new AgentScopeModelBridge(
                         modelGateway, runtimeContext, RoleType.DIRECTOR, "director", prompt,
                         debateTools.stream().map(AgentTool::getName).collect(java.util.stream.Collectors.toSet())))
@@ -113,6 +116,15 @@ public class ReviewDirectorHarnessFactory {
             builder.disableSessionPersistence();
         }
         return new DirectorRuntime(runtimeContext, workspace, builder.build());
+    }
+
+    /** Native Harness file tools must resolve from the attempt root, not the Spring process directory. */
+    private static LocalFilesystemSpec attemptFilesystem(ReviewWorkspaceLayout.ReviewWorkspace workspace) {
+        return new LocalFilesystemSpec()
+                .project(workspace.attempt())
+                .projectWritable(true)
+                .mode(LocalFsMode.ROOTED)
+                .addRoot(workspace.attempt());
     }
 
     private PermissionContextState bypassPermissionContext() {

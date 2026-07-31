@@ -28,6 +28,103 @@ Run the focused test set in an environment with the Maven dependencies cached or
 
 ---
 
+## 2026-07-30 Context Scout preview inherited historical session
+
+### Symptom
+
+The standalone Scout preview sent a first model request with 28 messages, including unrelated historical Scout turns. A local reasoning model exhausted its output budget before emitting any public result.
+
+### Cause
+
+`HarnessAgent.streamEvents(String)` delegates to `RuntimeContext.empty()`. That bypassed the preview Harness's explicit session identity, allowing AgentScope state restoration to use an unintended session.
+
+### Resolution
+
+Always call the `streamEvents(String, RuntimeContext)` overload for independent previews. Use a session key derived from review attempt and preview ID, and retain the review runtime context as a typed attribute. Keep `reasoning` separate from public result text; increase the configured public-output budget instead of publishing hidden reasoning.
+
+### Related Files
+
+- `src/main/java/ai/cc/chongming/review/application/ContextScoutPreviewService.java`
+- `src/test/java/ai/cc/chongming/review/application/ContextScoutPreviewServiceTests.java`
+
+---
+
+## [ERR-20260728-001] PLAN-019 本地浏览器验收服务未启动
+
+**Logged**: 2026-07-28T15:10:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: verification
+
+### Summary
+Context Scout 对话式工具流的代码、构建与自动化测试已完成，但本地 `127.0.0.1:8080` 连续三次 TCP 连接被拒绝，无法执行真实浏览器 E2E 验收。用户随后恢复服务，TCP 检测和真实 Scout 预览均已通过。
+
+### Suggested Fix
+由用户启动 Chongming 服务并确认端口 8080 可访问后，再执行 `/#/reviews/{reviewId}/scout` 的真实预览；不要把端口不可达误判为前端或 AgentScope 行为失败。
+
+### Resolution
+
+- **Resolved**: 2026-07-28T15:55:00+08:00
+- **Notes**: `Test-NetConnection 127.0.0.1 -Port 8080` 成功；浏览器中的真实 `list_files` 与 `glob_files` 工具流已到达并可展开。
+
+---
+
+## [ERR-20260728-002] 原生文件工具的结构化参数未参与 AS2 schema 校验
+
+**Logged**: 2026-07-28T15:55:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: AgentScope integration
+
+### Summary
+
+`AgentScopeModelBridge` 仅向 `ToolUseBlock.input` 写入参数时，AS2 `ToolExecutor` 会改从空的 `ToolUseBlock.content` 执行 schema 校验，导致 `list_files` 的 `path` 等必填参数被误判缺失。
+
+### Resolution
+
+- Bridge 同时以 canonical JSON 填充 `ToolUseBlock.content`。
+- `AgentScopeModelBridgeTests` 覆盖 schema 校验能够读取该 JSON。
+- IDEA 调试热替换后的真实 Scout 预览已成功读取冻结快照文件列表。
+
+---
+
+## [ERR-20260728-003] Scout 下一轮模型请求丢失原生工具结果
+
+**Logged**: 2026-07-28T16:05:00+08:00
+**Priority**: high
+**Status**: pending-runtime-verification
+**Area**: AgentScope integration
+
+### Summary
+
+Bridge 用 `Msg#getTextContent()` 生成模型公共上下文，原生 `ToolResultBlock` 的嵌套文本没有被包含。真实 Scout 因而反复执行根目录 `list_files`，无法基于已读取结果收束。
+
+### Fix and Verification
+
+- Bridge 现将原生工具结果以 `TOOL_RESULT <toolName>` 形式附加到下一轮上下文，并将单项限制为 12,000 字符。
+- 工具结果现有显式不可信数据边界，整次模型请求限制为 48,000 字符；回归测试已通过。
+- 新增私有方法不能对运行中 JVM 做结构热替换，必须重启 Chongming 后创建新的 Scout 预览验证最终中文概览。
+
+---
+
+## 2026-07-28 Maven 本地仓库校验阻断 Scout 预览编译
+
+**Status**: open
+**Area**: build environment
+
+### Summary
+使用显式 `-Dmaven.repo.local=C:\Users\cxwhdev\.m2\repository` 后，Maven 已能解析项目模型并进入 Java 编译，但在读取 `spring-jdbc-7.0.8.jar` 时发生编译器致命错误。
+
+### Error
+```
+Fatal error compiling: C:\Users\cxwhdev\.m2\repository\org\springframework\spring-jdbc\7.0.8\spring-jdbc-7.0.8.jar
+```
+
+### Suggested Fix
+确认该 jar 的完整性；若缓存损坏，删除该单个依赖目录后允许 Maven 重新下载，再重新执行编译。不要删除整个 Maven 本地仓库。
+
+---
+
 ## [ERR-20260714-001] git repository ownership check
 
 **Logged**: 2026-07-14T00:00:00+08:00

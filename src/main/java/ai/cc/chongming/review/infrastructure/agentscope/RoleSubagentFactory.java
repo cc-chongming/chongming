@@ -118,7 +118,8 @@ public class RoleSubagentFactory {
                         roleType,
                         rolePack.modelProfile(),
                         prompt,
-                        rolePack.allowedTools()))
+                        rolePack.allowedTools(),
+                        java.util.Set.of()))
                 .sysPrompt(prompt)
                 .maxIters(rolePack.maxIterations())
                 .toolkit(toolkit)
@@ -145,6 +146,60 @@ public class RoleSubagentFactory {
                 builder.build());
     }
 
+    /**
+     * Creates the protocol-only continuation used after a bounded initial-review investigation
+     * reaches its iteration budget. It deliberately omits every repository and debate tool.
+     */
+    public HarnessAgent createInitialReviewFinalizer(
+            ReviewRuntimeContext runtimeContext, RoleRuntime roleRuntime) {
+        Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
+        Objects.requireNonNull(roleRuntime, "roleRuntime must not be null");
+        RolePack rolePack = roleRuntime.rolePack();
+        if (!rolePack.allowedTools().contains("complete_initial_review")) {
+            throw new IllegalArgumentException("role does not require initial-review completion: " + rolePack.roleType());
+        }
+        java.util.Set<String> finalizationTools = java.util.Set.of("submit_claim", "complete_initial_review");
+        String publicContext = reviewRepositoryToolFactory == null
+                ? ""
+                : reviewContextAssembler == null
+                        ? reviewRepositoryToolFactory.sharedProjectContext(runtimeContext).publicText(rolePack.roleType())
+                        : reviewRepositoryToolFactory.rolePublicContext(runtimeContext, rolePack, reviewContextAssembler);
+        String prompt = finalizationPrompt(rolePack, publicContext);
+        Toolkit toolkit = reviewToolkit(runtimeContext, rolePack.roleType(), finalizationTools);
+        HarnessAgent.Builder builder = HarnessAgent.builder()
+                .name(roleRuntime.label() + "-finalizer")
+                .agentId(roleRuntime.label() + "-finalizer")
+                .description("Protocol finalizer for " + rolePack.roleType())
+                .defaultSessionId(roleRuntime.sessionId())
+                .workspace(roleRuntime.workspace())
+                .model(new AgentScopeModelBridge(
+                        modelGateway,
+                        runtimeContext,
+                        rolePack.roleType(),
+                        rolePack.modelProfile(),
+                        prompt,
+                        finalizationTools,
+                        java.util.Set.of()))
+                .sysPrompt(prompt)
+                .maxIters(Integer.MAX_VALUE)
+                .toolkit(toolkit)
+                .disableFilesystemTools()
+                .disableShellTool()
+                .disableMemoryTools()
+                .disableMemoryHooks()
+                .disableWorkspaceContext()
+                .disableSubagents()
+                .disableDynamicSubagents()
+                .disableDynamicSkills()
+                .disableDefaultWorkspaceSkills()
+                .skillsEnabled(false)
+                .permissionContext(readOnlyPermissionContext());
+        if (!agentScopeProperties.persistSession()) {
+            builder.disableSessionPersistence();
+        }
+        return builder.build();
+    }
+
     private PermissionContextState readOnlyPermissionContext() {
         return PermissionContextState.builder()
                 .mode(PermissionMode.EXPLORE)
@@ -168,6 +223,9 @@ public class RoleSubagentFactory {
         String completionGuidance = rolePack.allowedTools().contains("complete_initial_review")
                 ? "Submit every finding with submit_claim, then always call complete_initial_review, including when there are no findings. "
                 : "Submit only the evidence and formal actions authorized for this role; do not claim that an unavailable completion tool was called. ";
+        String checklistGuidance = rolePack.checklist().isEmpty()
+                ? ""
+                : "You must explicitly cover these review checkpoints: " + String.join("; ", rolePack.checklist()) + ". ";
         String iterationGuidance = rolePack.allowedTools().contains("complete_initial_review")
                 ? "Your maximum is " + rolePack.maxIterations() + " model turns. Spend at most the first twelve turns "
                         + "on repository investigation; reserve the remaining turns for submit_claim and complete_initial_review. "
@@ -178,12 +236,52 @@ public class RoleSubagentFactory {
                 + " Work only from the supplied public context and server-authorized tool results. "
                 + " Read repository files only through server-authorized snapshot tools; never access host files, shell commands, "
                 + "other role sessions, hidden reasoning, credentials, or final Gate authority. "
+                + workflowGuidance(rolePack.roleType())
+                + checklistGuidance
                 + " " + repositoryGuidance
                 + "for concrete files and symbols. Do not probe directories or read repository documents outside the assigned review. "
                 + iterationGuidance
                 + completionGuidance
                 + " Do not treat final text as a substitute for either tool. Return public "
                 + rolePack.outputKind().name() + " JSON compatible output using prompt version " + rolePack.promptVersion() + ". "
+                + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
+                + publicContext;
+    }
+
+    /**
+     * ECC-derived review workflows are adapted to evidence collection only; they never grant the
+     * original coding-agent's host, shell, edit, deployment or secret access.
+     */
+    private static String workflowGuidance(RoleType roleType) {
+        return switch (roleType) {
+            case DIRECTOR -> "Follow the review-director workflow: keep the public plan and role hand-offs coherent, route only verified evidence "
+                    + "to the appropriate stage, and never substitute an agent narrative for a protocol transition. ";
+            case PRODUCT -> "Follow the Product Lens workflow: identify target users and pain, trace the critical user journey, "
+                    + "separate MVP scope from anti-goals, and turn ambiguities into acceptance risks. ";
+            case PROJECT -> "Follow the Code Architect workflow: map dependencies and delivery sequence, identify ownership and integration boundaries, "
+                    + "then assess whether milestones have executable acceptance conditions. ";
+            case ARCHITECTURE -> "Follow the Code Architect workflow: trace entry points and call paths, map component boundaries and dependency direction, "
+                    + "then report only concrete extensibility, resilience or coupling risks. ";
+            case BACKEND -> "Follow the Spring Boot service-review workflow: trace request-to-data flow, validate contracts, consistency, failure handling, "
+                    + "observability and operational rollback boundaries. ";
+            case FRONTEND -> "Follow the frontend review workflow: trace user actions through UI state and API contracts, then check accessibility, loading, error "
+                    + "and recovery states. ";
+            case TESTING -> "Follow the TDD and E2E workflow: derive happy paths, boundaries and regressions from acceptance criteria, then identify the smallest "
+                    + "deterministic unit, integration and end-to-end evidence required. ";
+            case PERFORMANCE -> "Follow the performance review workflow: identify critical request paths, data volume assumptions, synchronous fan-out, hot queries, "
+                    + "resource ceilings and observable load-test acceptance thresholds. ";
+            case SECURITY -> "Follow the security-review workflow: establish trust boundaries, validate authorization and input handling, then inspect sensitive data, "
+                    + "injection and external-exposure risks. ";
+            case JUDGE -> "Follow the evidence-review workflow: compare only persisted claims and cited evidence, distinguish unresolved uncertainty from a proven defect, "
+                    + "and state whether a human decision is necessary. ";
+        };
+    }
+
+    private String finalizationPrompt(RolePack rolePack, String publicContext) {
+        return "You are the " + rolePack.roleType().name() + " review role in protocol-finalization mode. "
+                + "The bounded investigation phase has ended. Do not investigate, read files, debate, or request more context. "
+                + "Only use submit_claim for findings already supported by the supplied context, then call complete_initial_review. "
+                + "You must continue until complete_initial_review is accepted, including when there are no findings. "
                 + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
                 + publicContext;
     }

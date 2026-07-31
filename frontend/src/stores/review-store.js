@@ -104,6 +104,21 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
                     code: domainEvent.type
                 });
             }
+            if (domainEvent.type === 'CONTEXT_SCOUT_DEGRADED') {
+                const eventAttempt = domainEvent.attemptNo ?? domainEvent.attempt;
+                if (Number(eventAttempt) === Number(state.summary?.attempt)) {
+                    state.summary = {
+                        ...state.summary,
+                        contextScout: {
+                            status: domainEvent.payload?.status ?? 'DEGRADED',
+                            reasonCode: domainEvent.payload?.reasonCode ?? 'CONTEXT_SCOUT_UNAVAILABLE',
+                            publicSummary: domainEvent.payload?.publicSummary
+                                ?? 'Context Scout 未能完成项目上下文预处理，Director 将继续评审。',
+                            occurredAt: domainEvent.occurredAt
+                        }
+                    };
+                }
+            }
             if (domainEvent.type === 'REVIEW_CANCELLED') {
                 applyAgUiEvent(state.agUi, { type: EventType.RUN_FINISHED, threadId: state.agUi.threadId, runId: state.agUi.runId });
             }
@@ -168,6 +183,11 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
     async function retryReview(expectedVersion) {
         const result = await api.retryReview(state.reviewId, expectedVersion);
         applyLifecycleResult(result, 'PENDING');
+        if (state.summary) {
+            const nextSummary = { ...state.summary };
+            delete nextSummary.contextScout;
+            state.summary = nextSummary;
+        }
         return result;
     }
 

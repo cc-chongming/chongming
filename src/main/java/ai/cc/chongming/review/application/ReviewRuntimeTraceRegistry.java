@@ -40,13 +40,41 @@ public class ReviewRuntimeTraceRegistry {
         if (afterSequence < 0) {
             throw new IllegalArgumentException("afterSequence must not be negative");
         }
-        String runtimeId = ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo);
+        return subscribe(ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo), afterSequence);
+    }
+
+    /**
+     * Subscribes to an application-owned auxiliary runtime, such as an isolated Context Scout
+     * preview. Callers must authorize the runtime identifier before exposing this subscription.
+     */
+    public Subscription subscribe(String runtimeId, long afterSequence) {
+        if (runtimeId == null || runtimeId.isBlank()) {
+            throw new IllegalArgumentException("runtimeId must not be blank");
+        }
+        if (afterSequence < 0) {
+            throw new IllegalArgumentException("afterSequence must not be negative");
+        }
         return traces.computeIfAbsent(runtimeId, RuntimeTrace::new).subscribe(afterSequence);
     }
 
     /** Activates delivery only after the HTTP layer has completed registration. */
     public void activate(Subscription subscription) {
         subscription.trace().activate(subscription);
+    }
+
+    /**
+     * Releases an auxiliary runtime after its bounded replay window has elapsed. A later
+     * subscription receives a fresh, empty trace rather than stale tool output from a completed
+     * preview.
+     */
+    public void remove(String runtimeId) {
+        if (runtimeId == null || runtimeId.isBlank()) {
+            return;
+        }
+        RuntimeTrace trace = traces.remove(runtimeId);
+        if (trace != null) {
+            trace.close();
+        }
     }
 
     @PreDestroy
@@ -193,6 +221,12 @@ public class ReviewRuntimeTraceRegistry {
 
         private void remove(Subscription subscription) {
             subscriptions.remove(subscription.id());
+        }
+
+        private synchronized void close() {
+            subscriptions.values().forEach(subscription -> subscription.emitter().complete());
+            subscriptions.clear();
+            events.clear();
         }
     }
 

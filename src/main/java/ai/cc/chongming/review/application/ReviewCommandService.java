@@ -5,6 +5,7 @@ import ai.cc.chongming.review.config.ReviewDiagnosticsProperties;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.exception.ReviewErrorCode;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.RepositorySnapshot;
 import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewCommandMetadata;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -134,6 +136,46 @@ public class ReviewCommandService {
         return new RetryReviewResult(result.reviewId(), result.previousAttempt(), result.attemptNo(), result.version(), result.replayed());
     }
 
+    /**
+     * Establishes the immutable snapshot for a pending attempt before an isolated Scout preview.
+     * Once an attempt leaves {@link ReviewStage#PENDING}, this method may only reuse its existing
+     * reference and never replaces it with a newer worktree state.
+     */
+    public RepositorySnapshot prepareSnapshotForScoutPreview(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        if (intakeService == null || snapshotService == null) {
+            throw new IllegalStateException("repository snapshot preparation is unavailable");
+        }
+        Review review = requireReview(reviewId);
+        var requirement = intakeService.requireSnapshot(reviewId, attemptNo);
+        var existing = snapshotService.findExistingSnapshot(reviewId, attemptNo, requirement.repositoryPath());
+        if (existing.isPresent()) {
+            return existing.orElseThrow();
+        }
+        synchronized (review) {
+            if (review.attemptNo() != attemptNo) {
+                throw new IllegalStateException("requested Scout preview attempt is not current");
+            }
+            existing = snapshotService.findExistingSnapshot(reviewId, attemptNo, requirement.repositoryPath());
+            if (existing.isPresent()) {
+                return existing.orElseThrow();
+            }
+            if (review.stage() != ReviewStage.PENDING) {
+                throw new IllegalStateException(
+                        "a Scout preview can only initialize a snapshot while the attempt is PENDING");
+            }
+            return snapshotService.bindSnapshot(
+                    reviewId,
+                    attemptNo,
+                    requirement.repositoryPath(),
+                    requirement.contentHash(),
+                    IntakeCancellation.neverCancelled());
+        }
+    }
+
     private void launch(Review review, ReviewRuntimeContext context, StartReviewCommand command) {
         Mono.defer(() -> {
             bindRepositorySnapshot(context);
@@ -153,12 +195,20 @@ public class ReviewCommandService {
             return;
         }
         var requirementSnapshot = intakeService.requireSnapshot(context.reviewId(), context.attemptNo());
+        if (snapshotService.findExistingSnapshot(
+                context.reviewId(), context.attemptNo(), requirementSnapshot.repositoryPath()).isPresent()) {
+            return;
+        }
         snapshotService.bindSnapshot(
                 context.reviewId(), context.attemptNo(), requirementSnapshot.repositoryPath(),
                 requirementSnapshot.contentHash(), context.cancellation());
     }
 
     private Mono<Void> recordStartupFailure(Review review, ReviewRuntimeContext context, Throwable failure) {
+        if (isCancellationFailure(failure)) {
+            LOGGER.info("REVIEW_STARTUP_CANCELLED reviewId={} attempt={}", review.id().value(), context.attemptNo());
+            return releaseRuntime(context);
+        }
         logStartupFailure(review, failure);
         synchronized (review) {
             if (review.stage().isTerminal() || !stateMachine.canTransition(review.stage(), ReviewStage.FAILED)) {
@@ -181,6 +231,25 @@ public class ReviewCommandService {
                     Map.of("failureType", failure.getClass().getSimpleName())));
         }
         return releaseRuntime(context);
+    }
+
+    private static boolean isCancellationFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof CancellationException) {
+                return true;
+            }
+            if (current instanceof ReviewIntakeException intakeFailure
+                    && "INTAKE_CANCELLED".equals(intakeFailure.code())) {
+                return true;
+            }
+            if (current instanceof ai.cc.chongming.review.domain.gateway.ModelGatewayException modelFailure
+                    && modelFailure.code() == ai.cc.chongming.review.domain.gateway.ModelGatewayException.Code.MODEL_CANCELLED) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private Mono<Void> releaseRuntime(ReviewRuntimeContext context) {
@@ -222,7 +291,7 @@ public class ReviewCommandService {
         return redactDiagnosticText(writer.toString(), 10_000);
     }
 
-    static String redactDiagnosticText(String value, int limit) {
+    public static String redactDiagnosticText(String value, int limit) {
         String redacted = value
                 .replaceAll("(?i)authorization\\s*[=:]\\s*bearer\\s+\\S+", "Authorization=[REDACTED]")
                 .replaceAll("(?i)\\bbearer\\s+\\S+", "Bearer [REDACTED]")

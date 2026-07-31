@@ -2,12 +2,14 @@ package ai.cc.chongming.review.infrastructure.event;
 
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
@@ -62,6 +64,48 @@ public class InMemoryReviewEventStore implements ReviewEventStore {
         }
         synchronized (events) {
             return events.isEmpty() ? Optional.empty() : Optional.of(events.getLast());
+        }
+    }
+
+    @Override
+    public Optional<ReviewEvent> findLatestByType(ReviewId reviewId, ReviewEventType eventType) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(eventType, "eventType must not be null");
+        List<ReviewEvent> events = eventsByReview.get(reviewId);
+        if (events == null) {
+            return Optional.empty();
+        }
+        synchronized (events) {
+            for (int index = events.size() - 1; index >= 0; index--) {
+                ReviewEvent event = events.get(index);
+                if (event.type() == eventType) {
+                    return Optional.of(event);
+                }
+            }
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<ReviewEvent> findLatestByTypeAndAttempt(
+            ReviewId reviewId, ReviewEventType eventType, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(eventType, "eventType must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        List<ReviewEvent> events = eventsByReview.get(reviewId);
+        if (events == null) {
+            return Optional.empty();
+        }
+        synchronized (events) {
+            for (int index = events.size() - 1; index >= 0; index--) {
+                ReviewEvent event = events.get(index);
+                if (event.type() == eventType && event.attemptNo() == attemptNo) {
+                    return Optional.of(event);
+                }
+            }
+            return Optional.empty();
         }
     }
 }

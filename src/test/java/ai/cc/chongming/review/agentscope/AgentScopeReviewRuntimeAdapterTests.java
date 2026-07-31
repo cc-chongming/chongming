@@ -8,6 +8,7 @@ import ai.cc.chongming.review.config.ReviewProperties;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.gateway.ModelGateway;
+import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
@@ -17,24 +18,32 @@ import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentEventAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeRoleRequest;
+import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeSession;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeStartRequest;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeReviewRuntimeAdapter;
+import ai.cc.chongming.review.infrastructure.agentscope.ContextScoutHarnessFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewDirectorHarnessFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkspaceLayout;
 import ai.cc.chongming.review.infrastructure.agentscope.RoleSubagentFactory;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import io.agentscope.core.permission.PermissionMode;
+import io.agentscope.core.event.ToolCallStartEvent;
+import io.agentscope.harness.agent.HarnessAgent;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.ObjectProvider;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,6 +166,49 @@ class AgentScopeReviewRuntimeAdapterTests {
     }
 
     @Test
+    void directorNativeFilesystemIsRootedAtTheAttemptWorkspace() throws Exception {
+        ReviewRuntimeContext context = context(1);
+        ReviewWorkspaceLayout workspaceLayout = new ReviewWorkspaceLayout(
+                new ReviewProperties(temporaryDirectory.toString(), 8, 2),
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        ReviewWorkspaceLayout.ReviewWorkspace workspace = workspaceLayout.open(context);
+        Files.createDirectories(workspace.attempt().resolve("input"));
+        Files.writeString(workspace.attempt().resolve("input/requirement.md"), "评审需求");
+        AtomicInteger invocations = new AtomicInteger();
+        AtomicReference<ModelGateway.ModelRequest> afterListing = new AtomicReference<>();
+        ModelGateway gateway = (request, cancellation) -> {
+            if (invocations.incrementAndGet() == 1) {
+                return Mono.just(new ModelGateway.ModelResponse(
+                        "response-001", "test-model", "", new ModelGateway.Usage(1, 1, 2),
+                        ModelGateway.FinishReason.TOOL_CALL, Duration.ofMillis(5), 1,
+                        List.of(new ModelGateway.ToolCall("call-list-root", "list_files", Map.of("path", "."))),
+                        request.traceId()));
+            }
+            afterListing.set(request);
+            return Mono.just(new ModelGateway.ModelResponse(
+                    "response-002", "test-model", "工作区已确认。", new ModelGateway.Usage(1, 1, 2),
+                    ModelGateway.FinishReason.STOP, Duration.ofMillis(5), 1, request.traceId()));
+        };
+        @SuppressWarnings("unchecked")
+        ObjectProvider<io.agentscope.harness.agent.DistributedStore> storeProvider = Mockito.mock(ObjectProvider.class);
+        ReviewDirectorHarnessFactory.DirectorRuntime director = new ReviewDirectorHarnessFactory(
+                workspaceLayout,
+                gateway,
+                new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString()),
+                storeProvider).create(context);
+
+        try {
+            director.agent().streamEvents("确认工作区。").blockLast();
+        } finally {
+            director.agent().close();
+        }
+
+        assertThat(afterListing.get()).isNotNull();
+        assertThat(afterListing.get().publicContext()).contains("[DIR]  /input");
+        assertThat(afterListing.get().publicContext()).doesNotContain("/AGENTS.md", "/pom.xml");
+    }
+
+    @Test
     void failsReviewWhenRoleStreamEndsWithoutCompleteInitialReview() {
         ReviewRuntimeContext context = context(1);
         Review review = Review.restore(context.reviewId(), ReviewStage.INITIAL_REVIEW, context.attemptNo(), 0,
@@ -181,6 +233,109 @@ class AgentScopeReviewRuntimeAdapterTests {
         assertThat(review.stage()).isEqualTo(ReviewStage.FAILED);
         assertThat(events).extracting(ReviewEventDraft::type)
                 .containsExactly(ReviewEventType.ROLE_FAILED, ReviewEventType.REVIEW_FAILED);
+    }
+
+    @Test
+    void degradesScoutFailureAndStillRunsDirector() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
+                List.of(), java.util.Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        HarnessAgent scout = Mockito.mock(HarnessAgent.class);
+        ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
+        Mockito.when(scoutFactory.create(Mockito.any(), Mockito.any())).thenReturn(scout);
+        Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Flux.error(new ModelGatewayException(
+                        ModelGatewayException.Code.MODEL_CALL_TIMEOUT, "token=must-not-reach-public-events")));
+        AtomicInteger directorModelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
+
+        AgentRuntimeSession session = adapter.start(startRequest(context)).block();
+
+        assertThat(session.runtimeId()).isEqualTo(context.runtimeId());
+        assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
+        assertThat(directorModelCalls).hasValue(1);
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
+        assertThat(events.getFirst().payload())
+                .containsEntry("status", "DEGRADED")
+                .containsEntry("reasonCode", "MODEL_CALL_TIMEOUT")
+                .containsEntry("publicSummary", "Context Scout 模型调用超时，已跳过项目上下文预处理，Director 将继续评审。");
+        assertThat(events.getFirst().payload().toString()).doesNotContain("token=must-not-reach-public-events");
+        Mockito.verify(scout).close();
+    }
+
+    @Test
+    void degradesScoutConstructionFailureAndStillRunsDirector() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
+                List.of(), java.util.Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
+        Mockito.when(scoutFactory.create(Mockito.any(), Mockito.any())).thenThrow(new ModelGatewayException(
+                ModelGatewayException.Code.MODEL_NETWORK_ERROR, "unavailable before stream subscription"));
+        AtomicInteger directorModelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
+
+        adapter.start(startRequest(context)).block();
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
+        assertThat(directorModelCalls.get()).isEqualTo(1);
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
+        assertThat(events.getFirst().payload())
+                .containsEntry("reasonCode", "MODEL_NETWORK_ERROR")
+                .containsEntry("publicSummary", "Context Scout 模型服务暂不可用，已跳过项目上下文预处理，Director 将继续评审。");
+    }
+
+    @Test
+    void degradesScoutWhenItViolatesTheInitRetrievalContract() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
+                List.of(), Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        HarnessAgent scout = Mockito.mock(HarnessAgent.class);
+        ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
+        Mockito.when(scoutFactory.create(Mockito.any(), Mockito.any())).thenReturn(scout);
+        Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Flux.range(1, 3)
+                        .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "glob_files")));
+        AtomicInteger directorModelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
+
+        adapter.start(startRequest(context)).block();
+
+        assertThat(directorModelCalls).hasValue(1);
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
+        assertThat(events.getFirst().payload())
+                .containsEntry("reasonCode", "CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED");
+    }
+
+    @Test
+    void doesNotRunDirectorWhenTheAttemptIsAlreadyCancelledBeforeScoutStarts() {
+        ReviewRuntimeContext context = new ReviewRuntimeContext(
+                new ReviewId(UUID.randomUUID()), 1, "user-001", "trace-001", () -> true);
+        Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
+                List.of(), java.util.Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
+        AtomicInteger directorModelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, new ArrayList<>(), directorModelCalls);
+
+        assertThatThrownBy(() -> adapter.start(startRequest(context)).block())
+                .isInstanceOf(ai.cc.chongming.review.application.ReviewIntakeException.class)
+                .hasMessageContaining("cancelled");
+
+        assertThat(directorModelCalls.get()).isZero();
+        Mockito.verifyNoInteractions(scoutFactory);
     }
 
     private AgentScopeReviewRuntimeAdapter adapter() {
@@ -225,6 +380,41 @@ class AgentScopeReviewRuntimeAdapterTests {
                         properties,
                         workspaceLayout),
                 new AgentEventAdapter(), registry, progressService);
+    }
+
+    private AgentScopeReviewRuntimeAdapter adapter(
+            InMemoryReviewRegistry registry,
+            ContextScoutHarnessFactory scoutFactory,
+            List<ReviewEventDraft> events,
+            AtomicInteger directorModelCalls) {
+        ReviewProperties reviewProperties = new ReviewProperties(temporaryDirectory.toString(), 8, 2);
+        ReviewWorkspaceLayout workspaceLayout = new ReviewWorkspaceLayout(
+                reviewProperties, new com.fasterxml.jackson.databind.ObjectMapper());
+        AgentScopeProperties properties = new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString());
+        ModelGateway gateway = (request, cancellation) -> {
+            directorModelCalls.incrementAndGet();
+            return Mono.just(new ModelGateway.ModelResponse(
+                    "response-001", "test-model", "Director continued after Scout degradation.",
+                    new ModelGateway.Usage(1, 1, 2), ModelGateway.FinishReason.STOP,
+                    Duration.ofMillis(5), 1, request.traceId()));
+        };
+        @SuppressWarnings("unchecked")
+        ObjectProvider<io.agentscope.harness.agent.DistributedStore> storeProvider = Mockito.mock(ObjectProvider.class);
+        return new AgentScopeReviewRuntimeAdapter(
+                new ReviewDirectorHarnessFactory(workspaceLayout, gateway, properties, storeProvider),
+                new RoleSubagentFactory(
+                        new ai.cc.chongming.review.domain.role.RolePackRegistry(
+                                new org.springframework.core.io.support.PathMatchingResourcePatternResolver()),
+                        gateway,
+                        properties,
+                        workspaceLayout),
+                new AgentEventAdapter(),
+                registry,
+                null,
+                null,
+                null,
+                scoutFactory,
+                events::add);
     }
 
     private AgentRuntimeStartRequest startRequest(ReviewRuntimeContext context) {

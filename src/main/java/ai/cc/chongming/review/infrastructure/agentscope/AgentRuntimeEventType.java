@@ -12,5 +12,6 @@ public enum AgentRuntimeEventType {
     CANCELLED,
     RESUMED,
     RAW_EVENT,
+    DEGRADED,
     FAILED
 }

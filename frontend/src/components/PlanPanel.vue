@@ -33,6 +33,12 @@ function payloadValue(event, name) {
             <span :style="{ width: `${summary?.progress ?? 0}%` }"></span>
         </div>
 
+        <aside v-if="summary?.contextScout?.status === 'DEGRADED'" class="context-scout-warning" aria-label="Context Scout 降级信息">
+            <strong>Context Scout 已降级</strong>
+            <p>{{ summary.contextScout.publicSummary }}</p>
+            <small>原因代码：{{ summary.contextScout.reasonCode }}<template v-if="summary.contextScout.occurredAt"> · {{ summary.contextScout.occurredAt }}</template></small>
+        </aside>
+
         <h3>活跃角色</h3>
         <ul v-if="roles.length" class="role-list" aria-label="角色状态">
             <li v-for="role in roles" :key="role.role">

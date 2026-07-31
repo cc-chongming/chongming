@@ -2,6 +2,7 @@ package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventCategory;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.EvidenceBlock;
@@ -18,6 +19,7 @@ import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -64,6 +66,7 @@ public class ReviewQueryService {
         this.reviewRegistry = reviewRegistry;
     }
 
+    @Transactional(readOnly = true)
     public Optional<ReviewSummary> findSummary(ReviewId reviewId) {
         Optional<ReviewEvent> latestEvent = eventStore.findLatest(reviewId);
         Optional<GateDecision> gate = debateStore.findGateDraft(reviewId);
@@ -72,9 +75,17 @@ public class ReviewQueryService {
             return Optional.empty();
         }
         ReviewEvent event = latestEvent.orElse(null);
-        Long reviewVersion = reviewRegistry.find(reviewId).map(review -> review.version()).orElse(null);
+        var review = reviewRegistry.find(reviewId).orElse(null);
+        Long reviewVersion = review == null ? null : review.version();
+        int currentAttempt = review == null ? (event == null ? 0 : event.attemptNo()) : review.attemptNo();
         GateView gateView = humanGate.map(this::toGateView)
                 .orElseGet(() -> gate.map(this::toGateView).orElse(null));
+        ContextScoutView contextScout = currentAttempt < 1
+                ? null
+                : eventStore.findLatestByTypeAndAttempt(
+                                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, currentAttempt)
+                        .map(this::toContextScoutView)
+                        .orElse(null);
         return Optional.of(new ReviewSummary(
                 reviewId.value(),
                 event == null ? null : event.attemptNo(),
@@ -83,7 +94,8 @@ public class ReviewQueryService {
                 event == null ? 0L : event.sequence(),
                 reviewVersion,
                 event == null ? null : format(event.occurredAt()),
-                gateView));
+                gateView,
+                contextScout));
     }
 
     /**
@@ -239,6 +251,16 @@ public class ReviewQueryService {
                 decision.reason(),
                 format(decision.decidedAt()));
     }
+
+    private ContextScoutView toContextScoutView(ReviewEvent event) {
+        return new ContextScoutView(
+                event.payload().getOrDefault("status", "DEGRADED"),
+                event.payload().getOrDefault("reasonCode", "CONTEXT_SCOUT_UNAVAILABLE"),
+                event.payload().getOrDefault(
+                        "publicSummary",
+                        "Context Scout 未能完成项目上下文预处理，Director 将继续评审。"),
+                format(event.occurredAt()));
+    }
     private EvidenceView toEvidenceView(EvidenceBlock evidence) {
         return new EvidenceView(
                 evidence.evidenceId().value(),
@@ -273,7 +295,8 @@ public class ReviewQueryService {
             long lastSequence,
             Long reviewVersion,
             String occurredAt,
-            GateView gate) {
+            GateView gate,
+            ContextScoutView contextScout) {
     }
 
     /**
@@ -369,6 +392,12 @@ public class ReviewQueryService {
      * @author wangli
      */
     public record GateView(String result, String status, String actor, String reasonSummary, String decidedAt) {
+    }
+
+    /**
+     * @author wangli
+     */
+    public record ContextScoutView(String status, String reasonCode, String publicSummary, String occurredAt) {
     }
 
     /**

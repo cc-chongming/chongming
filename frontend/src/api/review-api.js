@@ -112,6 +112,19 @@ export const reviewApi = {
         return request(withQuery(`/api/reviews/${reviewId}/retry`, { expectedVersion }), { method: 'POST' });
     },
 
+    startScoutPreview(reviewId, attemptNo, { userId, traceId } = {}) {
+        const payload = jsonBody({ userId });
+        return request(`/api/reviews/${reviewId}/attempts/${attemptNo}/scout-previews`, {
+            method: 'POST',
+            body: payload.body,
+            headers: { ...payload.headers, ...(traceId ? { 'X-Trace-Id': traceId } : {}) }
+        });
+    },
+
+    getScoutPreview(reviewId, attemptNo, previewId) {
+        return request(`/api/reviews/${reviewId}/attempts/${attemptNo}/scout-previews/${previewId}`);
+    },
+
     getSummary(reviewId) {
         return request(`/api/reviews/${reviewId}`);
     },

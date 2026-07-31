@@ -8,5 +8,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @author wangli
  */
 @ConfigurationProperties(prefix = "review.diagnostics")
-public record ReviewDiagnosticsProperties(boolean logStartupFailureStack) {
+public record ReviewDiagnosticsProperties(
+        boolean logStartupFailureStack,
+        boolean contextScoutPreviewEnabled) {
+
+    public ReviewDiagnosticsProperties(boolean logStartupFailureStack) {
+        this(logStartupFailureStack, false);
+    }
 }
