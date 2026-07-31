@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.cc.chongming.review.config.ReviewProperties;
+import ai.cc.chongming.review.domain.model.RequirementSnapshot;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementParser;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementValidator;
@@ -62,6 +63,29 @@ class ReviewIntakeServiceTests {
                 .contains("\"snapshotId\"")
                 .contains(created.snapshot().contentHash())
                 .contains("\"parserVersion\" : \"markdown-line-parser-v1\"");
+    }
+
+    @Test
+    void copiesAcceptedInputIntoTheRetryAttemptWorkspace() throws Exception {
+        ReviewIntakeService service = newService();
+        ReviewIntakeResult created = service.intake(request(false));
+
+        RequirementSnapshot retrySnapshot = service.copySnapshotForRetry(created.snapshot().reviewId(), 1, 2);
+
+        assertThat(retrySnapshot.reviewId()).isEqualTo(created.snapshot().reviewId());
+        assertThat(retrySnapshot.attemptNo()).isEqualTo(2);
+        assertThat(retrySnapshot.snapshotId()).isNotEqualTo(created.snapshot().snapshotId());
+        assertThat(retrySnapshot.contentHash()).isEqualTo(created.snapshot().contentHash());
+        assertThat(service.requireSnapshot(created.snapshot().reviewId(), 2)).isEqualTo(retrySnapshot);
+        Path retryInput = workspaceRoot.resolve("reviews")
+                .resolve(created.snapshot().reviewId().value().toString())
+                .resolve("attempt-2")
+                .resolve("input");
+        assertThat(Files.readString(retryInput.resolve("requirement.md")))
+                .isEqualTo("# Requirement\r\nImplement the intake endpoint.");
+        assertThat(Files.readString(retryInput.resolve("snapshot-manifest.json")))
+                .contains("\"attemptNo\" : 2")
+                .contains(retrySnapshot.snapshotId().toString());
     }
 
     @Test

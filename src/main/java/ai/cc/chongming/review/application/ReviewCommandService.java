@@ -133,6 +133,9 @@ public class ReviewCommandService {
     public RetryReviewResult retry(ReviewId reviewId, long expectedVersion) {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
         ReviewLifecycleService.RetryResult result = lifecycleService.retry(requireReview(reviewId), expectedVersion);
+        if (intakeService != null) {
+            intakeService.copySnapshotForRetry(reviewId, result.previousAttempt(), result.attemptNo());
+        }
         return new RetryReviewResult(result.reviewId(), result.previousAttempt(), result.attemptNo(), result.version(), result.replayed());
     }
 

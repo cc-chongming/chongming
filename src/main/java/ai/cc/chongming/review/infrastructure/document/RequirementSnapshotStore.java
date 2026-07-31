@@ -96,6 +96,73 @@ public class RequirementSnapshotStore {
     }
 
     /**
+     * Copies an already accepted input into a fresh attempt workspace without reparsing or changing the source snapshot.
+     *
+     * @param source accepted input snapshot from the terminal attempt
+     * @param target immutable input snapshot metadata for the fresh attempt
+     * @param cancellation retry cancellation signal
+     * @return the controlled workspace locations for the fresh input snapshot
+     */
+    public StoredRequirementSnapshot copyForNewAttempt(
+            RequirementSnapshot source, RequirementSnapshot target, IntakeCancellation cancellation) {
+        Objects.requireNonNull(source, "source must not be null");
+        Objects.requireNonNull(target, "target must not be null");
+        Objects.requireNonNull(cancellation, "cancellation must not be null");
+        if (!source.reviewId().equals(target.reviewId()) || source.attemptNo() >= target.attemptNo()) {
+            throw new IllegalArgumentException("retry snapshot must belong to the same review and a newer attempt");
+        }
+
+        Path sourceInputDirectory = snapshotInputDirectory(source.reviewId(), source.attemptNo());
+        Path attemptDirectory = workspaceRoot
+                .resolve("reviews")
+                .resolve(target.reviewId().value().toString())
+                .resolve("attempt-" + target.attemptNo())
+                .normalize();
+        Path targetInputDirectory = attemptDirectory.resolve("input").normalize();
+        verifyWorkspacePath(sourceInputDirectory);
+        verifyWorkspacePath(attemptDirectory);
+        verifyWorkspacePath(targetInputDirectory);
+        if (!Files.isRegularFile(sourceInputDirectory.resolve("requirement.md"))
+                || !Files.isRegularFile(sourceInputDirectory.resolve("requirement.normalized.md"))) {
+            throw new IllegalStateException("Requirement snapshot was not found for the source review attempt");
+        }
+
+        Path stagingDirectory = null;
+        try {
+            cancellation.checkCancelled();
+            Files.createDirectories(attemptDirectory);
+            if (Files.exists(targetInputDirectory)) {
+                throw new IllegalStateException("Requirement snapshot already exists for this review attempt");
+            }
+            stagingDirectory = Files.createTempDirectory(attemptDirectory, ".input-staging-");
+            copyWithCancellation(sourceInputDirectory.resolve("requirement.md"),
+                    stagingDirectory.resolve("requirement.md"), cancellation);
+            copyWithCancellation(sourceInputDirectory.resolve("requirement.normalized.md"),
+                    stagingDirectory.resolve("requirement.normalized.md"), cancellation);
+            writeManifest(stagingDirectory.resolve("snapshot-manifest.json"), target, cancellation);
+            cancellation.checkCancelled();
+            moveDirectory(stagingDirectory, targetInputDirectory);
+            stagingDirectory = null;
+            return storedSnapshot(targetInputDirectory);
+        } catch (FileAlreadyExistsException exception) {
+            throw new IllegalStateException("Requirement snapshot already exists for this review attempt", exception);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to copy immutable requirement snapshot", exception);
+        } finally {
+            deleteDirectoryQuietly(stagingDirectory);
+        }
+    }
+
+    /**
+     * Checks whether the controlled manifest for an attempt is present before a retry attempts to materialize it.
+     *
+     * @author wangli
+     */
+    public boolean hasSnapshot(ReviewId reviewId, int attemptNo) {
+        return Files.isRegularFile(snapshotInputDirectory(reviewId, attemptNo).resolve("snapshot-manifest.json"));
+    }
+
+    /**
      * Rehydrates an immutable requirement snapshot from the controlled workspace manifest.
      *
      * @author wangli
@@ -105,11 +172,7 @@ public class RequirementSnapshotStore {
         if (attemptNo < 1) {
             throw new IllegalArgumentException("attemptNo must be positive");
         }
-        Path manifestPath = workspaceRoot
-                .resolve("reviews")
-                .resolve(reviewId.value().toString())
-                .resolve("attempt-" + attemptNo)
-                .resolve("input")
+        Path manifestPath = snapshotInputDirectory(reviewId, attemptNo)
                 .resolve("snapshot-manifest.json")
                 .normalize();
         verifyWorkspacePath(manifestPath);
@@ -180,6 +243,13 @@ public class RequirementSnapshotStore {
                 .normalize();
         verifyWorkspacePath(input);
         return input;
+    }
+
+    private StoredRequirementSnapshot storedSnapshot(Path inputDirectory) {
+        return new StoredRequirementSnapshot(
+                inputDirectory.resolve("requirement.md"),
+                inputDirectory.resolve("requirement.normalized.md"),
+                inputDirectory.resolve("snapshot-manifest.json"));
     }
 
     private void verifyWorkspacePath(Path path) {

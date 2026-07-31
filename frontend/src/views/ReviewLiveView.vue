@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import LiveAgentConversation from '../components/LiveAgentConversation.vue';
+import { describeLiveRunState } from '../services/live-run-status';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
 
@@ -10,6 +11,7 @@ const store = createReviewStore();
 const runtimeTrace = createRuntimeTraceStore();
 let loadGeneration = 0;
 const stage = computed(() => store.state.summary?.stage ?? 'PENDING');
+const liveRunState = computed(() => describeLiveRunState(stage.value, runtimeTrace.state.status));
 const participatingRoles = computed(() => new Set(
     runtimeTrace.state.events
         .map((event) => event?.value?.role)
@@ -33,7 +35,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
             <div>
                 <p class="eyebrow">AG-UI 实时对话</p>
                 <h1>评审 Agent 执行流</h1>
-                <p class="connection" :data-status="runtimeTrace.state.status"><span aria-hidden="true">●</span>{{ runtimeTrace.state.status === 'connected' ? '运行流已连接' : '正在连接运行流' }}</p>
+                <p class="connection" :data-status="runtimeTrace.state.status"><span aria-hidden="true">●</span>{{ liveRunState.connectionText }}</p>
             </div>
             <div class="live-session-meta"><span>阶段 {{ stage }}</span><span>{{ participatingRoles }} 个 Agent 已出现</span><RouterLink class="button secondary" :to="{ name: 'review-workbench', params: { reviewId } }">返回评审工作台</RouterLink></div>
         </header>
@@ -42,7 +44,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
         <div v-else-if="store.state.loading" class="loading-grid" aria-label="正在连接评审运行流"><span></span><span></span><span></span></div>
         <template v-else>
             <p class="live-observatory-note">按实际到达顺序展示 Agent 思考、回答和工具调用。工具参数与结果保留原始内容；正式评审结论仍以工作台领域事件为准。</p>
-            <LiveAgentConversation :events="runtimeTrace.state.events" :status="runtimeTrace.state.status" />
+            <LiveAgentConversation :events="runtimeTrace.state.events" :status="runtimeTrace.state.status" :empty-state="liveRunState.emptyState" />
         </template>
     </section>
 </template>

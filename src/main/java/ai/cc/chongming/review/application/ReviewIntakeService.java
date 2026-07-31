@@ -155,6 +155,43 @@ public class ReviewIntakeService {
         }
     }
 
+    /**
+     * [AIREVIEW-PLAN-010#1.7] Materializes the accepted input for a retry attempt while retaining the original input.
+     *
+     * @param reviewId review owning both attempts
+     * @param previousAttemptNo terminal attempt whose input is reused
+     * @param retryAttemptNo fresh pending attempt
+     * @return the immutable retry input snapshot
+     */
+    public RequirementSnapshot copySnapshotForRetry(ReviewId reviewId, int previousAttemptNo, int retryAttemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (previousAttemptNo < 1 || retryAttemptNo <= previousAttemptNo) {
+            throw new IllegalArgumentException("retry attempt must follow a positive source attempt");
+        }
+        synchronized (submissions) {
+            if (snapshotStore.hasSnapshot(reviewId, retryAttemptNo)) {
+                return snapshotStore.load(reviewId, retryAttemptNo);
+            }
+            RequirementSnapshot source = requireSnapshot(reviewId, previousAttemptNo);
+            RequirementSnapshot target = new RequirementSnapshot(
+                    UUID.randomUUID(),
+                    reviewId,
+                    retryAttemptNo,
+                    source.submitter(),
+                    source.repositoryPath(),
+                    source.branch(),
+                    source.commit(),
+                    source.originalFilename(),
+                    source.sourceHash(),
+                    source.contentHash(),
+                    source.parserVersion(),
+                    source.document(),
+                    Instant.now());
+            snapshotStore.copyForNewAttempt(source, target, IntakeCancellation.neverCancelled());
+            return target;
+        }
+    }
+
     private void validateMetadata(ReviewIntakeRequest request) {
         requireText(request.repositoryPath(), "MISSING_REPOSITORY_PATH", "repositoryPath is required");
         requireText(request.submitter(), "MISSING_SUBMITTER", "submitter is required");

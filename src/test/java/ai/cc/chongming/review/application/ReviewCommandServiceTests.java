@@ -245,6 +245,18 @@ class ReviewCommandServiceTests {
                 .containsExactly(ReviewEventType.REVIEW_CANCELLED, ReviewEventType.REVIEW_RETRIED);
     }
 
+    @Test
+    void retryCopiesTheAcceptedInputForTheFreshAttempt() {
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        commandService = commandService(intakeService, mock(RepositorySnapshotService.class));
+        when(orchestrationService.requestRuntimeCancellation(reviewId, 1)).thenReturn(Mono.empty());
+        commandService.cancel(reviewId, 0L).block();
+
+        commandService.retry(reviewId, review.version());
+
+        verify(intakeService).copySnapshotForRetry(reviewId, 1, 2);
+    }
+
     private ReviewCommandService.StartReviewCommand startCommand(long expectedVersion, String idempotencyKey) {
         return new ReviewCommandService.StartReviewCommand(
                 expectedVersion,

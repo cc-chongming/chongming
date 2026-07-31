@@ -1,6 +1,6 @@
 # `/live` 连续 Agent 对话流收口与验收计划
 
-> **状态**: 🟡 实施中（自动化门槛已完成，待用户重启服务后的真实浏览器验收）
+> **状态**: 🟡 实施中（已通过 `cx-ai` 的真实浏览器运行流、工具 trace 与断线回放验收；多角色全流程终态仍在运行中）
 > **创建日期**: 2026-07-31
 > **目标**: 将 `/live` 收口为可靠的、按真实 AG-UI 事件顺序展示 Agent 思考、回答、工具入参和工具结果的连续对话页，并在不阻塞评审领域流程的前提下完成自动化与真实运行验收。
 > **关联计划**: AIREVIEW-PLAN-017、AIREVIEW-PLAN-018、AIREVIEW-PLAN-019
@@ -45,6 +45,7 @@ DIRECTOR
 - `npm test`（6 文件、12 用例）与 `npm run build` 已通过；生产 `index.html` 引用的 JS/CSS hash 与本次构建产物一致，无遗留旧 hash。
 - IDEA 全量构建及 7 个后端定向测试类（40 个用例）已通过。Scout 三种精确降级原因码均已恢复；`RoleSubagentIsolationTests` 已从过时的 `submitEvidence` 期望改为 RolePack 实际公开的 `submit_claim`/`complete_initial_review`，未放宽生产白名单。
 - 当前 shell 的 `JAVA_HOME` 指向 JDK 8，`./mvnw.cmd test` 在 Maven Enforcer 的 Java 21 基线检查前退出；已使用项目 IDEA JDK 21 完成构建和定向测试，不能将该 Maven 环境问题记为全量 Maven 通过。
+- 已修复 `ReviewDiagnosticsProperties` 的配置绑定构造器歧义：显式标记 record 的两参数主构造器，避免新增 Context Scout 诊断开关后在应用启动时回退到无参实例化。
 
 ## 1. 后端事件契约收口
 
@@ -177,6 +178,8 @@ DIRECTOR
 
 **完成记录（2026-07-31）**：IDEA 全量构建通过；`AgentScopeReviewRuntimeAdapterTests`、`AgentScopeModelBridgeTests`、`ReviewAgUiEventMapperTests`、`RuntimeTraceRedactorTests`、`ScoutToolTraceCollectorTests`、`OpenAiCompatibleModelClientTests`、`ModelGatewayContractTests` 共 40 个用例通过；前端 Vitest 6 文件 12 用例与 Playwright E2E 2 个用例通过；Vite 生产构建通过。`git diff --check` 通过。代码审查确认原始工具入参/结果仅进入进程内 `ReviewRuntimeTraceRegistry` 的 AG-UI runtime trace；领域事件、报告与 `ModelCallAuditService` 不持久化原始工具内容或 `thinkingText`（审计仅记录公开文本 hash）。`./mvnw.cmd test` 因当前 shell JDK 8 不满足 Java 21 基线而未执行，属于环境限制。
 
+**启动回归记录（2026-07-31）**：IDEA 控制台复现到 `ReviewDiagnosticsProperties` 无默认构造器启动失败后，已显式标记其两参数主构造器为 `@ConstructorBinding`。IDEA 编译、`ReviewDiagnosticsPropertiesTests` 与完整 `ChongmingApplicationTests`（Java 21、test profile）均通过，确认 `@ConfigurationPropertiesScan` 的实际启动路径已恢复。
+
 ### 4.2 浏览器验收（用户重启后）
 
 1. 创建一个新的 review/attempt，进入 `http://127.0.0.1:8080/review/#/reviews/{reviewId}/live`。
@@ -185,6 +188,18 @@ DIRECTOR
 4. 等待 Director 激活至少一个普通角色（优先 PRODUCT）；确认无需选择角色，时间线自动出现该角色的文字、工具与完成/失败事件。
 5. 刷新一次页面或短暂断网重连，确认 runtime 有界回放去重；验证失败/Scout 降级显示为 notice，评审阶段与领域工作台仍可正常访问。
 6. 将 reviewId、attemptNo、观察到的角色、工具调用 ID、失败（如有）记录进本计划变更记录；未达到 PRODUCT 及后续角色，不得宣称“多 Agent 全流程验收完成”。
+
+**首次真实运行记录（2026-07-31）**：用户确认提交验收后，以 `cx-ai` 创建 review `ce02c9ab-06ef-4626-aa33-325369ef87d9`。attempt 1 的首次 `/start` 返回 `COMMAND_UNEXPECTED_FAILURE`，用新的幂等键重试后返回 `202 PLANNING`，但随即失败；`/retry` 创建 attempt 2 并再次 `/start` 后同样失败。通过临时 IDEA 调试断点确认异步启动异常为 `IllegalStateException: Requirement snapshot was not found for the active review attempt`。根因是 `/retry` 只创建领域 attempt，未把已接受的需求输入物化到新 attempt 的受控工作区，违反 PLAN-010 “输入快照可复用”的约束。
+
+**修复与恢复条件**：`RequirementSnapshotStore` 现在将原始 Markdown、标准化 Markdown 与新 manifest 原子复制到新 attempt；`ReviewIntakeService` 将其作为幂等的 `copySnapshotForRetry(...)` 暴露，`ReviewCommandService#retry(...)` 已接线调用。IDEA 编译、`ReviewIntakeServiceTests`（5 用例）和 `ReviewCommandServiceTests`（11 用例）均通过。
+
+**重启后复验记录（2026-07-31）**：用户重启后，创建 review `3ba2743d-966c-41e1-a68f-7797a8216b9d`，attempt 1 与 retry attempt 2 均返回 `202 PLANNING`。浏览器已打开 `/live` 并成功建立运行流连接；attempt 2 的临时 IDEA 调试断点显示失败为 `RepositoryAccessException: Configured repository root does not exist`，不再是缺少需求快照，证明 retry 快照物化已生效。当前 `application-local.yml` 仅允许 `cx-ai`，其 root `E:\aicode\cx-ai-bak` 在本机不存在；运行在 Agent 创建前失败，未观察到 Context Scout、Director、PRODUCT 或工具调用，故不得宣称 `/live` 验收通过。
+
+**启动前失败呈现修复（2026-07-31）**：同次浏览器观察发现：`/live` 已读取 `FAILED` 阶段但在没有 AG-UI trace 时仍显示“等待 Agent 运行事件”。现将 FAILED、CANCELLED、COMPLETED 的空运行态映射为明确 notice，并保持它与模型回答、thinking 和工具条目分离。`npm test`（7 文件、14 用例）、Playwright（2 用例）及 `npm run build` 均通过；构建产物和 `index.html` 已同步更新。完整浏览器验收仍受仓库 root 阻断。
+
+**配置恢复记录（2026-07-31）**：用户明确提供 `D:\GitCode\cx-ai` 作为 `cx-ai` 的真实项目仓库；已校验该目录存在、包含 `.git` 且 `git rev-parse --is-inside-work-tree` 返回 `true`。为避免把任一开发机的绝对路径固化到配置，受版本管理的默认配置与本地覆盖均使用 `${CX_AI_REPOSITORY_ROOT:../cx-ai}`：默认从评审系统工作目录查找同级 `cx-ai`，目录布局不同的机器以环境变量 `CX_AI_REPOSITORY_ROOT` 覆盖。不得做全盘扫描或接受调用方传入的任意本地路径，既有白名单、非链接及独立 Git 仓库校验仍然生效。运行中的服务尚未重新加载配置，需由用户重启后创建新的 review/attempt，继续本节验收。
+
+**可移植仓库配置后的真实浏览器验收（2026-07-31）**：用户重启后，以 `cx-ai` 和本计划 Markdown 创建 review `18fdabb2-e6b9-4b40-be74-89e8504e170d`（attempt 1）。`/live` 成功连接，先后观察到 Context Scout、Director 和 PRODUCT（页面标题“产品经理”）三个 Agent；实时页面已展示 58 条运行条目，其中包含真实 thinking、文本回答和工具调用。已观察到 `glob_files`、`list_files`、`read_file`、`todo_write`、`plan_enter`、`plan_write`、`searchText`、`readLines` 等调用；例如 Scout `glob_files` 完成耗时 442/443ms，Director `list_files`、`read_file`、`plan_write` 和 `todo_write` 均有成功完成记录。刷新页面前后均为 31 条既有条目，连接恢复后保持去重；随后继续增长到 58 条，证明有界回放未重复已有 trace 且实时流继续追加。正式查询已到达 `INITIAL_REVIEW`、progress `40`、version `11`；同时存在 `CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED` 降级事件，Director 按既有降级策略继续评审。此前“仓库 root 不存在”阻断已解除，真实 `/live` 核心验收通过；未到达后续全部角色与终态，不能宣称完整多角色流程验收完成。
 
 ## 5. 文件清单
 
@@ -196,6 +211,8 @@ DIRECTOR
 | `frontend/src/components/LiveAgentConversation.vue` | #2.2 | ✅（待浏览器验收） |
 | `frontend/src/services/runtime-conversation-adapter.js` | #2.1 | ✅（待补边界测试） |
 | `frontend/src/services/runtime-conversation-adapter.test.js` | #2.1 | ✅ |
+| `frontend/src/services/live-run-status.js` | #4.2 | ✅（无 trace 的终态 notice） |
+| `frontend/src/services/live-run-status.test.js` | #4.2 | ✅ |
 | `src/main/resources/static/review/assets/index-*.js` | #2.2 | ✅（构建产物，提交时以实际 hash 为准） |
 | `src/main/resources/static/review/assets/index-*.css` | #2.2 | ✅（构建产物，提交时以实际 hash 为准） |
 
@@ -216,7 +233,8 @@ DIRECTOR
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java` | #1.2/#3.1 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewAgUiEventMapper.java` | #1.3/#3.2 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/RuntimeTraceRedactor.java` | #1.3 | ✅ |
-| `frontend/src/views/ReviewLiveView.vue` | #2.2 | ✅（待浏览器验收） |
+| `frontend/src/views/ReviewLiveView.vue` | #2.2/#4.2 | ✅（终态无 trace notice；全流程验收待仓库配置） |
+| `frontend/src/components/LiveAgentConversation.vue` | #2.2/#4.2 | ✅（终态 notice 呈现；全流程验收待仓库配置） |
 | `frontend/src/styles/review.css` | #2.2 | ✅（待浏览器验收） |
 | `src/main/resources/static/review/index.html` | #2.2 | ✅（构建产物） |
 | `src/test/java/ai/cc/chongming/review/agentscope/AgentScopeModelBridgeTests.java` | #1.1 | ✅ |
@@ -226,6 +244,13 @@ DIRECTOR
 | `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/RuntimeTraceRedactorTests.java` | #1.3 | ✅ |
 | `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/ScoutToolTraceCollectorTests.java` | #3.2 | ✅ |
 | `src/test/java/ai/cc/chongming/review/infrastructure/model/OpenAiCompatibleModelClientTests.java` | #1.1 | ✅ |
+| `src/main/java/ai/cc/chongming/review/config/ReviewDiagnosticsProperties.java` | #4.1 | ✅（启动配置绑定修复） |
+| `src/test/java/ai/cc/chongming/review/config/ReviewDiagnosticsPropertiesTests.java` | #4.1 | ✅（启动配置绑定回归） |
+| `src/main/java/ai/cc/chongming/review/infrastructure/document/RequirementSnapshotStore.java` | #4.2/PLAN-010#1.7 | ✅（重试输入快照物化） |
+| `src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java` | #4.2/PLAN-010#1.7 | ✅（重试快照复制接线） |
+| `src/main/java/ai/cc/chongming/review/application/ReviewCommandService.java` | #4.2/PLAN-010#1.7 | ✅（retry 调用快照复制） |
+| `src/test/java/ai/cc/chongming/review/application/ReviewIntakeServiceTests.java` | #4.2/PLAN-010#1.7 | ✅（重试工作区回归） |
+| `src/test/java/ai/cc/chongming/review/application/ReviewCommandServiceTests.java` | #4.2/PLAN-010#1.7 | ✅（retry 接线回归） |
 
 ## 6. 实施顺序
 
@@ -234,7 +259,7 @@ DIRECTOR
 3. **步骤 2** ✅：修复 Scout 降级原因码回归；精确原因码未降级为通用码。
 4. **步骤 3** ✅：补齐 mapper/collector/审计的防御性测试，并定位、修复 RolePack API 过时期望。
 5. **步骤 4** ✅：完成定向 Java、前端单测、生产构建、IDEA 构建、差异检查与代码审查；Maven Wrapper 因 shell JDK 8 环境未运行，已记录为环境限制。
-6. **步骤 5** ⏳：用户重启后的新 attempt 浏览器验收；依赖步骤 4。
+6. **步骤 5** 🟡：已完成重启后的新 attempt 受理、启动、`/live` 连接、retry 快照复验和启动前失败 notice 修复；`cx-ai` 已采用“同级目录默认值 + 本机环境变量覆盖”的可移植定位规则，并以新 review 观察到 Context Scout、Director、PRODUCT、真实工具 trace 与刷新回放去重。当前 attempt 仍在 `INITIAL_REVIEW`，待后续角色、辩论/Gate 和终态完成后补齐全流程记录。
 7. **步骤 6** ⏳：更新 PLAN-017/018 实施状态、`.learnings/LEARNINGS.md` 与提交说明；依赖步骤 5。
 
 ## 7. 风险与应对
@@ -258,9 +283,9 @@ DIRECTOR
 
 ## 9. 交接说明
 
-下一位执行者从**步骤 5**开始。自动化门槛已完成；先请用户按其服务管理方式重启服务并创建新的 review/attempt，再执行本文件 #4.2 的浏览器验收。
+下一位执行者从**步骤 5**继续。自动化门槛、retry 快照修复和 `cx-ai` 的真实 `/live` 核心浏览器验收已完成；`cx-ai` 默认定位为评审系统工作目录的同级 `../cx-ai`，可由 `CX_AI_REPOSITORY_ROOT` 覆盖。先观察 review `18fdabb2-e6b9-4b40-be74-89e8504e170d` 的后续角色与终态；只有其完成或失败后，才能记录全流程结果。
 
-运行服务由用户控制。完成自动化门槛后，请用户重启服务并创建新的 review，然后按 #4.2 执行浏览器验收。若模型只返回文本没有 thinking，这属于正常兼容路径；若工具输入/输出为空，应先核对该新 attempt 是否真正产生了 `chongming.tool-call.v1` 事件，而不是回退到旧状态块 UI。
+运行服务由用户控制。本地 `cx-ai` 默认查找同级 `../cx-ai`，目录不遵循此布局时设置本机环境变量 `CX_AI_REPOSITORY_ROOT`。当前真实 attempt 正在运行；若模型只返回文本没有 thinking，这属于正常兼容路径；若工具输入/输出为空，应先核对该 attempt 是否真正产生了 `chongming.tool-call.v1` 事件，而不是回退到旧状态块 UI。
 
 ## 10. 变更记录
 
@@ -271,3 +296,10 @@ DIRECTOR
 | 2026-07-31 | 用户明确当前阶段不需要工具调用结果脱敏；将其限定为本机调试 runtime trace 的临时边界，并保留后续生产化需单独设计的约束。 |
 | 2026-07-31 | 完成 Scout 三个精确降级原因码回归：测试改为模拟 `createRuntime(...)` 返回的 `ScoutRuntime`，不再因旧 `create(...)` mock 产生空 runtime 并吞没根因。 |
 | 2026-07-31 | 完成 mapper/collector 防御性覆盖、PRODUCT RolePack 旧 API 期望修复和前端跨角色同 toolCallId 去重样本；IDEA 全量构建、7 个后端定向类（40 用例）、前端 Vitest（6 文件、12 用例）、Playwright E2E（2 用例）与 Vite 构建通过。Maven Wrapper 被当前 shell JDK 8 基线限制阻断，已保留为环境记录。 |
+| 2026-07-31 | 修复 IDEA 启动时 `ReviewDiagnosticsProperties` 的构造器绑定歧义：该 record 同时保留两参数主构造器与一参数兼容构造器，配置扫描无法自动推断绑定构造器并错误回退为无参实例化。现显式使用 `@ConstructorBinding` 绑定两参数主构造器；新增配置绑定回归测试，并以完整 `ChongmingApplicationTests` 验证实际应用上下文启动。 |
+| 2026-07-31 | 已提交一次真实验收：review `ce02c9ab-06ef-4626-aa33-325369ef87d9` 的 attempt 1 和 retry attempt 2 均在启动后失败。IDEA 调试确认原因是新 retry attempt 没有需求快照，而不是 `/live` 前端映射问题。已补齐受控工作区的输入快照原子复制及 `ReviewCommandService#retry(...)` 接线；IDEA 编译、`ReviewIntakeServiceTests` 5 用例与 `ReviewCommandServiceTests` 11 用例通过。当前 JVM 尚未加载此修复，浏览器全流程验收仍待用户重启后使用新 review/attempt 执行。 |
+| 2026-07-31 | 用户重启后的第二次真实验收创建 review `3ba2743d-966c-41e1-a68f-7797a8216b9d`；attempt 1 与 retry attempt 2 均成功受理并启动，浏览器 `/live` 已建立连接。attempt 2 的诊断从“缺少需求快照”变为 `Configured repository root does not exist`，验证 retry 快照修复已加载。当前唯一允许的 `cx-ai` 映射 `E:\aicode\cx-ai-bak` 不存在，Agent 尚未创建，未观察到角色或工具调用；浏览器全流程验收继续保持未完成。 |
+| 2026-07-31 | 浏览器观察到无 AG-UI trace 的 FAILED attempt 被错误呈现为“等待 Agent 运行事件”。已新增终态状态归约，使 FAILED/CANCELLED/COMPLETED 在空时间线中呈现独立 notice，不伪装为模型回答；`npm test` 7 文件 14 用例、Playwright 2 用例与 Vite 构建通过，静态 bundle 已更新。 |
+| 2026-07-31 | 用户提供真实仓库 `D:\GitCode\cx-ai`；已校验其存在且为独立 Git work tree。`cx-ai` root 在默认配置和本机覆盖中均改为可移植的 `${CX_AI_REPOSITORY_ROOT:../cx-ai}`：默认查找评审系统同级项目，非标准布局由本机环境变量覆盖，不固化开发机绝对路径且不放宽仓库边界。待用户重启服务后以新的 review/attempt 继续真实浏览器验收。 |
+| 2026-07-31 | 用户重启后的第三次真实验收创建 review `18fdabb2-e6b9-4b40-be74-89e8504e170d`（attempt 1）。`/live` 已观察到 Context Scout、Director、PRODUCT，至少 58 条真实运行条目及 `glob_files`、`list_files`、`read_file`、`todo_write`、`plan_enter`、`plan_write`、`searchText`、`readLines` 调用；刷新前后 31 条已展示条目保持一致，连接恢复后继续追加。查询阶段为 `INITIAL_REVIEW`（40%），Scout 记录 `CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED` 后由 Director 继续。`cx-ai` 仓库定位、运行流与回放验收通过；全角色/Gate/终态仍待当前 attempt 继续运行。 |
+| 2026-07-31 | `cx-ai` 可移植定位规则及本次验收记录回写后，IDEA 项目构建通过（无问题）；`git diff --check` 通过。 |

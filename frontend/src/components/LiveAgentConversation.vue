@@ -4,7 +4,8 @@ import { buildRuntimeConversation } from '../services/runtime-conversation-adapt
 
 const props = defineProps({
     events: { type: Array, default: () => [] },
-    status: { type: String, default: 'idle' }
+    status: { type: String, default: 'idle' },
+    emptyState: { type: Object, default: null }
 });
 
 const conversation = computed(() => buildRuntimeConversation(props.events));
@@ -95,9 +96,9 @@ function format(value) {
                 </article>
             </li>
         </ol>
-        <div v-else class="live-agent-empty">
+        <div v-else class="live-agent-empty" :class="{ 'is-terminal-notice': emptyState }" :role="emptyState ? 'alert' : undefined">
             <span class="agent-avatar" aria-hidden="true">…</span>
-            <div><strong>等待 Agent 运行事件</strong><p>{{ status === 'connected' ? '实时连接已建立，新的思考、回答和工具调用会直接出现在这里。' : '正在建立同一评审尝试的实时连接。' }}</p></div>
+            <div><strong>{{ emptyState?.title ?? '等待 Agent 运行事件' }}</strong><p>{{ emptyState?.message ?? (status === 'connected' ? '实时连接已建立，新的思考、回答和工具调用会直接出现在这里。' : '正在建立同一评审尝试的实时连接。') }}</p></div>
         </div>
     </section>
 </template>
