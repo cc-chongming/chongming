@@ -138,8 +138,7 @@ public class CommercialModelGateway implements ModelGateway {
         return exception.code() == Code.MODEL_CALL_TIMEOUT
                 || exception.code() == Code.MODEL_RATE_LIMITED
                 || exception.code() == Code.MODEL_NETWORK_ERROR
-                || exception.code() == Code.MODEL_PROVIDER_ERROR
-                || exception.code() == Code.MODEL_RESPONSE_INVALID;
+                || exception.code() == Code.MODEL_PROVIDER_ERROR;
     }
 
     private void waitForRetry(Duration initialBackoff, int completedAttempts, IntakeCancellation cancellation) {
