@@ -18,9 +18,10 @@
 |------|------|------|
 | 需求受理 | `POST /api/reviews` 一步创建评审 | 需求以 Markdown 快照形式嵌入 `review_request`，无独立"需求"实体 |
 | 生命周期 | `ReviewStage` 状态机（PENDING→…→COMPLETED） | 覆盖**单次评审**流程，不覆盖需求跨阶段流转 |
-| 用户 | `submitter_id` 字符串 + 人工审核人 | 无负责人、无用户账号体系 |
+| 用户 | `submitter_id` 字符串 + 人工审核人 | 有 `ReviewerIdentityProvider`（`Permission{REVIEW,OVERRIDE}`），无需求负责人/创建人字段 |
+| 持久化 | `review.persistence.enabled=false` 默认关闭 | 默认全 in-memory；local profile 启用 MyBatis+Flyway。新需求存储需**双实现** |
 | 前端 | 5 个路由：create / workbench / live / scout / report | 无 Dashboard、无需求库、无需求详情 |
-| 数据聚合 | 无 | 无按状态统计、无评审列表聚合 |
+| 数据聚合 | 无 | 无 `GET /api/reviews` 列表、无按状态统计、无跨评审查询 |
 
 ### 0.2 与原型（platform.html）的差距
 
@@ -83,8 +84,9 @@ RETURNED       → PENDING_REVIEW（修订后重新提交）
 - `review/application/RequirementQueryService.java` — 列表/详情查询（含分页）
 - `review/api/RequirementCommandController.java` — `POST /api/requirements`
 - `review/api/RequirementQueryController.java` — `GET /api/requirements`（分页+筛选）、`GET /api/requirements/{id}`
-- `review/infrastructure/persistence/MyBatisRequirementRepository.java` — MyBatis 实现
+- `review/infrastructure/persistence/MyBatisRequirementRepository.java` — MyBatis 实现（`@ConditionalOnProperty(review.persistence.enabled=true)`）
 - `review/infrastructure/persistence/mapper/RequirementMapper.java`
+- `review/infrastructure/review/InMemoryRequirementRepository.java` — in-memory 实现（默认生效，与现有 `InMemory*` 仓库同模式）
 - `resources/db/migration/V11__create_requirement_and_link_review.sql` — 新表 + `review_request.requirement_id` 列（可空，兼容已有评审）
 
 **关键实现细节**：
@@ -114,7 +116,8 @@ ALTER TABLE review_request ADD COLUMN requirement_id CHAR(36) NULL;
 ```
 
 - 列表 API 支持 `?status=REVIEWING&assignee=张工&page=1&size=20&keyword=增量`。
-- 复用现有 `ReviewTypes.ReviewId` 的转换，保持类型安全。
+- 仓储接口 + 双实现（InMemory / MyBatis）对齐现有 `ReviewRegistry`、`InMemoryReviewRegistry` 模式；两个实现共享同一接口，由 Spring profile 决定装配。
+- 创建人/负责人沿用现有自由字符串标识（`ReviewerIdentityProvider.currentReviewer().reviewerId()`），不引入完整账号体系。
 
 ---
 
@@ -223,12 +226,20 @@ public record DashboardSnapshot(
 - `frontend/src/views/ReviewListView.vue`
 - `frontend/src/views/ReportListView.vue`
 - `frontend/src/api/dashboard-api.js`
+- `review/application/ReviewListQueryService.java` — 跨评审列表/聚合查询
+- `review/api/ReviewListController.java` — `GET /api/reviews`（列表，分页+状态筛选）
+- `frontend/src/api/review-list-api.js`（或并入现有 review-api）
 - `frontend/src/router/index.js`（修改）— 新增 `/`（Dashboard）、`/reviews`、`/reports`
 
 **关键实现细节**：
+- **评审列表 API**：现有 `GET /api/reviews/{reviewId}` 只查单个评审，**无列表端点**。新增 `GET /api/reviews?stage=&status=&page=&size=`，由 `ReviewListQueryService` 聚合：
+  - 状态分布：从 `review_event` 最新事件按 `stage` 分组统计（跨评审扫描 `GROUP BY stage`）。
+  - 活跃评审：`stage ∈ {INITIAL_REVIEW..WAITING_HUMAN}` 的最近 N 条，附共识度（复用 `ReviewDebateStore` 批量查）。
+  - 进度：`progress` 字段已由事件携带（PLANNING=20 … COMPLETED=100）。
 - Dashboard：KPI 卡片（需求总数/评审中/已通过/已驳回）+ 待处理评审列表 + 最近动态，数据来自 `GET /api/dashboard`。
-- 评审列表：`GET /api/reviews`（新增聚合查询）或从 dashboard 扩充分页；评审进度卡片（复用 rv-card 样式）。
+- 评审列表：进度卡片复用 `platform.html` 的 rv-card 样式。
 - 报告列表：`GET /api/reviews?hasReport=true` 或新增 `GET /api/reports`；点击跳转现有报告页。
+- **双存储适配**：`ReviewPersistenceMapper` 现有查询全部按单 `review_id` 限定，段 8 需新增跨评审 SQL（`findReviewSummaries` / `countByStage`，`@ConditionalOnProperty` 持久化启用时）；默认 in-memory 事件存储同样提供跨评审扫描。
 
 ---
 
@@ -287,6 +298,7 @@ public record DashboardSnapshot(
 | `src/main/java/ai/cc/chongming/review/api/RequirementQueryController.java` | #2 | ⏳ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/MyBatisRequirementRepository.java` | #2 | ⏳ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/RequirementMapper.java` | #2 | ⏳ |
+| `src/main/java/ai/cc/chongming/review/infrastructure/review/InMemoryRequirementRepository.java` | #2 | ⏳ |
 | `src/main/resources/db/migration/V11__create_requirement_and_link_review.sql` | #2 | ⏳ |
 | `src/main/java/ai/cc/chongming/review/application/RequirementLifecycleService.java` | #3 | ⏳ |
 | `src/main/java/ai/cc/chongming/review/application/DashboardQueryService.java` | #4 | ⏳ |
@@ -299,6 +311,9 @@ public record DashboardSnapshot(
 | `frontend/src/views/ReviewListView.vue` | #8 | ⏳ |
 | `frontend/src/views/ReportListView.vue` | #8 | ⏳ |
 | `frontend/src/api/dashboard-api.js` | #8 | ⏳ |
+| `src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java` | #8 | ⏳ |
+| `src/main/java/ai/cc/chongming/review/api/ReviewListController.java` | #8 | ⏳ |
+| `frontend/src/api/review-list-api.js` | #8 | ⏳ |
 | 测试文件（Requirement 系列单测/集成/MockMvc） | #10 | ⏳ |
 | `docs/验证记录/RequirementPlatformReport.md` | #10 | ⏳ |
 
@@ -357,6 +372,7 @@ flowchart LR
 | 事件联动产生循环依赖 | 需求更新事件又触发评审 | 只监听评审→需求单向流转；需求手动流转不反向触评审 |
 | 状态机遗漏迁移路径 | 非法迁移抛异常 | 先写全迁移矩阵的领域测试（RED）再实现 |
 | 与现有评审契约冲突 | 接口签名变更 | 新增 `/api/requirements/**`，不改 `/api/reviews/**`；CI 验证现有测试不回归 |
+| 双存储实现（InMemory/MyBatis）行为漂移 | 两实现查询结果不一致 | 仓储接口冻结契约，两个实现共用同一套契约测试；in-memory 用 `ConcurrentHashMap` + 流式筛选对齐 SQL 语义 |
 
 ---
 
@@ -378,3 +394,4 @@ flowchart LR
 | 日期 | 变更 |
 |------|------|
 | 2026-07-31 | 首次创建：基于 `platform.html` 原型与当前项目实现做差距分析，拆分 10 个计划段。 |
+| 2026-07-31 | 探索 Agent 核对实现后补充：持久化默认关闭 → 需求存储需 InMemory/MyBatis 双实现；`ReviewerIdentityProvider` 身份模型可复用；`GET /api/reviews` 列表端点全缺 → 段 8 新增 `ReviewListQueryService` + `ReviewListController` + 跨评审 SQL。 |
