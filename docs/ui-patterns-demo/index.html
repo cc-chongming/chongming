@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重明 - 多角色对抗需求评审 UI 方案对比</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232734;
+    --border: #2e3348;
+    --text: #e4e6f0;
+    --text-dim: #8b8fa4;
+    --accent: #6c8cff;
+    --green: #34d399;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --orange: #fb923c;
+    --purple: #a78bfa;
+    --cyan: #22d3ee;
+    --radius: 10px;
+    --shadow: 0 4px 24px rgba(0,0,0,.35);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "SF Pro SC", "PingFang SC", "Noto Sans SC", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+
+  /* ── Nav ── */
+  .nav { display: flex; gap: 0; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+  .nav-btn { flex: 1; padding: 14px 8px; text-align: center; font-size: 14px; font-weight: 600; color: var(--text-dim); background: none; border: none; cursor: pointer; border-bottom: 3px solid transparent; transition: .2s; }
+  .nav-btn:hover { color: var(--text); background: var(--surface2); }
+  .nav-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .panel { display: none; padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .panel.active { display: block; }
+  .panel-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .panel-desc { color: var(--text-dim); font-size: 14px; margin-bottom: 20px; }
+
+  /* ── 模式一：论点树 ── */
+  .tree { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .tree-root { background: linear-gradient(135deg, #1e293b, #1e1b4b); border: 1px solid var(--accent); border-radius: var(--radius); padding: 16px 28px; font-size: 16px; font-weight: 700; text-align: center; position: relative; }
+  .tree-root::after { content: ''; position: absolute; bottom: -20px; left: 50%; width: 2px; height: 20px; background: var(--border); }
+  .tree-branches { display: flex; gap: 24px; margin-top: 20px; position: relative; }
+  .tree-branches::before { content: ''; position: absolute; top: -20px; left: 15%; right: 15%; height: 2px; background: var(--border); }
+  .branch { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 220px; }
+  .branch::before { content: ''; width: 2px; height: 18px; background: var(--border); }
+  .claim-card { background: var(--surface); border-radius: var(--radius); padding: 14px 16px; width: 100%; box-shadow: var(--shadow); transition: .2s; cursor: default; position: relative; }
+  .claim-card:hover { transform: translateY(-2px); box-shadow: 0 6px 30px rgba(0,0,0,.5); }
+  .claim-card.support { border-left: 4px solid var(--green); }
+  .claim-card.oppose  { border-left: 4px solid var(--red); }
+  .claim-card.neutral { border-left: 4px solid var(--yellow); }
+  .claim-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px; }
+  .claim-role.product  { color: var(--cyan); }
+  .claim-role.frontend { color: var(--purple); }
+  .claim-role.backend  { color: var(--orange); }
+  .claim-role.test     { color: var(--yellow); }
+  .claim-text { font-size: 13px; margin-bottom: 6px; }
+  .claim-meta { display: flex; gap: 8px; align-items: center; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .badge-p0 { background: rgba(248,113,113,.15); color: var(--red); }
+  .badge-p1 { background: rgba(251,191,36,.15); color: var(--yellow); }
+  .badge-p2 { background: rgba(108,140,255,.15); color: var(--accent); }
+  .badge-pos-sup { background: rgba(52,211,153,.12); color: var(--green); }
+  .badge-pos-opp { background: rgba(248,113,113,.12); color: var(--red); }
+  .child-nodes { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--border); }
+  .child-node { font-size: 12px; color: var(--text-dim); padding: 6px 10px; background: var(--surface2); border-radius: 6px; }
+  .child-node.challenge { border-left: 3px solid var(--red); }
+  .child-node.rebuttal { border-left: 3px solid var(--green); }
+  .child-node.evidence { border-left: 3px solid var(--accent); }
+  .child-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+  .child-label.challenge { color: var(--red); }
+  .child-label.rebuttal { color: var(--green); }
+  .child-label.evidence { color: var(--accent); }
+
+  /* ── 模式二：庭审面板 ── */
+  .court { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0; min-height: 420px; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  .court-side { padding: 20px; background: var(--surface); overflow-y: auto; }
+  .court-side.pro { border-right: 1px solid var(--border); }
+  .court-side.con { border-left: 1px solid var(--border); }
+  .court-center { width: 200px; background: var(--surface2); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 12px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+  .court-side-label { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 16px; text-align: center; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .court-side.pro .court-side-label { color: var(--green); }
+  .court-side.con .court-side-label { color: var(--red); }
+  .court-claim { background: var(--surface2); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; transition: .2s; cursor: default; }
+  .court-claim:hover { background: #2a2e42; }
+  .court-claim .claim-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .court-claim .avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .court-claim .claim-body { font-size: 13px; }
+  .court-vs { font-size: 32px; font-weight: 900; color: var(--border); margin: 16px 0; }
+  .court-round { font-size: 12px; color: var(--text-dim); }
+  .consensus-ring { width: 80px; height: 80px; border-radius: 50%; border: 4px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; margin: 16px 0; position: relative; }
+  .consensus-ring::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 4px solid transparent; border-top-color: var(--yellow); border-right-color: var(--yellow); animation: spin 2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .court-verdict { grid-column: 1 / -1; background: var(--surface2); padding: 16px 24px; display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--border); }
+  .verdict-tag { font-size: 13px; font-weight: 700; padding: 4px 14px; border-radius: 20px; background: rgba(251,191,36,.15); color: var(--yellow); }
+  .verdict-text { font-size: 14px; flex: 1; }
+  .verdict-actions { display: flex; gap: 8px; }
+  .verdict-btn { font-size: 12px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; transition: .15s; font-weight: 600; }
+  .verdict-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .verdict-btn.pass { border-color: var(--green); color: var(--green); }
+  .verdict-btn.pass:hover { background: rgba(52,211,153,.1); }
+  .verdict-btn.block { border-color: var(--red); color: var(--red); }
+  .verdict-btn.block:hover { background: rgba(248,113,113,.1); }
+
+  /* ── 模式三：圆桌增强 ── */
+  .roundtable-wrap { display: flex; gap: 24px; }
+  .roundtable-main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 450px; position: relative; }
+  .rt-ring { width: 300px; height: 300px; border-radius: 50%; border: 2px dashed var(--border); position: relative; display: flex; align-items: center; justify-content: center; }
+  .rt-center { text-align: center; }
+  .rt-center-topic { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .rt-center-sub { font-size: 12px; color: var(--text-dim); }
+  .rt-seat { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: .3s; cursor: default; }
+  .rt-seat.speaking .rt-avatar { box-shadow: 0 0 0 3px var(--accent), 0 0 20px rgba(108,140,255,.4); transform: scale(1.15); }
+  .rt-avatar { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; transition: .3s; border: 2px solid var(--border); background: var(--surface2); }
+  .rt-name { font-size: 11px; font-weight: 600; color: var(--text-dim); white-space: nowrap; }
+  .rt-seat.speaking .rt-name { color: var(--accent); }
+  .rt-speech { position: absolute; background: var(--surface); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 14px; font-size: 12px; max-width: 200px; box-shadow: var(--shadow); animation: fadeIn .3s; z-index: 10; }
+  .rt-speech::before { content: ''; position: absolute; width: 8px; height: 8px; background: var(--surface); border-right: 1px solid var(--accent); border-bottom: 1px solid var(--accent); transform: rotate(45deg); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .rt-log { width: 320px; background: var(--surface); border-radius: var(--radius); padding: 16px; overflow-y: auto; max-height: 450px; }
+  .rt-log-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; color: var(--text-dim); }
+  .rt-log-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); animation: fadeIn .3s; }
+  .rt-log-avatar { width: 24px; height: 24px; border-radius: 50%; font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--surface2); }
+  .rt-log-content { font-size: 12px; }
+  .rt-log-role { font-weight: 700; font-size: 11px; margin-bottom: 2px; }
+
+  /* ── 模式四：立场光谱 ── */
+  .spectrum-wrap { display: flex; flex-direction: column; gap: 20px; }
+  .spectrum-row { background: var(--surface); border-radius: var(--radius); padding: 16px 20px; }
+  .spectrum-label { font-size: 13px; font-weight: 700; margin-bottom: 12px; color: var(--text-dim); }
+  .spectrum-track { position: relative; height: 48px; background: linear-gradient(90deg, rgba(248,113,113,.08) 0%, rgba(251,191,36,.08) 50%, rgba(52,211,153,.08) 100%); border-radius: 8px; border: 1px solid var(--border); }
+  .spectrum-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; transition: left 1s ease; }
+  .spectrum-dot { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid var(--bg); box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  .spectrum-name { font-size: 10px; font-weight: 600; margin-top: 2px; white-space: nowrap; color: var(--text-dim); }
+  .spectrum-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-top: 4px; padding: 0 4px; }
+  .spectrum-arrow { position: absolute; top: 50%; height: 2px; background: var(--border); transition: all 1s ease; }
+  .convergence-note { text-align: center; font-size: 13px; color: var(--text-dim); padding: 12px; background: var(--surface); border-radius: var(--radius); margin-top: 8px; }
+  .convergence-note strong { color: var(--green); }
+  .play-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--accent); background: rgba(108,140,255,.1); color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 16px; transition: .15s; }
+  .play-btn:hover { background: rgba(108,140,255,.2); }
+
+  /* ── 通用 ── */
+  .section-gap { margin-top: 32px; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--surface2); color: var(--text-dim); margin-right: 4px; }
+
+  /* responsive */
+  @media (max-width: 800px) {
+    .court { grid-template-columns: 1fr; }
+    .court-center { width: 100%; flex-direction: row; gap: 16px; padding: 12px; border-left: none; border-right: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .tree-branches { flex-direction: column; align-items: center; }
+    .roundtable-wrap { flex-direction: column; }
+    .rt-log { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="nav" id="nav">
+  <button class="nav-btn active" data-panel="tree">🌳 论点树</button>
+  <button class="nav-btn" data-panel="court">⚖️ 庭审面板</button>
+  <button class="nav-btn" data-panel="roundtable">🪑 圆桌增强</button>
+  <button class="nav-btn" data-panel="spectrum">📊 立场光谱</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 模式一：论点树 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="panel active" id="panel-tree">
+  <div class="panel-title">模式一：论点树 + 对抗着色</div>
+  <div class="panel-desc">
+    <span class="tag">参考: Kialo</span>
+    <span class="tag">参考: DebateGraph</span>
+    <span class="tag">适配度: ⭐⭐⭐⭐⭐</span>
+    将 Claim 按支持/反对关系组织为树状结构，一目了然地看到各方观点的逻辑关系。
+  </div>
+
+  <div class="tree">
+    <div class="tree-root">
+      📋 需求: 数据同步模块 —— 增量同步 + 冲突解决策略
+    </div>
+    <div class="tree-branches">
+      <!-- 产品经理 - 支持 -->
+      <div class="branch">
+        <div class="claim-card support">
+          <div class="claim-role product">👤 产品经理</div>
+          <div class="claim-text">增量同步是核心业务诉求，日活用户量已证明全量同步不可持续</div>
+          <div class="claim-meta">
+            <span class="badge badge-p1">P1</span>
+            <span class="badge badge-pos-sup">✅ 支持</span>
+          </div>
+          <div class="child-nodes">
+            <div class="child-node evidence">
+              <div class="child-label evidence">📎 证据</div>
+              <div>上周全量同步导致 DB 峰值 QPS 达 12k，触发告警</div>
+            </div>
+            <div class="child-node evidence">
+              <div class="child-label evidence">📎 证据</div>
+              <div>用户反馈: "同步太慢，影响工作流"</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 前端 - 支持 -->
+      <div class="branch">
+        <div class="claim-card support">
+          <div class="claim-role frontend">👤 前端开发</div>
+          <div class="claim-text">前端已实现 diff 对比视图，增量数据展示无技术障碍</div>
+          <div class="claim-meta">
+            <span class="badge badge-p2">P2</span>
+            <span class="badge badge-pos-sup">✅ 支持</span>
+          </div>
+          <div class="child-nodes">
+            <div class="child-node evidence">
+              <div class="child-label evidence">📎 证据</div>
+              <div>已有 <code>DiffViewer</code> 组件，支持 3-way merge 渲染</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 后端 - 质疑 -->
+      <div class="branch">
+        <div class="claim-card oppose">
+          <div class="claim-role backend">👤 后端开发</div>
+          <div class="claim-text">冲突解决策略未定义，并发写入下数据一致性无法保证</div>
+          <div class="claim-meta">
+            <span class="badge badge-p0">P0</span>
+            <span class="badge badge-pos-opp">❌ 反对</span>
+          </div>
+          <div class="child-nodes">
+            <div class="child-node challenge">
+              <div class="child-label challenge">⚔️ 挑战 (对产品)</div>
+              <div>"如果两个用户同时修改同一条记录，以谁为准？需求文档未回答"</div>
+            </div>
+            <div class="child-node evidence">
+              <div class="child-label evidence">📎 证据</div>
+              <div>当前 MySQL 5.6 不支持行级乐观锁的 <code>SKIP LOCKED</code></div>
+            </div>
+            <div class="child-node rebuttal">
+              <div class="child-label rebuttal">🛡️ 反驳 (回应测试)</div>
+              <div>"Last-write-wins 在财务场景下不可接受，需向量时钟"</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 测试 - 反对 -->
+      <div class="branch">
+        <div class="claim-card oppose">
+          <div class="claim-role test">👤 测试工程师</div>
+          <div class="claim-text">缺乏边界条件: 网络断开重连后的状态恢复未在验收标准中</div>
+          <div class="claim-meta">
+            <span class="badge badge-p1">P1</span>
+            <span class="badge badge-pos-opp">❌ 反对</span>
+          </div>
+          <div class="child-nodes">
+            <div class="child-node challenge">
+              <div class="child-label challenge">⚔️ 挑战 (对产品)</div>
+              <div>"断点续传还是从头重试？吞吐量指标未定义"</div>
+            </div>
+            <div class="child-node evidence">
+              <div class="child-label evidence">📎 证据</div>
+              <div>同类竞品 A 采用 WAL 日志回放，竞品 B 采用 checkpoint 机制</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 模式二：庭审面板 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-court">
+  <div class="panel-title">模式二：法庭庭审式面板</div>
+  <div class="panel-desc">
+    <span class="tag">参考: LLM Courtroom</span>
+    <span class="tag">参考: AI Safety via Debate</span>
+    <span class="tag">对抗感: ⭐⭐⭐⭐⭐</span>
+    左右分栏对峙，正反阵营一目了然，中间协调区显示回合和共识度。
+  </div>
+
+  <div class="court">
+    <!-- 支持方 -->
+    <div class="court-side pro">
+      <div class="court-side-label">🟢 支持方</div>
+
+      <div class="court-claim">
+        <div class="claim-header">
+          <span class="claim-role product" style="display:flex;align-items:center;gap:6px">
+            <span class="avatar" style="background:rgba(34,211,238,.15)">👤</span> 产品经理
+          </span>
+          <span class="badge badge-p1">P1</span>
+        </div>
+        <div class="claim-body">增量同步是核心业务诉求，日活用户量已证明全量同步不可持续</div>
+      </div>
+
+      <div class="court-claim">
+        <div class="claim-header">
+          <span class="claim-role product" style="display:flex;align-items:center;gap:6px">
+            <span class="avatar" style="background:rgba(34,211,238,.15)">👤</span> 产品经理
+          </span>
+          <span class="badge badge-p2">P2</span>
+        </div>
+        <div class="claim-body">可先采用 Last-write-wins 策略上线，后续迭代优化</div>
+      </div>
+
+      <div class="court-claim">
+        <div class="claim-header">
+          <span class="claim-role frontend" style="display:flex;align-items:center;gap:6px">
+            <span class="avatar" style="background:rgba(167,139,250,.15)">👤</span> 前端开发
+          </span>
+          <span class="badge badge-p2">P2</span>
+        </div>
+        <div class="claim-body">前端已有 DiffViewer 组件，增量展示无技术障碍</div>
+      </div>
+    </div>
+
+    <!-- 中间协调区 -->
+    <div class="court-center">
+      <div class="court-vs">VS</div>
+      <div class="consensus-ring" id="consensusRing">45%</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">共识度</div>
+      <div class="court-round" style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:700;color:var(--text)">当前议题</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">数据冲突解决策略</div>
+      </div>
+      <div class="court-round" style="margin-top:12px">
+        <div style="font-size:11px;color:var(--text-dim)">辩论回合</div>
+        <div style="font-size:18px;font-weight:900;color:var(--accent)">R2 / 3</div>
+      </div>
+    </div>
+
+    <!-- 反对方 -->
+    <div class="court-side con">
+      <div class="court-side-label">🔴 质疑方</div>
+
+      <div class="court-claim">
+        <div class="claim-header">
+          <span class="claim-role backend" style="display:flex;align-items:center;gap:6px">
+            <span class="avatar" style="background:rgba(251,146,60,.15)">👤</span> 后端开发
+          </span>
+          <span class="badge badge-p0">P0</span>
+        </div>
+        <div class="claim-body">冲突解决策略未定义，并发写入下数据一致性无法保证</div>
+      </div>
+
+      <div class="court-claim">
+        <div class="claim-header">
+          <span class="claim-role backend" style="display:flex;align-items:center;gap:6px">
+            <span class="avatar" style="background:rgba(251,146,60,.15)">👤</span> 后端开发
+          </span>
+          <span class="badge badge-p1">P1</span>
+        </div>
+        <div class="claim-body">MySQL 5.6 不支持 SKIP LOCKED，需要引入 Redis 分布式锁</div>
+      </div>
+
+      <div class="court-claim">
+        <div class="claim-header">
+          <span class="claim-role test" style="display:flex;align-items:center;gap:6px">
+            <span class="avatar" style="background:rgba(251,191,36,.15)">👤</span> 测试工程师
+          </span>
+          <span class="badge badge-p1">P1</span>
+        </div>
+        <div class="claim-body">断点续传 vs 从头重试未在验收标准中定义</div>
+      </div>
+    </div>
+
+    <!-- 底部裁决区 -->
+    <div class="court-verdict">
+      <span class="verdict-tag">⚖️ 裁决草案</span>
+      <span class="verdict-text">CONDITIONAL — 需补充并发冲突解决方案和断点续传验收标准后通过</span>
+      <div class="verdict-actions">
+        <button class="verdict-btn pass">✅ 通过</button>
+        <button class="verdict-btn" style="border-color:var(--yellow);color:var(--yellow)">⚠️ 有条件通过</button>
+        <button class="verdict-btn block">❌ 驳回</button>
+        <button class="verdict-btn">↩️ 退回修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 模式三：圆桌增强 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-roundtable">
+  <div class="panel-title">模式三：圆桌讨论 + 实时发言动画</div>
+  <div class="panel-desc">
+    <span class="tag">参考: ChatArena</span>
+    <span class="tag">在你现有 Roundtable 基础上增强</span>
+    <span class="tag">实现成本: 低</span>
+    Agent 围坐圆桌，当前发言者高亮 + 语音气泡，右侧实时对话日志。
+  </div>
+
+  <div class="roundtable-wrap">
+    <div class="roundtable-main">
+      <div class="rt-ring" id="rtRing">
+        <div class="rt-center">
+          <div class="rt-center-topic">📋 数据冲突解决策略</div>
+          <div class="rt-center-sub">辩论第 2 轮 · 共识度 45%</div>
+        </div>
+        <!-- Seats positioned by JS -->
+        <div class="rt-seat" data-role="director" style="top:-34px;left:50%;transform:translateX(-50%)">
+          <div class="rt-avatar">🎬</div>
+          <div class="rt-name">协调者</div>
+        </div>
+        <div class="rt-seat speaking" data-role="product" style="top:35%;right:-34px;transform:translateY(-50%)">
+          <div class="rt-avatar">💡</div>
+          <div class="rt-name">产品经理</div>
+        </div>
+        <div class="rt-seat" data-role="frontend" style="bottom:-34px;right:20%">
+          <div class="rt-avatar">🎨</div>
+          <div class="rt-name">前端开发</div>
+        </div>
+        <div class="rt-seat" data-role="backend" style="bottom:-34px;left:20%">
+          <div class="rt-avatar">⚙️</div>
+          <div class="rt-name">后端开发</div>
+        </div>
+        <div class="rt-seat" data-role="test" style="top:35%;left:-34px;transform:translateY(-50%)">
+          <div class="rt-avatar">🧪</div>
+          <div class="rt-name">测试工程师</div>
+        </div>
+      </div>
+      <!-- Speech bubble -->
+      <div class="rt-speech" id="rtSpeech" style="position:relative;top:-320px;left:180px;">
+        <div style="font-weight:700;font-size:11px;color:var(--cyan);margin-bottom:4px">💡 产品经理</div>
+        考虑到上线时间，建议先用 LWW 策略快速交付，后续版本引入向量时钟
+      </div>
+    </div>
+
+    <div class="rt-log" id="rtLog">
+      <div class="rt-log-title">📜 对话日志</div>
+      <div class="rt-log-item">
+        <div class="rt-log-avatar">🎬</div>
+        <div class="rt-log-content">
+          <div class="rt-log-role" style="color:var(--text-dim)">协调者</div>
+          本轮议题: 数据冲突解决策略。请各方陈述立场。
+        </div>
+      </div>
+      <div class="rt-log-item">
+        <div class="rt-log-avatar">⚙️</div>
+        <div class="rt-log-content">
+          <div class="rt-log-role" style="color:var(--orange)">后端开发</div>
+          并发写入是硬约束，LWW 会丢数据。需要至少引入乐观锁 + 版本号。
+        </div>
+      </div>
+      <div class="rt-log-item">
+        <div class="rt-log-avatar">🧪</div>
+        <div class="rt-log-content">
+          <div class="rt-log-role" style="color:var(--yellow)">测试工程师</div>
+          从测试角度，没有冲突解决策略就无法编写确定性的集成测试。
+        </div>
+      </div>
+      <div class="rt-log-item">
+        <div class="rt-log-avatar">🎨</div>
+        <div class="rt-log-content">
+          <div class="rt-log-role" style="color:var(--purple)">前端开发</div>
+          前端需要一个冲突提示 UI，让用户选择保留哪个版本。
+        </div>
+      </div>
+      <div class="rt-log-item" style="background:rgba(108,140,255,.06);border-radius:6px;padding:8px;margin:0 -8px;">
+        <div class="rt-log-avatar">💡</div>
+        <div class="rt-log-content">
+          <div class="rt-log-role" style="color:var(--cyan)">产品经理 · 正在发言</div>
+          考虑到上线时间，建议先用 LWW 策略快速交付，后续版本引入向量时钟
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 模式四：立场光谱 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-spectrum">
+  <div class="panel-title">模式四：立场光谱 — 收敛可视化</div>
+  <div class="panel-desc">
+    <span class="tag">参考: Polis</span>
+    <span class="tag">参考: Remesh</span>
+    <span class="tag">最佳展示: 辩论结束后</span>
+    将各角色立场投影到反对→支持光谱上，动态展示随辩论轮次的收敛过程。
+  </div>
+
+  <button class="play-btn" id="playBtn">▶ 播放收敛动画</button>
+
+  <div class="spectrum-wrap" id="spectrumWrap">
+    <!-- R1 -->
+    <div class="spectrum-row">
+      <div class="spectrum-label">🔴 辩论第 1 轮 — 立场分散</div>
+      <div class="spectrum-track" data-round="1">
+        <div class="spectrum-marker" data-role="product" style="left:78%">
+          <div class="spectrum-dot" style="background:var(--cyan)">💡</div>
+          <div class="spectrum-name">产品经理</div>
+        </div>
+        <div class="spectrum-marker" data-role="frontend" style="left:65%">
+          <div class="spectrum-dot" style="background:var(--purple)">🎨</div>
+          <div class="spectrum-name">前端开发</div>
+        </div>
+        <div class="spectrum-marker" data-role="test" style="left:28%">
+          <div class="spectrum-dot" style="background:var(--yellow)">🧪</div>
+          <div class="spectrum-name">测试工程师</div>
+        </div>
+        <div class="spectrum-marker" data-role="backend" style="left:15%">
+          <div class="spectrum-dot" style="background:var(--orange)">⚙️</div>
+          <div class="spectrum-name">后端开发</div>
+        </div>
+      </div>
+      <div class="spectrum-ends">
+        <span>❌ 完全反对</span>
+        <span>✅ 完全支持</span>
+      </div>
+    </div>
+
+    <!-- R2 -->
+    <div class="spectrum-row">
+      <div class="spectrum-label">🟡 辩论第 2 轮 — 开始收敛</div>
+      <div class="spectrum-track" data-round="2">
+        <div class="spectrum-marker" data-role="product" style="left:68%">
+          <div class="spectrum-dot" style="background:var(--cyan)">💡</div>
+          <div class="spectrum-name">产品经理</div>
+        </div>
+        <div class="spectrum-marker" data-role="frontend" style="left:60%">
+          <div class="spectrum-dot" style="background:var(--purple)">🎨</div>
+          <div class="spectrum-name">前端开发</div>
+        </div>
+        <div class="spectrum-marker" data-role="test" style="left:42%">
+          <div class="spectrum-dot" style="background:var(--yellow)">🧪</div>
+          <div class="spectrum-name">测试工程师</div>
+        </div>
+        <div class="spectrum-marker" data-role="backend" style="left:38%">
+          <div class="spectrum-dot" style="background:var(--orange)">⚙️</div>
+          <div class="spectrum-name">后端开发</div>
+        </div>
+      </div>
+      <div class="spectrum-ends">
+        <span>❌ 完全反对</span>
+        <span>✅ 完全支持</span>
+      </div>
+    </div>
+
+    <!-- R3 -->
+    <div class="spectrum-row">
+      <div class="spectrum-label">🟢 辩论第 3 轮 — 达成共识</div>
+      <div class="spectrum-track" data-round="3">
+        <div class="spectrum-marker" data-role="product" style="left:58%">
+          <div class="spectrum-dot" style="background:var(--cyan)">💡</div>
+          <div class="spectrum-name">产品经理</div>
+        </div>
+        <div class="spectrum-marker" data-role="frontend" style="left:56%">
+          <div class="spectrum-dot" style="background:var(--purple)">🎨</div>
+          <div class="spectrum-name">前端开发</div>
+        </div>
+        <div class="spectrum-marker" data-role="test" style="left:53%">
+          <div class="spectrum-dot" style="background:var(--yellow)">🧪</div>
+          <div class="spectrum-name">测试工程师</div>
+        </div>
+        <div class="spectrum-marker" data-role="backend" style="left:50%">
+          <div class="spectrum-dot" style="background:var(--orange)">⚙️</div>
+          <div class="spectrum-name">后端开发</div>
+        </div>
+      </div>
+      <div class="spectrum-ends">
+        <span>❌ 完全反对</span>
+        <span>✅ 完全支持</span>
+      </div>
+    </div>
+
+    <div class="convergence-note">
+      📈 经过 3 轮辩论，4 个角色的立场从 <strong>分散 (63% 跨度)</strong> 收敛到 <strong>共识 (8% 跨度)</strong>，
+      主要妥协点: 产品接受"先 LWW + 下版本向量时钟"的分阶段方案
+    </div>
+  </div>
+</div>
+
+<script>
+// Tab navigation
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+  });
+});
+
+// Play convergence animation
+document.getElementById('playBtn').addEventListener('click', function() {
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = '⏳ 播放中...';
+
+  // Reset all markers to R1 positions
+  const r1Positions = { product: 78, frontend: 65, test: 28, backend: 15 };
+  const r2Positions = { product: 68, frontend: 60, test: 42, backend: 38 };
+  const r3Positions = { product: 58, frontend: 56, test: 53, backend: 50 };
+
+  // Animate R1 -> show R2 -> show R3
+  document.querySelectorAll('.spectrum-track[data-round="1"] .spectrum-marker').forEach(m => {
+    m.style.left = r1Positions[m.dataset.role] + '%';
+  });
+  document.querySelectorAll('.spectrum-track[data-round="2"] .spectrum-marker').forEach(m => {
+    m.style.left = r1Positions[m.dataset.role] + '%'; // start from R1
+  });
+  document.querySelectorAll('.spectrum-track[data-round="3"] .spectrum-marker').forEach(m => {
+    m.style.left = r1Positions[m.dataset.role] + '%'; // start from R1
+  });
+
+  // Animate to final positions
+  setTimeout(() => {
+    document.querySelectorAll('.spectrum-track[data-round="2"] .spectrum-marker').forEach(m => {
+      m.style.left = r2Positions[m.dataset.role] + '%';
+    });
+  }, 800);
+
+  setTimeout(() => {
+    document.querySelectorAll('.spectrum-track[data-round="3"] .spectrum-marker').forEach(m => {
+      m.style.left = r3Positions[m.dataset.role] + '%';
+    });
+  }, 2000);
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '▶ 重播收敛动画';
+  }, 3200);
+});
+</script>
+
+</body>
+</html>

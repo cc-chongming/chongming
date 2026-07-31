@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重明 — 多角色对抗需求评审 全流程整合原型</title>
+<style>
+  :root {
+    --bg: #0b0d13; --surface: #13161f; --surface2: #1a1e2b; --surface3: #222738;
+    --border: #2a2f44; --text: #e4e6f0; --text-dim: #7a7f96; --accent: #6c8cff;
+    --green: #34d399; --red: #f87171; --yellow: #fbbf24; --orange: #fb923c;
+    --purple: #a78bfa; --cyan: #22d3ee; --pink: #f472b6;
+    --radius: 10px; --shadow: 0 4px 24px rgba(0,0,0,.4);
+    --font: -apple-system, "SF Pro SC", "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ══════ Top Header ══════ */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+  .header-logo { font-size: 18px; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .header-title { font-size: 14px; color: var(--text-dim); flex: 1; }
+  .header-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--green); }
+  .header-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ══════ Main Layout ══════ */
+  .main { flex: 1; display: flex; overflow: hidden; }
+
+  /* ══════ Left Pipeline ══════ */
+  .pipeline { width: 220px; background: var(--surface); border-right: 1px solid var(--border); padding: 16px 0; overflow-y: auto; flex-shrink: 0; }
+  .pipeline-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 0 16px; margin-bottom: 12px; }
+  .pipe-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; transition: .15s; border-left: 3px solid transparent; position: relative; }
+  .pipe-item:hover { background: var(--surface2); }
+  .pipe-item.active { background: rgba(108,140,255,.08); border-left-color: var(--accent); }
+  .pipe-item.done { opacity: .7; }
+  .pipe-item.done .pipe-icon { background: var(--green); color: #000; }
+  .pipe-item.running .pipe-icon { background: var(--accent); color: #000; animation: pulse 1.5s infinite; }
+  .pipe-item.pending .pipe-icon { background: var(--surface3); color: var(--text-dim); }
+  .pipe-icon { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; transition: .2s; }
+  .pipe-text { flex: 1; min-width: 0; }
+  .pipe-text .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pipe-text .sub { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+  .pipe-connector { width: 2px; height: 12px; background: var(--border); margin-left: 29px; }
+  .pipe-connector.done { background: var(--green); }
+
+  /* ══════ Center Content ══════ */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .content-area { flex: 1; overflow-y: auto; padding: 20px; }
+
+  /* Phase views */
+  .phase-view { display: none; }
+  .phase-view.active { display: block; }
+  .phase-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .phase-header h2 { font-size: 18px; font-weight: 700; }
+  .phase-header .tag { font-size: 11px; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+  .tag-running { background: rgba(108,140,255,.15); color: var(--accent); }
+  .tag-done { background: rgba(52,211,153,.15); color: var(--green); }
+
+  /* ── Streaming Chat ── */
+  .stream-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .stream-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; background: var(--surface2); }
+  .stream-header .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .stream-header .info { flex: 1; }
+  .stream-header .info .name { font-size: 13px; font-weight: 700; }
+  .stream-header .info .role { font-size: 11px; color: var(--text-dim); }
+  .stream-header .status-badge { font-size: 11px; padding: 2px 10px; border-radius: 20px; }
+  .stream-body { padding: 16px; max-height: 500px; overflow-y: auto; }
+  .stream-msg { margin-bottom: 12px; animation: fadeUp .3s ease; }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .stream-msg .msg-line { font-size: 13px; line-height: 1.7; color: var(--text); }
+  .stream-msg .msg-line.dim { color: var(--text-dim); }
+  .stream-msg .msg-line.highlight { color: var(--cyan); }
+  .stream-msg .tool-call { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 6px 0; font-size: 12px; font-family: var(--mono); }
+  .stream-msg .tool-call .tool-name { color: var(--orange); font-weight: 700; }
+  .stream-msg .tool-call .tool-status { color: var(--green); float: right; }
+  .stream-msg .tool-call .tool-result { color: var(--text-dim); margin-top: 4px; font-size: 11px; }
+  .cursor-blink { display: inline-block; width: 2px; height: 14px; background: var(--accent); animation: blink 1s step-end infinite; vertical-align: text-bottom; margin-left: 2px; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* ── Multi-agent grid ── */
+  .agents-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: pointer; transition: .2s; }
+  .agent-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .agent-card.expanded { grid-column: 1 / -1; }
+  .agent-card-head { padding: 10px 14px; display: flex; align-items: center; gap: 10px; background: var(--surface2); }
+  .agent-card-head .av { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .agent-card-head .name { font-size: 13px; font-weight: 700; flex: 1; }
+  .agent-card-head .sev { font-size: 10px; padding: 1px 8px; border-radius: 20px; }
+  .agent-card-body { padding: 12px 14px; font-size: 13px; display: none; max-height: 300px; overflow-y: auto; line-height: 1.7; }
+  .agent-card.expanded .agent-card-body { display: block; }
+  .agent-card-summary { padding: 8px 14px; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--border); }
+  .agent-card.expanded .agent-card-summary { display: none; }
+
+  /* ── Debate Court ── */
+  .debate-court { display: grid; grid-template-columns: 1fr 180px 1fr; gap: 0; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); min-height: 400px; }
+  .debate-side { padding: 16px; background: var(--surface); overflow-y: auto; }
+  .debate-side.pro { border-right: 1px solid var(--border); }
+  .debate-side.con { border-left: 1px solid var(--border); }
+  .debate-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .debate-side.pro .debate-label { color: var(--green); }
+  .debate-side.con .debate-label { color: var(--red); }
+  .debate-center { background: var(--surface2); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 10px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+  .consensus-gauge { position: relative; width: 100px; height: 100px; margin-bottom: 8px; }
+  .consensus-gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .consensus-gauge .track { fill: none; stroke: var(--border); stroke-width: 8; }
+  .consensus-gauge .fill { fill: none; stroke: var(--yellow); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+  .consensus-gauge .label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; }
+  .debate-round-badge { font-size: 11px; color: var(--text-dim); margin-bottom: 12px; }
+  .debate-round-badge strong { color: var(--accent); font-size: 16px; }
+  .debate-claim { background: var(--surface2); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 12px; transition: .15s; cursor: default; }
+  .debate-claim:hover { background: var(--surface3); }
+  .debate-claim .claim-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .debate-claim .claim-head .av { width: 20px; height: 20px; border-radius: 50%; font-size: 10px; display: flex; align-items: center; justify-content: center; }
+  .debate-claim .claim-head .nm { font-size: 11px; font-weight: 700; }
+  .debate-claim .claim-head .sev { font-size: 9px; padding: 1px 6px; border-radius: 10px; margin-left: auto; }
+
+  /* ── Round Selector ── */
+  .round-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .round-tab { padding: 6px 16px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); transition: .15s; }
+  .round-tab:hover { border-color: var(--accent); color: var(--text); }
+  .round-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .round-tab .rc { font-size: 10px; opacity: .7; }
+
+  /* ── Convergence Chart ── */
+  .convergence-wrap { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .convergence-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; color: var(--text-dim); }
+  .cv-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .cv-label { width: 60px; font-size: 12px; font-weight: 600; text-align: right; flex-shrink: 0; }
+  .cv-track { flex: 1; height: 32px; background: linear-gradient(90deg, rgba(248,113,113,.06), rgba(251,191,36,.06), rgba(52,211,153,.06)); border-radius: 6px; border: 1px solid var(--border); position: relative; }
+  .cv-dot { position: absolute; top: 50%; width: 24px; height: 24px; border-radius: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; font-size: 12px; border: 2px solid var(--bg); transition: left .8s ease; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  .cv-ends { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); padding: 0 4px; margin-top: 2px; }
+  .cv-note { text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .cv-note strong { color: var(--green); }
+
+  /* ── Verdict ── */
+  .verdict-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-top: 16px; display: flex; align-items: center; gap: 16px; }
+  .verdict-badge { font-size: 12px; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
+  .verdict-text { font-size: 13px; flex: 1; }
+  .verdict-btns { display: flex; gap: 6px; }
+  .verdict-btns button { font-size: 11px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; font-weight: 600; transition: .15s; }
+  .verdict-btns button:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Right Sidebar ── */
+  .sidebar { width: 320px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .sidebar-tab { flex: 1; padding: 10px 8px; text-align: center; font-size: 11px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; transition: .15s; background: none; border-top: none; border-left: none; border-right: none; }
+  .sidebar-tab:hover { color: var(--text); }
+  .sidebar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .sidebar-panel { flex: 1; overflow-y: auto; padding: 12px; display: none; }
+  .sidebar-panel.active { display: block; }
+
+  /* Timeline in sidebar */
+  .tl-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); animation: fadeUp .3s; }
+  .tl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .tl-content { flex: 1; min-width: 0; }
+  .tl-content .tl-title { font-size: 12px; font-weight: 600; }
+  .tl-content .tl-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .tl-content .tl-time { font-size: 10px; color: var(--text-dim); float: right; }
+
+  /* Evidence drawer */
+  .ev-item { background: var(--surface2); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 12px; border-left: 3px solid var(--accent); }
+  .ev-item .ev-path { font-family: var(--mono); font-size: 11px; color: var(--accent); margin-bottom: 4px; }
+  .ev-item .ev-code { font-family: var(--mono); font-size: 11px; color: var(--text-dim); background: var(--bg); padding: 6px 8px; border-radius: 4px; margin-top: 4px; white-space: pre-wrap; }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  /* animation trigger classes */
+  .animate-in { animation: fadeUp .4s ease; }
+</style>
+</head>
+<body>
+
+<!-- ═══ Header ═══ -->
+<div class="header">
+  <div class="header-logo">重明</div>
+  <div class="header-title">需求评审 #2026-0731 · 数据同步模块增量同步需求</div>
+  <div class="header-status"><div class="dot"></div> 审查进行中 · 辩论第 2 轮</div>
+</div>
+
+<!-- ═══ Main ═══ -->
+<div class="main">
+
+  <!-- ── Left Pipeline ── -->
+  <div class="pipeline">
+    <div class="pipeline-label">评审流程</div>
+
+    <div class="pipe-item done" data-phase="scout" onclick="switchPhase('scout')">
+      <div class="pipe-icon">🔍</div>
+      <div class="pipe-text"><div class="name">Context Scout</div><div class="sub">项目信息收集</div></div>
+    </div>
+    <div class="pipe-connector done"></div>
+
+    <div class="pipe-item done" data-phase="director" onclick="switchPhase('director')">
+      <div class="pipe-icon">🎬</div>
+      <div class="pipe-text"><div class="name">Director 规划</div><div class="sub">创建评审计划</div></div>
+    </div>
+    <div class="pipe-connector done"></div>
+
+    <div class="pipe-item done" data-phase="review" onclick="switchPhase('review')">
+      <div class="pipe-icon">👥</div>
+      <div class="pipe-text"><div class="name">独立审查</div><div class="sub">4 角色并行</div></div>
+    </div>
+    <div class="pipe-connector done"></div>
+
+    <div class="pipe-item done" data-phase="conflict" onclick="switchPhase('conflict')">
+      <div class="pipe-icon">⚡</div>
+      <div class="pipe-text"><div class="name">冲突检测</div><div class="sub">3 组冲突发现</div></div>
+    </div>
+    <div class="pipe-connector"></div>
+
+    <div class="pipe-item running" data-phase="debate" onclick="switchPhase('debate')">
+      <div class="pipe-icon">⚖️</div>
+      <div class="pipe-text"><div class="name">多轮辩论</div><div class="sub">第 2 轮进行中</div></div>
+    </div>
+    <div class="pipe-connector"></div>
+
+    <div class="pipe-item pending" data-phase="judge" onclick="switchPhase('judge')">
+      <div class="pipe-icon">👨‍⚖️</div>
+      <div class="pipe-text"><div class="name">Judge 裁决</div><div class="sub">等待辩论结束</div></div>
+    </div>
+    <div class="pipe-connector"></div>
+
+    <div class="pipe-item pending" data-phase="human" onclick="switchPhase('human')">
+      <div class="pipe-icon">🧑</div>
+      <div class="pipe-text"><div class="name">人工决策</div><div class="sub">最终 Gate</div></div>
+    </div>
+  </div>
+
+  <!-- ── Center Content ── -->
+  <div class="content">
+    <div class="content-area">
+
+      <!-- ════════════════════════ Phase: Scout ════════════════════════ -->
+      <div class="phase-view" id="phase-scout">
+        <div class="phase-header">
+          <h2>🔍 Context Scout — 项目信息收集</h2>
+          <span class="tag tag-done">✓ 完成</span>
+        </div>
+        <div class="stream-panel">
+          <div class="stream-header">
+            <div class="avatar" style="background:rgba(34,211,238,.15)">🔍</div>
+            <div class="info">
+              <div class="name" style="color:var(--cyan)">Context Scout</div>
+              <div class="role">项目上下文探索 Agent</div>
+            </div>
+            <span class="status-badge" style="background:rgba(52,211,153,.15);color:var(--green)">已完成</span>
+          </div>
+          <div class="stream-body" id="scout-stream">
+            <div class="stream-msg">
+              <div class="msg-line">正在分析目标仓库 <strong>cx-ai/data-sync</strong> ...</div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">listFiles</span>
+                <span class="tool-status">✓</span>
+                <div class="tool-result">找到 847 个文件，识别 12 个核心模块</div>
+              </div>
+            </div>
+            <div class="stream-msg">
+              <div class="msg-line highlight">关键发现: 项目使用 MySQL 5.6，当前数据同步采用全量拉取方案</div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">searchText</span>
+                <span class="tool-status">✓</span>
+                <div class="tool-result">搜索 "sync" 关键词，命中 23 个文件、67 处引用</div>
+              </div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">readLines</span>
+                <span class="tool-status">✓</span>
+                <div class="tool-result">读取 SyncService.java:1-150 — 发现当前无增量同步逻辑，无冲突处理机制</div>
+              </div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">findSymbol</span>
+                <span class="tool-status">✓</span>
+                <div class="tool-result">定位 DataSyncController, SyncService, SyncTask, SyncConfig 4 个核心类</div>
+              </div>
+            </div>
+            <div class="stream-msg">
+              <div class="msg-line highlight"><strong>Scout 报告摘要:</strong></div>
+              <div class="msg-line dim">1. 技术栈: Spring Boot 3.2 + MyBatis + MySQL 5.6</div>
+              <div class="msg-line dim">2. 当前同步方案: 全量拉取，无增量机制</div>
+              <div class="msg-line dim">3. 数据模型: 无版本号字段，无 updated_at 时间戳</div>
+              <div class="msg-line dim">4. 基准 QPS: 峰值 12k，触发过告警</div>
+              <div class="msg-line dim">5. 依赖: 无 Redis，无消息队列，纯 MySQL 方案</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════ Phase: Director ════════════════════════ -->
+      <div class="phase-view" id="phase-director">
+        <div class="phase-header">
+          <h2>🎬 Director — 评审规划</h2>
+          <span class="tag tag-done">✓ 完成</span>
+        </div>
+        <div class="stream-panel">
+          <div class="stream-header">
+            <div class="avatar" style="background:rgba(108,140,255,.15)">🎬</div>
+            <div class="info">
+              <div class="name" style="color:var(--accent)">Director 协调者</div>
+              <div class="role">评审流程编排 Agent</div>
+            </div>
+            <span class="status-badge" style="background:rgba(52,211,153,.15);color:var(--green)">已完成</span>
+          </div>
+          <div class="stream-body">
+            <div class="stream-msg">
+              <div class="msg-line">基于 Scout 报告，制定评审计划如下:</div>
+            </div>
+            <div class="stream-msg">
+              <div class="msg-line"><strong>📋 评审任务清单:</strong></div>
+              <div class="msg-line dim">1. 增量同步方案的技术可行性评估</div>
+              <div class="msg-line dim">2. 数据冲突解决策略的完整性审查</div>
+              <div class="msg-line dim">3. 前端增量数据展示的交互方案</div>
+              <div class="msg-line dim">4. 测试覆盖与验收标准的充分性</div>
+            </div>
+            <div class="stream-msg">
+              <div class="msg-line"><strong>👥 角色分配:</strong></div>
+              <div class="msg-line dim">• 产品经理 → 任务 1, 2 (业务价值 + 需求完整性)</div>
+              <div class="msg-line dim">• 前端开发 → 任务 3 (交互方案可行性)</div>
+              <div class="msg-line dim">• 后端开发 → 任务 1, 2 (技术方案 + 数据一致性)</div>
+              <div class="msg-line dim">• 测试工程师 → 任务 4 (测试路径 + 验收标准)</div>
+            </div>
+            <div class="stream-msg">
+              <div class="msg-line highlight">计划已发布，4 个角色 Agent 开始独立审查...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════ Phase: Review ════════════════════════ -->
+      <div class="phase-view" id="phase-review">
+        <div class="phase-header">
+          <h2>👥 独立审查 — 4 角色并行分析</h2>
+          <span class="tag tag-done">✓ 完成</span>
+        </div>
+        <div class="agents-grid" id="reviewGrid">
+          <!-- 产品经理 -->
+          <div class="agent-card" onclick="toggleCard(this)">
+            <div class="agent-card-head">
+              <div class="av" style="background:rgba(34,211,238,.15)">💡</div>
+              <div class="name" style="color:var(--cyan)">产品经理</div>
+              <div class="sev" style="background:rgba(52,211,153,.15);color:var(--green)">✅ 支持</div>
+            </div>
+            <div class="agent-card-summary">提交 2 个 Claim · P1: 增量同步是核心诉求 · P2: 建议分阶段上线</div>
+            <div class="agent-card-body">
+              <div class="tool-call"><span class="tool-name">searchText</span><span class="tool-status">✓</span><div class="tool-result">搜索竞品同步方案文档...</div></div>
+              <div class="stream-msg"><div class="msg-line">基于 Scout 报告和竞品分析，增量同步是当前最紧迫的需求。用户反馈和监控数据都表明全量方案已到瓶颈。</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #1 [P1]:</strong> 增量同步是核心业务诉求，必须在 V1 实现</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #2 [P2]:</strong> 建议分阶段上线 — V1 用 LWW 策略，V2 引入向量时钟</div></div>
+            </div>
+          </div>
+
+          <!-- 前端开发 -->
+          <div class="agent-card" onclick="toggleCard(this)">
+            <div class="agent-card-head">
+              <div class="av" style="background:rgba(167,139,250,.15)">🎨</div>
+              <div class="name" style="color:var(--purple)">前端开发</div>
+              <div class="sev" style="background:rgba(52,211,153,.15);color:var(--green)">✅ 支持</div>
+            </div>
+            <div class="agent-card-summary">提交 1 个 Claim · P2: 前端已有 DiffViewer，增量展示可行</div>
+            <div class="agent-card-body">
+              <div class="tool-call"><span class="tool-name">listFiles</span><span class="tool-status">✓</span><div class="tool-result">发现 src/components/DiffViewer.vue 已存在</div></div>
+              <div class="stream-msg"><div class="msg-line">前端已有成熟的 Diff 对比组件，增量数据展示的技术基础完备。</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #3 [P2]:</strong> 前端已实现 DiffViewer，增量数据展示无技术障碍</div></div>
+            </div>
+          </div>
+
+          <!-- 后端开发 -->
+          <div class="agent-card" onclick="toggleCard(this)">
+            <div class="agent-card-head">
+              <div class="av" style="background:rgba(251,146,60,.15)">⚙️</div>
+              <div class="name" style="color:var(--orange)">后端开发</div>
+              <div class="sev" style="background:rgba(248,113,113,.15);color:var(--red)">❌ 反对</div>
+            </div>
+            <div class="agent-card-summary">提交 2 个 Claim · P0: 冲突策略未定义 · P1: MySQL 5.6 约束</div>
+            <div class="agent-card-body">
+              <div class="tool-call"><span class="tool-name">findSymbol</span><span class="tool-status">✓</span><div class="tool-result">定位 SyncService — 无版本号字段，无乐观锁</div></div>
+              <div class="tool-call"><span class="tool-name">readLines</span><span class="tool-status">✓</span><div class="tool-result">DDL: CREATE TABLE sync_data — 无 version, 无 updated_at</div></div>
+              <div class="stream-msg"><div class="msg-line">数据模型缺少关键字段，并发场景下无法保证一致性。MySQL 5.6 不支持 SKIP LOCKED。</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #4 [P0]:</strong> 冲突解决策略未定义，并发写入下数据一致性无法保证</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #5 [P1]:</strong> MySQL 5.6 不支持 SKIP LOCKED，需引入 Redis 分布式锁</div></div>
+            </div>
+          </div>
+
+          <!-- 测试工程师 -->
+          <div class="agent-card" onclick="toggleCard(this)">
+            <div class="agent-card-head">
+              <div class="av" style="background:rgba(251,191,36,.15)">🧪</div>
+              <div class="name" style="color:var(--yellow)">测试工程师</div>
+              <div class="sev" style="background:rgba(248,113,113,.15);color:var(--red)">❌ 反对</div>
+            </div>
+            <div class="agent-card-summary">提交 2 个 Claim · P1: 缺少断点续传 · P2: 验收标准不充分</div>
+            <div class="agent-card-body">
+              <div class="tool-call"><span class="tool-name">searchText</span><span class="tool-status">✓</span><div class="tool-result">搜索 "断点续传" / "checkpoint" — 0 结果</div></div>
+              <div class="stream-msg"><div class="msg-line">需求文档未定义网络异常恢复策略，无法编写确定性的集成测试。</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #6 [P1]:</strong> 缺乏断点续传/重连恢复的验收标准</div></div>
+              <div class="stream-msg"><div class="msg-line highlight"><strong>Claim #7 [P2]:</strong> 缺少性能基准指标（吞吐量、延迟 P99）</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════ Phase: Conflict ════════════════════════ -->
+      <div class="phase-view" id="phase-conflict">
+        <div class="phase-header">
+          <h2>⚡ 冲突检测</h2>
+          <span class="tag tag-done">✓ 完成</span>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text-dim)">🔍 ConflictDetector 发现 3 组冲突</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;border-left:3px solid var(--red);">
+              <div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:4px;">冲突 #1 [P0]</div>
+              <div style="font-size:12px;"><span style="color:var(--cyan)">产品</span> "增量同步必须上线" vs <span style="color:var(--orange)">后端</span> "冲突策略未定义，无法保证一致性"</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">类型: 立场对立 · 需进入辩论</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;border-left:3px solid var(--yellow);">
+              <div style="font-size:12px;font-weight:700;color:var(--yellow);margin-bottom:4px;">冲突 #2 [P1]</div>
+              <div style="font-size:12px;"><span style="color:var(--cyan)">产品</span> "LWW 够用" vs <span style="color:var(--yellow)">测试</span> "LWW 在并发场景下无法验证正确性"</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">类型: 严重度不匹配 · 需进入辩论</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:12px;border-left:3px solid var(--accent);">
+              <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:4px;">冲突 #3 [P1]</div>
+              <div style="font-size:12px;"><span style="color:var(--orange)">后端</span> "需 Redis 分布式锁" vs <span style="color:var(--cyan)">产品</span> "不增加新基础设施依赖"</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">类型: 方案矛盾 · 需进入辩论</div>
+            </div>
+          </div>
+        </div>
+        <div class="stream-panel">
+          <div class="stream-header">
+            <div class="avatar" style="background:rgba(108,140,255,.15)">🎬</div>
+            <div class="info">
+              <div class="name" style="color:var(--accent)">Director 协调者</div>
+              <div class="role">冲突处置决策</div>
+            </div>
+            <span class="status-badge" style="background:rgba(52,211,153,.15);color:var(--green)">已完成</span>
+          </div>
+          <div class="stream-body">
+            <div class="stream-msg"><div class="msg-line">检测到 3 组冲突，其中 1 组 P0 级别。启动结构化辩论流程，最多 3 轮。</div></div>
+            <div class="stream-msg"><div class="msg-line dim">将 3 组冲突合并为 1 个辩论议题: "数据冲突解决策略"</div></div>
+            <div class="stream-msg"><div class="msg-line highlight">辩论开始，请各方准备论据...</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════ Phase: Debate ════════════════════════ -->
+      <div class="phase-view active" id="phase-debate">
+        <div class="phase-header">
+          <h2>⚖️ 多轮辩论 — 数据冲突解决策略</h2>
+          <span class="tag tag-running">● 进行中</span>
+        </div>
+
+        <!-- Round Tabs -->
+        <div class="round-tabs">
+          <div class="round-tab" onclick="switchRound(1)">R1 <span class="rc">初始立场</span></div>
+          <div class="round-tab active" onclick="switchRound(2)">R2 <span class="rc">交锋 · 进行中</span></div>
+          <div class="round-tab" onclick="switchRound(3)">R3 <span class="rc">收敛</span></div>
+        </div>
+
+        <!-- Debate Court -->
+        <div class="debate-court">
+          <div class="debate-side pro">
+            <div class="debate-label">🟢 支持方</div>
+            <div class="debate-claim" data-round="1,2,3">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(34,211,238,.15)">💡</div>
+                <div class="nm" style="color:var(--cyan)">产品经理</div>
+                <div class="sev" style="background:rgba(251,191,36,.12);color:var(--yellow)">P1</div>
+              </div>
+              增量同步是核心业务诉求
+            </div>
+            <div class="debate-claim" data-round="2,3">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(34,211,238,.15)">💡</div>
+                <div class="nm" style="color:var(--cyan)">产品经理</div>
+                <div class="sev" style="background:rgba(108,140,255,.12);color:var(--accent)">P2</div>
+              </div>
+              先 LWW 快速交付，后续迭代优化
+            </div>
+            <div class="debate-claim" data-round="1,2,3">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(167,139,250,.15)">🎨</div>
+                <div class="nm" style="color:var(--purple)">前端开发</div>
+                <div class="sev" style="background:rgba(108,140,255,.12);color:var(--accent)">P2</div>
+              </div>
+              DiffViewer 已就绪，前端无障碍
+            </div>
+            <div class="debate-claim" data-round="3" style="border:1px solid var(--green);background:rgba(52,211,153,.05)">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(251,191,36,.15)">🧪</div>
+                <div class="nm" style="color:var(--yellow)">测试工程师</div>
+                <div class="sev" style="background:rgba(52,211,153,.12);color:var(--green)">立场转变</div>
+              </div>
+              接受分阶段方案，前提是 V1 必须有并发测试用例
+            </div>
+          </div>
+
+          <div class="debate-center">
+            <div class="consensus-gauge">
+              <svg viewBox="0 0 100 100">
+                <circle class="track" cx="50" cy="50" r="42"/>
+                <circle class="fill" cx="50" cy="50" r="42" id="consensusCircle"
+                  stroke-dasharray="264" stroke-dashoffset="145"/>
+              </svg>
+              <div class="label" id="consensusValue">45%</div>
+            </div>
+            <div style="font-size:10px;color:var(--text-dim)">共识度</div>
+            <div class="debate-round-badge" style="margin-top:12px">
+              <strong id="roundDisplay">R2</strong> / 3
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:4px">回合</div>
+          </div>
+
+          <div class="debate-side con">
+            <div class="debate-label">🔴 质疑方</div>
+            <div class="debate-claim" data-round="1,2,3">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(251,146,60,.15)">⚙️</div>
+                <div class="nm" style="color:var(--orange)">后端开发</div>
+                <div class="sev" style="background:rgba(248,113,113,.12);color:var(--red)">P0</div>
+              </div>
+              冲突策略未定义，一致性无法保证
+            </div>
+            <div class="debate-claim" data-round="1,2">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(251,146,60,.15)">⚙️</div>
+                <div class="nm" style="color:var(--orange)">后端开发</div>
+                <div class="sev" style="background:rgba(251,191,36,.12);color:var(--yellow)">P1</div>
+              </div>
+              MySQL 5.6 不支持 SKIP LOCKED
+            </div>
+            <div class="debate-claim" data-round="1,2,3">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(251,191,36,.15)">🧪</div>
+                <div class="nm" style="color:var(--yellow)">测试工程师</div>
+                <div class="sev" style="background:rgba(251,191,36,.12);color:var(--yellow)">P1</div>
+              </div>
+              断点续传 vs 从头重试未定义
+            </div>
+            <div class="debate-claim" data-round="3" style="border:1px solid var(--orange);background:rgba(251,146,60,.05)">
+              <div class="claim-head">
+                <div class="av" style="background:rgba(251,146,60,.15)">⚙️</div>
+                <div class="nm" style="color:var(--orange)">后端开发</div>
+                <div class="sev" style="background:rgba(251,146,60,.12);color:var(--orange)">让步</div>
+              </div>
+              接受 V1 用 version 字段 + 乐观锁，放弃 Redis 方案
+            </div>
+          </div>
+        </div>
+
+        <!-- Round dialogue (collapsible) -->
+        <div style="margin-top:16px;">
+          <div style="font-size:13px;font-weight:700;color:var(--text-dim);margin-bottom:8px;">📜 辩论对话流 · R2</div>
+          <div class="stream-panel">
+            <div class="stream-body" style="max-height:250px;">
+              <div class="stream-msg">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:14px">🎬</span>
+                  <span style="font-size:11px;font-weight:700;color:var(--accent)">Director</span>
+                </div>
+                <div class="msg-line">议题: 数据冲突解决策略。R2 开始，请各方回应 R1 中的挑战。</div>
+              </div>
+              <div class="stream-msg">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:14px">⚙️</span>
+                  <span style="font-size:11px;font-weight:700;color:var(--orange)">后端开发</span>
+                  <span style="font-size:10px;color:var(--red)">⚔️ 挑战 → 产品</span>
+                </div>
+                <div class="msg-line">LWW 在并发写入下会丢数据。请产品经理确认: 业务上能接受数据丢失吗？</div>
+              </div>
+              <div class="stream-msg">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:14px">💡</span>
+                  <span style="font-size:11px;font-weight:700;color:var(--cyan)">产品经理</span>
+                  <span style="font-size:10px;color:var(--green)">🛡️ 反驳</span>
+                </div>
+                <div class="msg-line">非财务场景可以接受。但我会在需求文档中明确标注: LWW 仅适用于非关键数据字段。</div>
+              </div>
+              <div class="stream-msg">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:14px">🧪</span>
+                  <span style="font-size:11px;font-weight:700;color:var(--yellow)">测试工程师</span>
+                  <span style="font-size:10px;color:var(--cyan)">📎 补充证据</span>
+                </div>
+                <div class="msg-line">竞品 A 用 WAL 日志回放，竞品 B 用 checkpoint。两者都有明确的冲突解决策略，我们没有。</div>
+              </div>
+              <div class="stream-msg">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:14px">⚙️</span>
+                  <span style="font-size:11px;font-weight:700;color:var(--orange)">后端开发</span>
+                  <span style="font-size:10px;color:var(--yellow)">🤝 立场微调</span>
+                </div>
+                <div class="msg-line cursor-blink">如果产品接受给 sync_data 表加 version 字段，我可以用乐观锁替代 Redis 方案...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Convergence Chart -->
+        <div class="convergence-wrap">
+          <div class="convergence-title">📈 多轮立场收敛</div>
+          <!-- R1 -->
+          <div class="cv-row">
+            <div class="cv-label" style="color:var(--red)">R1</div>
+            <div class="cv-track">
+              <div class="cv-dot" style="left:82%;background:var(--cyan)">💡</div>
+              <div class="cv-dot" style="left:70%;background:var(--purple)">🎨</div>
+              <div class="cv-dot" style="left:25%;background:var(--yellow)">🧪</div>
+              <div class="cv-dot" style="left:12%;background:var(--orange)">⚙️</div>
+            </div>
+          </div>
+          <div class="cv-ends"><span>❌ 完全反对</span><span>✅ 完全支持</span></div>
+          <!-- R2 -->
+          <div class="cv-row" style="margin-top:8px">
+            <div class="cv-label" style="color:var(--yellow)">R2</div>
+            <div class="cv-track">
+              <div class="cv-dot" style="left:70%;background:var(--cyan)">💡</div>
+              <div class="cv-dot" style="left:62%;background:var(--purple)">🎨</div>
+              <div class="cv-dot" style="left:40%;background:var(--yellow)">🧪</div>
+              <div class="cv-dot" style="left:35%;background:var(--orange)">⚙️</div>
+            </div>
+          </div>
+          <div class="cv-ends"><span>❌ 完全反对</span><span>✅ 完全支持</span></div>
+          <!-- R3 -->
+          <div class="cv-row" style="margin-top:8px">
+            <div class="cv-label" style="color:var(--green)">R3</div>
+            <div class="cv-track">
+              <div class="cv-dot" style="left:58%;background:var(--cyan)">💡</div>
+              <div class="cv-dot" style="left:55%;background:var(--purple)">🎨</div>
+              <div class="cv-dot" style="left:52%;background:var(--yellow)">🧪</div>
+              <div class="cv-dot" style="left:48%;background:var(--orange)">⚙️</div>
+            </div>
+          </div>
+          <div class="cv-ends"><span>❌ 完全反对</span><span>✅ 完全支持</span></div>
+          <div class="cv-note">经 3 轮辩论，立场从 <strong>70% 跨度</strong> 收敛到 <strong>10% 跨度</strong>。关键转折: R2 产品接受分阶段方案，R3 后端接受乐观锁替代 Redis</div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════ Phase: Judge ════════════════════════ -->
+      <div class="phase-view" id="phase-judge">
+        <div class="phase-header">
+          <h2>👨‍⚖️ Judge 裁决</h2>
+          <span class="tag tag-running">● 进行中</span>
+        </div>
+        <div class="stream-panel">
+          <div class="stream-header">
+            <div class="avatar" style="background:rgba(244,114,182,.15)">👨‍⚖️</div>
+            <div class="info">
+              <div class="name" style="color:var(--pink)">Judge 裁决者</div>
+              <div class="role">仅基于已持久化的 Claim 和证据，不浏览仓库</div>
+            </div>
+            <span class="status-badge" style="background:rgba(108,140,255,.15);color:var(--accent)">思考中...</span>
+          </div>
+          <div class="stream-body">
+            <div class="stream-msg">
+              <div class="msg-line">审查全部 7 个 Claim、3 组冲突、6 轮辩论记录...</div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">submit_judgement</span>
+                <span class="tool-status">✓</span>
+                <div class="tool-result">Judgement #1: 关键路径 — 并发一致性方案必须在 V1 就绪</div>
+              </div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">submit_judgement</span>
+                <span class="tool-status">✓</span>
+                <div class="tool-result">Judgement #2: 妥协方案 — version 字段 + 乐观锁可接受</div>
+              </div>
+            </div>
+            <div class="stream-msg">
+              <div class="tool-call">
+                <span class="tool-name">draft_gate</span>
+                <span class="tool-status cursor-blink"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════ Phase: Human ════════════════════════ -->
+      <div class="phase-view" id="phase-human">
+        <div class="phase-header">
+          <h2>🧑 人工决策 — 最终 Gate</h2>
+          <span class="tag" style="background:rgba(251,191,36,.15);color:var(--yellow)">⏳ 等待人工</span>
+        </div>
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px;">⚖️ AI 裁决草案</div>
+          <div style="font-size:12px;line-height:1.8;">
+            <div><strong>结论:</strong> CONDITIONAL — 有条件通过</div>
+            <div style="margin-top:8px"><strong>条件清单:</strong></div>
+            <div style="padding-left:16px;color:var(--text-dim)">
+              1. sync_data 表必须新增 version 字段 + updated_at 时间戳<br>
+              2. 冲突策略文档化: LWW 仅限非关键字段，关键字段用乐观锁<br>
+              3. 补充断点续传验收标准和性能基准指标
+            </div>
+          </div>
+        </div>
+
+        <div class="verdict-bar">
+          <span class="verdict-badge" style="background:rgba(251,191,36,.15);color:var(--yellow)">🧑 人工决策</span>
+          <span class="verdict-text">系统已暂停 AI 输出，等待人类做出最终版本化决策</span>
+          <div class="verdict-btns">
+            <button style="border-color:var(--green);color:var(--green)">✅ 通过</button>
+            <button style="border-color:var(--yellow);color:var(--yellow)">⚠️ 有条件通过</button>
+            <button style="border-color:var(--red);color:var(--red)">❌ 驳回</button>
+            <button>↩️ 退回</button>
+            <button style="border-color:var(--purple);color:var(--purple)">🔮 覆盖</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Right Sidebar ── -->
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-sidebar="timeline" onclick="switchSidebar('timeline')">📜 事件流</button>
+      <button class="sidebar-tab" data-sidebar="evidence" onclick="switchSidebar('evidence')">📎 证据</button>
+      <button class="sidebar-tab" data-sidebar="trace" onclick="switchSidebar('trace')">🔍 跟踪</button>
+    </div>
+
+    <div class="sidebar-panel active" id="sidebar-timeline">
+      <div class="tl-item"><div class="tl-dot" style="background:var(--green)"></div><div class="tl-content"><div class="tl-title">Context Scout 完成</div><div class="tl-sub">识别 12 个核心模块，5 条关键发现</div><div class="tl-time">14:23</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--green)"></div><div class="tl-content"><div class="tl-title">Director 发布计划</div><div class="tl-sub">4 项评审任务，4 个角色分配</div><div class="tl-time">14:25</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--green)"></div><div class="tl-content"><div class="tl-title">独立审查完成</div><div class="tl-sub">7 个 Claim 提交 (2 支持 / 2 反对)</div><div class="tl-time">14:38</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--green)"></div><div class="tl-content"><div class="tl-title">冲突检测</div><div class="tl-sub">3 组冲突发现，合并为 1 个辩论议题</div><div class="tl-time">14:39</div></div></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--yellow)"></div><div class="tl-content"><div class="tl-title">辩论 R1 完成</div><div class="tl-sub">立场分散，共识度 15%</div><div class="tl-time">14:45</div></div></div>
+      <div class="tl-item" style="background:rgba(108,140,255,.05);border-radius:6px;padding:8px;margin:0 -8px;"><div class="tl-dot" style="background:var(--accent)"></div><div class="tl-content"><div class="tl-title">辩论 R2 进行中</div><div class="tl-sub">后端接受乐观锁方案，共识度上升中</div><div class="tl-time">14:52</div></div></div>
+    </div>
+
+    <div class="sidebar-panel" id="sidebar-evidence">
+      <div class="ev-item">
+        <div class="ev-path">📄 SyncService.java:45</div>
+        <div>后端提交: 当前同步服务无版本号机制</div>
+        <div class="ev-code">public void syncAll() {
+    List&lt;Data&gt; all = repo.findAll();
+    targetRepo.saveAll(all);  // 全量覆盖，无版本检查
+}</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-path">📄 V3__add_sync_data.sql</div>
+        <div>Scout 发现: DDL 中无 version / updated_at 字段</div>
+        <div class="ev-code">CREATE TABLE sync_data (
+    id BIGINT PRIMARY KEY,
+    content TEXT,
+    created_at DATETIME
+    -- 缺失: version, updated_at
+);</div>
+      </div>
+      <div class="ev-item">
+        <div class="ev-path">📄 竞品分析报告</div>
+        <div>测试提交: 竞品 A/B 都有明确冲突策略</div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel" id="sidebar-trace">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">点击左侧阶段查看 Agent 执行轨迹</div>
+      <div class="stream-msg">
+        <div class="tool-call">
+          <span class="tool-name">submit_claim</span>
+          <span class="tool-status">✓</span>
+          <div class="tool-result">后端 · Claim #4 · P0 · OPPOSE<br>"冲突解决策略未定义"</div>
+        </div>
+      </div>
+      <div class="stream-msg">
+        <div class="tool-call">
+          <span class="tool-name">submit_claim</span>
+          <span class="tool-status">✓</span>
+          <div class="tool-result">产品 · Claim #1 · P1 · SUPPORT<br>"增量同步是核心诉求"</div>
+        </div>
+      </div>
+      <div class="stream-msg">
+        <div class="tool-call">
+          <span class="tool-name">submit_challenge</span>
+          <span class="tool-status">✓</span>
+          <div class="tool-result">后端 → 产品<br>"如果两个用户同时修改同一条记录..."</div>
+        </div>
+      </div>
+      <div class="stream-msg">
+        <div class="tool-call">
+          <span class="tool-name">submit_rebuttal</span>
+          <span class="tool-status">✓</span>
+          <div class="tool-result">产品 → 后端<br>"非财务场景可接受 LWW"</div>
+        </div>
+      </div>
+      <div class="stream-msg">
+        <div class="tool-call">
+          <span class="tool-name">change_claim_position</span>
+          <span class="tool-status">✓</span>
+          <div class="tool-result">测试 · Claim #6<br>NEUTRAL → OPPOSE → 立场转变中</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Phase switching ──
+function switchPhase(phase) {
+  document.querySelectorAll('.pipe-item').forEach(el => el.classList.remove('active'));
+  document.querySelector(`.pipe-item[data-phase="${phase}"]`).classList.add('active');
+  document.querySelectorAll('.phase-view').forEach(el => el.classList.remove('active'));
+  document.getElementById('phase-' + phase).classList.add('active');
+}
+
+// ── Agent card expand/collapse ──
+function toggleCard(card) {
+  const wasExpanded = card.classList.contains('expanded');
+  document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('expanded'));
+  if (!wasExpanded) card.classList.add('expanded');
+}
+
+// ── Round switching ──
+const roundData = {
+  1: { consensus: 15, circleOffset: 224, round: 'R1' },
+  2: { consensus: 45, circleOffset: 145, round: 'R2' },
+  3: { consensus: 85, circleOffset: 40,  round: 'R3' }
+};
+
+function switchRound(round) {
+  document.querySelectorAll('.round-tab').forEach((t, i) => t.classList.toggle('active', i === round - 1));
+
+  const data = roundData[round];
+  document.getElementById('consensusValue').textContent = data.consensus + '%';
+  document.getElementById('consensusCircle').style.strokeDashoffset = data.circleOffset;
+  document.getElementById('consensusCircle').style.stroke = data.consensus > 70 ? 'var(--green)' : data.consensus > 40 ? 'var(--yellow)' : 'var(--red)';
+  document.getElementById('roundDisplay').textContent = data.round;
+
+  // Show/hide claims by round
+  document.querySelectorAll('.debate-claim').forEach(c => {
+    const rounds = c.dataset.round.split(',').map(Number);
+    c.style.display = rounds.includes(round) ? '' : 'none';
+  });
+}
+
+// ── Sidebar switching ──
+function switchSidebar(tab) {
+  document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.sidebar === tab));
+  document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.toggle('active', p.id === 'sidebar-' + tab));
+}
+
+// ── Init: show debate phase ──
+switchRound(2);
+</script>
+
+</body>
+</html>
