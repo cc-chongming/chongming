@@ -9,12 +9,13 @@ import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.middleware.ActingInput;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
 /**
- * [AIREVIEW-PLAN-019#3.1] Verifies that the Scout observes AS2 native read-tool calls without
- * replacing their execution implementation.
+ * [AIREVIEW-PLAN-020#3.2] Verifies that the observer records authorized AS2 tool calls without
+ * replacing their execution implementation or changing the harness tool policy.
  *
  * @author wangli
  */
@@ -46,29 +47,38 @@ class ScoutToolTraceCollectorTests {
     }
 
     @Test
-    void ignoresAnyToolOutsideTheScoutReadOnlyAllowlist() {
+    void capturesAuthorizedDirectorAndFinalizerToolsWithoutChangingTheActingInput() {
         ScoutToolTraceCollector collector = new ScoutToolTraceCollector();
-        ToolUseBlock toolUse = new ToolUseBlock("call-unsafe", "write_file", Map.of("path", "README.md"));
+        ToolUseBlock planWrite = new ToolUseBlock("call-plan", "plan_write", Map.of("plan", "Review plan"));
+        ToolUseBlock completeInitialReview = new ToolUseBlock(
+                "call-finalize", "complete_initial_review", Map.of("summary", "Initial review completed"));
+        ActingInput input = new ActingInput(List.of(planWrite, completeInitialReview));
+        AtomicReference<ActingInput> forwardedInput = new AtomicReference<>();
 
         collector.onActing(
                         null,
                         null,
-                        new ActingInput(List.of(toolUse)),
-                        ignored -> Flux.just(new ToolResultEndEvent(
-                                "reply-1", "call-unsafe", "write_file", ToolResultState.SUCCESS)))
+                        input,
+                        forwarded -> {
+                            forwardedInput.set(forwarded);
+                            return Flux.just(
+                                    new ToolResultEndEvent(
+                                            "reply-1", "call-plan", "plan_write", ToolResultState.SUCCESS),
+                                    new ToolResultEndEvent(
+                                            "reply-1",
+                                            "call-finalize",
+                                            "complete_initial_review",
+                                            ToolResultState.SUCCESS));
+                        })
                 .collectList()
                 .block();
 
-        assertThat(collector.find("call-unsafe")).isEmpty();
-    }
-
-    @Test
-    void ignoresRootListingBecauseTheInitManifestOwnsRepositoryReconnaissance() {
-        ScoutToolTraceCollector collector = new ScoutToolTraceCollector();
-        ToolUseBlock toolUse = new ToolUseBlock("call-list-root", "list_files", Map.of("path", "."));
-
-        collector.captureModelToolUse(toolUse);
-
-        assertThat(collector.find("call-list-root")).isEmpty();
+        assertThat(forwardedInput.get()).isSameAs(input);
+        assertThat(collector.find("call-plan").orElseThrow())
+                .extracting(ScoutToolTraceCollector.ToolTrace::toolName, ScoutToolTraceCollector.ToolTrace::state)
+                .containsExactly("plan_write", ToolResultState.SUCCESS);
+        assertThat(collector.find("call-finalize").orElseThrow())
+                .extracting(ScoutToolTraceCollector.ToolTrace::toolName, ScoutToolTraceCollector.ToolTrace::state)
+                .containsExactly("complete_initial_review", ToolResultState.SUCCESS);
     }
 }

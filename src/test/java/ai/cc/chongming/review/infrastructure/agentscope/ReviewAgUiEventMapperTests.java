@@ -7,8 +7,10 @@ import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import io.agentscope.core.agui.event.AguiEvent;
+import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.message.Msg;
 import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
@@ -25,6 +27,37 @@ import reactor.core.publisher.Flux;
  * @author wangli
  */
 class ReviewAgUiEventMapperTests {
+
+    @Test
+    void mapsAnAgentResultWithoutAMessageAsRunCompletion() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+
+        List<AguiEvent> events = mapper.map(
+                new AgentResultEvent((Msg) null), context(), RoleType.DIRECTOR, "DIRECTOR");
+
+        assertThat(events).singleElement().isInstanceOf(AguiEvent.RunFinished.class);
+    }
+
+    @Test
+    void assignsAStableFallbackToolCallIdWhenTheRuntimeEventOmitsOne() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+
+        List<AguiEvent> started = mapper.map(
+                new ToolCallStartEvent("reply-1", null, null), context(), RoleType.DIRECTOR, "DIRECTOR");
+        List<AguiEvent> completed = mapper.map(
+                new ToolResultEndEvent("reply-1", null, null, ToolResultState.ERROR),
+                context(),
+                RoleType.DIRECTOR,
+                "DIRECTOR");
+
+        AguiEvent.ToolCallStart start = (AguiEvent.ToolCallStart) started.getFirst();
+        AguiEvent.ToolCallEnd end = (AguiEvent.ToolCallEnd) completed.getFirst();
+        AguiEvent.ToolCallResult result = (AguiEvent.ToolCallResult) completed.get(1);
+        assertThat(start.toolCallId()).isEqualTo(end.toolCallId()).endsWith(":tool:reply-1:unknown_tool");
+        assertThat(start.toolCallName()).isEqualTo("unknown_tool");
+        assertThat(result.toolCallId()).isEqualTo(start.toolCallId());
+        assertThat(result.content()).isEqualTo("工具状态：ERROR");
+    }
 
     @Test
     void mapsStartedObservationBeforeTheNativeActingMiddlewareRuns() {
@@ -105,6 +138,45 @@ class ReviewAgUiEventMapperTests {
         assertThat(payload.get("output").toString())
                 .contains("token=raw-tool-result")
                 .contains("class App {}");
+    }
+
+    @Test
+    void mapsFailedToolResultsWithTheRawObservedOutput() {
+        ScoutToolTraceCollector collector = new ScoutToolTraceCollector();
+        ToolUseBlock toolUse = new ToolUseBlock("call-2", "plan_write", Map.of("plan", "Use the reported risks"));
+        collector.onActing(
+                        null,
+                        null,
+                        new ActingInput(List.of(toolUse)),
+                        ignored -> Flux.just(
+                                new ToolResultTextDeltaEvent(
+                                        "reply-2", "call-2", "plan_write", "plan storage unavailable"),
+                                new ToolResultEndEvent(
+                                        "reply-2", "call-2", "plan_write", ToolResultState.ERROR)))
+                .collectList()
+                .block();
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+
+        List<AguiEvent> events = mapper.map(
+                new ToolResultEndEvent("reply-2", "call-2", "plan_write", ToolResultState.ERROR),
+                context(),
+                RoleType.DIRECTOR,
+                "DIRECTOR",
+                "runtime-1",
+                collector);
+
+        AguiEvent.Custom custom = events.stream()
+                .filter(AguiEvent.Custom.class::isInstance)
+                .map(AguiEvent.Custom.class::cast)
+                .findFirst()
+                .orElseThrow();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) custom.value();
+
+        assertThat(payload)
+                .containsEntry("phase", "failed")
+                .containsEntry("status", "ERROR");
+        assertThat(payload.get("output")).isEqualTo("plan storage unavailable");
     }
 
     private static ReviewRuntimeContext context() {

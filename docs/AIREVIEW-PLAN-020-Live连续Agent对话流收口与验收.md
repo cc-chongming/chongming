@@ -1,6 +1,6 @@
 # `/live` 连续 Agent 对话流收口与验收计划
 
-> **状态**: 🟡 实施中（第 0、1、2 段主体代码已在工作区，待完成回归修复和真实浏览器验收）
+> **状态**: 🟡 实施中（自动化门槛已完成，待用户重启服务后的真实浏览器验收）
 > **创建日期**: 2026-07-31
 > **目标**: 将 `/live` 收口为可靠的、按真实 AG-UI 事件顺序展示 Agent 思考、回答、工具入参和工具结果的连续对话页，并在不阻塞评审领域流程的前提下完成自动化与真实运行验收。
 > **关联计划**: AIREVIEW-PLAN-017、AIREVIEW-PLAN-018、AIREVIEW-PLAN-019
@@ -42,8 +42,9 @@ DIRECTOR
 - 已新增 `LiveAgentConversation.vue` 和 `runtime-conversation-adapter.js`，`ReviewLiveView.vue` 已不再渲染固定角色状态块。
 - 网关已读取 OpenAI-compatible 的 `reasoning_content`，并兼容 `reasoning`；仅有真实值时才写入 `ThinkingBlock`。
 - Director、Context Scout、普通角色与初审收尾 Agent 均已接入同一观察型工具 collector；collector 只观测，不改工具调用、权限或结果。
-- `npm test`（6 文件、11 用例）与 `npm run build` 已通过；构建产物 hash 已更新到 `src/main/resources/static/review/`，但尚未提交。
-- 后端定向测试在 2026-07-31 最近一次运行中共 34 个用例，31 通过、3 失败。失败均为 `AgentScopeReviewRuntimeAdapterTests` 中 Scout 降级原因码从预期的 `MODEL_CALL_TIMEOUT`、`MODEL_NETWORK_ERROR`、`CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED` 退化为 `CONTEXT_SCOUT_UNAVAILABLE`。在这 3 项修复并重新验证前，不能声明后端回归通过。
+- `npm test`（6 文件、12 用例）与 `npm run build` 已通过；生产 `index.html` 引用的 JS/CSS hash 与本次构建产物一致，无遗留旧 hash。
+- IDEA 全量构建及 7 个后端定向测试类（40 个用例）已通过。Scout 三种精确降级原因码均已恢复；`RoleSubagentIsolationTests` 已从过时的 `submitEvidence` 期望改为 RolePack 实际公开的 `submit_claim`/`complete_initial_review`，未放宽生产白名单。
+- 当前 shell 的 `JAVA_HOME` 指向 JDK 8，`./mvnw.cmd test` 在 Maven Enforcer 的 Java 21 基线检查前退出；已使用项目 IDEA JDK 21 完成构建和定向测试，不能将该 Maven 环境问题记为全量 Maven 通过。
 
 ## 1. 后端事件契约收口
 
@@ -135,7 +136,7 @@ DIRECTOR
 
 ## 3. 必须先修复的回归
 
-### 3.1 Scout 降级原因码回归 ⏳
+### 3.1 Scout 降级原因码回归 ✅
 
 **现象**：`AgentScopeReviewRuntimeAdapterTests` 的三种可识别 Scout 失败都被页面事件写成通用 `CONTEXT_SCOUT_UNAVAILABLE`。
 
@@ -153,16 +154,18 @@ DIRECTOR
 
 **退出条件**：上述 3 个断言全部恢复，通过后再运行本计划第 5 段的完整定向集。
 
-### 3.2 防御性映射与测试补齐 ⏳
+**完成记录（2026-07-31）**：`runScout(...)` 实际调用 `ContextScoutHarnessFactory#createRuntime(...)`，原测试仍只桩设 `create(...)`，导致空 runtime 异常覆盖原始 failure cause。测试现模拟完整 `ScoutRuntime`；`MODEL_CALL_TIMEOUT`、`MODEL_NETWORK_ERROR` 与 `CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED` 均已验证被持久化到 `CONTEXT_SCOUT_DEGRADED.reasonCode`，Director 继续启动。
 
-1. 为 `ReviewAgUiEventMapper` 的 null Agent result、无 toolCallId、工具异常结果增加回归样本。
-2. 为 `ScoutToolTraceCollector` 增加非 Scout 工具（如 `plan_write`、`complete_initial_review`）也能观察、但不改变权限的测试。
-3. 检查 `RoleSubagentIsolationTests` 的 `submitEvidence` 期望是否与当前 RolePack API 名称一致；该失败不属于本次 UI 验收，不可在未定位前标记为既有基线或随意改生产白名单。
-4. 重新运行 `ReviewReportServiceTests`，确认其空白行差异是否为测试固化问题；同样与本计划无直接耦合，但全量构建前须有明确归属。
+### 3.2 防御性映射与测试补齐 ✅
+
+1. `ReviewAgUiEventMapper` 已覆盖 null Agent result、缺少 toolCallId 的稳定回退 ID 和工具 ERROR 原始结果；映射不会因异常输入使 SSE 线程 NPE。
+2. `ScoutToolTraceCollector` 已覆盖 `plan_write` 与 `complete_initial_review`：只观察同一个 `ActingInput` 和运行时已授权工具，不重写入参或改变权限。
+3. `RoleSubagentIsolationTests` 已确认并改为断言 PRODUCT RolePack 的真实 API：`submit_claim`、`complete_initial_review`、`searchText`，且明确不暴露旧 `submitEvidence`；生产白名单未改。
+4. `ReviewReportServiceTests` 已通过，未复现空白行差异。
 
 ## 4. 真实运行验收
 
-### 4.1 自动化门槛
+### 4.1 自动化门槛 ✅
 
 按以下顺序执行，任一步失败先修复，再进入下一步：
 
@@ -171,6 +174,8 @@ DIRECTOR
 3. `npm run build`，检查 `src/main/resources/static/review/index.html` 与本次生成的 JS/CSS hash 成对更新，没有遗留被 index 引用的旧 hash。
 4. 使用 IDEA 构建项目；若 Maven 可用，再运行与改动相关的 Java 测试集。全量测试发现的既有失败必须记录责任和复现证据，不能静默忽略。
 5. `git diff --check`，随后进行代码审查，确认没有把原始工具内容误写入领域事件、报告或持久化审计。
+
+**完成记录（2026-07-31）**：IDEA 全量构建通过；`AgentScopeReviewRuntimeAdapterTests`、`AgentScopeModelBridgeTests`、`ReviewAgUiEventMapperTests`、`RuntimeTraceRedactorTests`、`ScoutToolTraceCollectorTests`、`OpenAiCompatibleModelClientTests`、`ModelGatewayContractTests` 共 40 个用例通过；前端 Vitest 6 文件 12 用例与 Playwright E2E 2 个用例通过；Vite 生产构建通过。`git diff --check` 通过。代码审查确认原始工具入参/结果仅进入进程内 `ReviewRuntimeTraceRegistry` 的 AG-UI runtime trace；领域事件、报告与 `ModelCallAuditService` 不持久化原始工具内容或 `thinkingText`（审计仅记录公开文本 hash）。`./mvnw.cmd test` 因当前 shell JDK 8 不满足 Java 21 基线而未执行，属于环境限制。
 
 ### 4.2 浏览器验收（用户重启后）
 
@@ -190,7 +195,7 @@ DIRECTOR
 | `docs/AIREVIEW-PLAN-020-Live连续Agent对话流收口与验收.md` | #0 | ✅ |
 | `frontend/src/components/LiveAgentConversation.vue` | #2.2 | ✅（待浏览器验收） |
 | `frontend/src/services/runtime-conversation-adapter.js` | #2.1 | ✅（待补边界测试） |
-| `frontend/src/services/runtime-conversation-adapter.test.js` | #2.1 | ✅（待补跨角色样本） |
+| `frontend/src/services/runtime-conversation-adapter.test.js` | #2.1 | ✅ |
 | `src/main/resources/static/review/assets/index-*.js` | #2.2 | ✅（构建产物，提交时以实际 hash 为准） |
 | `src/main/resources/static/review/assets/index-*.css` | #2.2 | ✅（构建产物，提交时以实际 hash 为准） |
 
@@ -207,27 +212,28 @@ DIRECTOR
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ContextScoutHarnessFactory.java` | #1.2 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewDirectorHarnessFactory.java` | #1.2 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/RoleSubagentFactory.java` | #1.2 | ✅ |
-| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ScoutToolTraceCollector.java` | #1.2/#3.2 | 🟡 待扩展测试 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java` | #1.2/#3.1 | 🟡 待修复原因码回归 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewAgUiEventMapper.java` | #1.3/#3.2 | 🟡 待补空 result 防御 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ScoutToolTraceCollector.java` | #1.2/#3.2 | ✅ |
+| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java` | #1.2/#3.1 | ✅ |
+| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewAgUiEventMapper.java` | #1.3/#3.2 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/RuntimeTraceRedactor.java` | #1.3 | ✅ |
 | `frontend/src/views/ReviewLiveView.vue` | #2.2 | ✅（待浏览器验收） |
 | `frontend/src/styles/review.css` | #2.2 | ✅（待浏览器验收） |
 | `src/main/resources/static/review/index.html` | #2.2 | ✅（构建产物） |
 | `src/test/java/ai/cc/chongming/review/agentscope/AgentScopeModelBridgeTests.java` | #1.1 | ✅ |
-| `src/test/java/ai/cc/chongming/review/agentscope/AgentScopeReviewRuntimeAdapterTests.java` | #3.1 | ⏳ |
-| `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewAgUiEventMapperTests.java` | #1.3/#3.2 | 🟡 待补边界样本 |
+| `src/test/java/ai/cc/chongming/review/agentscope/AgentScopeReviewRuntimeAdapterTests.java` | #3.1 | ✅ |
+| `src/test/java/ai/cc/chongming/review/agentscope/RoleSubagentIsolationTests.java` | #3.2 | ✅ |
+| `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewAgUiEventMapperTests.java` | #1.3/#3.2 | ✅ |
 | `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/RuntimeTraceRedactorTests.java` | #1.3 | ✅ |
-| `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/ScoutToolTraceCollectorTests.java` | #3.2 | ⏳ |
+| `src/test/java/ai/cc/chongming/review/infrastructure/agentscope/ScoutToolTraceCollectorTests.java` | #3.2 | ✅ |
 | `src/test/java/ai/cc/chongming/review/infrastructure/model/OpenAiCompatibleModelClientTests.java` | #1.1 | ✅ |
 
 ## 6. 实施顺序
 
 1. **步骤 0** ✅：冻结目标、原始工具载荷例外、当前工作区与验收边界。
 2. **步骤 1** ✅：完成模型 thinking、跨 Harness collector、AG-UI 映射和连续对话 UI 主体。
-3. **步骤 2** ⏳：修复 Scout 降级原因码回归；依赖步骤 1，禁止把精确原因码降级为通用码。
-4. **步骤 3** ⏳：补齐 mapper/collector/审计的防御性测试；依赖步骤 2。
-5. **步骤 4** ⏳：运行定向 Java、前端单测、生产构建、IDEA 构建、差异检查与代码审查；依赖步骤 3。
+3. **步骤 2** ✅：修复 Scout 降级原因码回归；精确原因码未降级为通用码。
+4. **步骤 3** ✅：补齐 mapper/collector/审计的防御性测试，并定位、修复 RolePack API 过时期望。
+5. **步骤 4** ✅：完成定向 Java、前端单测、生产构建、IDEA 构建、差异检查与代码审查；Maven Wrapper 因 shell JDK 8 环境未运行，已记录为环境限制。
 6. **步骤 5** ⏳：用户重启后的新 attempt 浏览器验收；依赖步骤 4。
 7. **步骤 6** ⏳：更新 PLAN-017/018 实施状态、`.learnings/LEARNINGS.md` 与提交说明；依赖步骤 5。
 
@@ -252,7 +258,7 @@ DIRECTOR
 
 ## 9. 交接说明
 
-下一位执行者从**步骤 2**开始。先阅读本文件 #3.1，再检查 `AgentScopeReviewRuntimeAdapterTests` 对 factory 的 mock 与 `ContextScoutHarnessFactory#createRuntime(...)` 的实际调用是否一致；修复后先跑第 4.1 的定向集，不能先做浏览器操作。
+下一位执行者从**步骤 5**开始。自动化门槛已完成；先请用户按其服务管理方式重启服务并创建新的 review/attempt，再执行本文件 #4.2 的浏览器验收。
 
 运行服务由用户控制。完成自动化门槛后，请用户重启服务并创建新的 review，然后按 #4.2 执行浏览器验收。若模型只返回文本没有 thinking，这属于正常兼容路径；若工具输入/输出为空，应先核对该新 attempt 是否真正产生了 `chongming.tool-call.v1` 事件，而不是回退到旧状态块 UI。
 
@@ -263,3 +269,5 @@ DIRECTOR
 | 2026-07-31 | 根据“`/live` 必须像主流 Agent 对话软件、展示思考/回答/工具入参与结果”的要求创建收口计划。 |
 | 2026-07-31 | 记录主体实现已在未提交工作区，以及近期后端定向测试中 Scout 三个精确降级原因码被通用码替代的回归；将修复、测试、浏览器新 attempt 验收顺序固化为可交接步骤。 |
 | 2026-07-31 | 用户明确当前阶段不需要工具调用结果脱敏；将其限定为本机调试 runtime trace 的临时边界，并保留后续生产化需单独设计的约束。 |
+| 2026-07-31 | 完成 Scout 三个精确降级原因码回归：测试改为模拟 `createRuntime(...)` 返回的 `ScoutRuntime`，不再因旧 `create(...)` mock 产生空 runtime 并吞没根因。 |
+| 2026-07-31 | 完成 mapper/collector 防御性覆盖、PRODUCT RolePack 旧 API 期望修复和前端跨角色同 toolCallId 去重样本；IDEA 全量构建、7 个后端定向类（40 用例）、前端 Vitest（6 文件、12 用例）、Playwright E2E（2 用例）与 Vite 构建通过。Maven Wrapper 被当前 shell JDK 8 基线限制阻断，已保留为环境记录。 |

@@ -19,7 +19,7 @@ import java.util.function.Function;
 import reactor.core.publisher.Flux;
 
 /**
- * [AIREVIEW-PLAN-019#3.1] Observes the AS2 tool lifecycle through the official acting middleware.
+ * [AIREVIEW-PLAN-020#1.2] Observes the AS2 tool lifecycle through the official acting middleware.
  * It is deliberately observational: it never replaces a tool, changes its parameters, or makes
  * filesystem decisions.
  *
@@ -53,7 +53,7 @@ public final class ScoutToolTraceCollector implements MiddlewareBase {
     }
 
     /**
-     * Receives the already-validated model tool call before AS2 emits {@code ToolCallStartEvent}.
+     * Receives an already-authorized model tool call before AS2 emits {@code ToolCallStartEvent}.
      * Result collection remains on the official {@link MiddlewareBase#onActing} stream.
      */
     public void captureModelToolUse(ToolUseBlock toolUse) {
@@ -96,7 +96,7 @@ public final class ScoutToolTraceCollector implements MiddlewareBase {
         return value == null || value.isBlank();
     }
 
-    /** Immutable browser-mapping input, preserving only the native read-tool observation. */
+    /** Immutable browser-mapping input for an authorized native or domain tool observation. */
     public record ToolTrace(
             String toolName,
             Map<String, Object> input,

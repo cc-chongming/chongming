@@ -36,10 +36,7 @@ public class ReviewAgUiEventMapper {
         return map(event, context, role, agentId, null, null);
     }
 
-    /**
-     * Maps a runtime event with an optional attempt-local native-tool observer. The observer is
-     * only passed by Context Scout previews; formal role traces retain their existing contract.
-     */
+    /** Maps a runtime event with an optional attempt-local observer owned by its Harness runtime. */
     public List<AguiEvent> map(
             AgentEvent event,
             ReviewRuntimeContext context,
@@ -58,7 +55,7 @@ public class ReviewAgUiEventMapper {
         }
         if (event instanceof AgentResultEvent result) {
             String text = result.getResult() == null ? "" : redactor.redactVisibleText(result.getResult().getTextContent());
-            String messageId = result.getResult().getId();
+            String messageId = result.getResult() == null ? null : result.getResult().getId();
             if (messageId == null || messageId.isBlank()) {
                 messageId = runId + ":result:" + event.getId();
             }
@@ -85,27 +82,30 @@ public class ReviewAgUiEventMapper {
             return List.copyOf(mapped);
         }
         if (event instanceof ToolCallStartEvent tool) {
+            String toolCallId = toolCallId(runId, tool.getToolCallId(), tool.getReplyId(), tool.getToolCallName(), event);
+            String toolCallName = toolCallName(tool.getToolCallName());
             AguiEvent.ToolCallStart standard =
-                    new AguiEvent.ToolCallStart(threadId, runId, tool.getToolCallId(), tool.getToolCallName());
-            return toolTrace(toolTraceCollector, tool.getToolCallId())
+                    new AguiEvent.ToolCallStart(threadId, runId, toolCallId, toolCallName);
+            return toolTrace(toolTraceCollector, toolCallId)
                     .map(trace -> List.<AguiEvent>of(
                             standard,
-                            toolObservation(threadId, runId, context, tool.getToolCallId(), trace, "started", null)))
+                            toolObservation(threadId, runId, context, toolCallId, trace, "started", null)))
                     .orElseGet(() -> List.of(standard));
         }
         if (event instanceof ToolResultEndEvent tool) {
+            String toolCallId = toolCallId(runId, tool.getToolCallId(), tool.getReplyId(), tool.getToolCallName(), event);
             String summary = tool.getState() == null ? "工具执行结束" : "工具状态：" + tool.getState().name();
             List<AguiEvent> standard = List.of(
-                    new AguiEvent.ToolCallEnd(threadId, runId, tool.getToolCallId()),
-                    new AguiEvent.ToolCallResult(threadId, runId, tool.getToolCallId(), summary, "tool", tool.getReplyId()));
-            return toolTrace(toolTraceCollector, tool.getToolCallId())
+                    new AguiEvent.ToolCallEnd(threadId, runId, toolCallId),
+                    new AguiEvent.ToolCallResult(threadId, runId, toolCallId, summary, "tool", tool.getReplyId()));
+            return toolTrace(toolTraceCollector, toolCallId)
                     .map(trace -> {
                         List<AguiEvent> mapped = new java.util.ArrayList<>(standard);
                         mapped.add(toolObservation(
                                 threadId,
                                 runId,
                                 context,
-                                tool.getToolCallId(),
+                                toolCallId,
                                 trace,
                                 trace.state() == ToolResultState.SUCCESS ? "completed" : "failed",
                                 tool.getState()));
@@ -118,7 +118,24 @@ public class ReviewAgUiEventMapper {
 
     private Optional<ScoutToolTraceCollector.ToolTrace> toolTrace(
             ScoutToolTraceCollector collector, String toolCallId) {
-        return collector == null ? Optional.empty() : collector.find(toolCallId);
+        return collector == null || toolCallId == null || toolCallId.isBlank()
+                ? Optional.empty()
+                : collector.find(toolCallId);
+    }
+
+    private static String toolCallId(
+            String runId, String toolCallId, String replyId, String toolCallName, AgentEvent event) {
+        if (toolCallId != null && !toolCallId.isBlank()) {
+            return toolCallId;
+        }
+        String replyPart = replyId == null || replyId.isBlank()
+                ? (event.getId() == null || event.getId().isBlank() ? "unknown" : event.getId())
+                : replyId;
+        return runId + ":tool:" + replyPart + ":" + toolCallName(toolCallName);
+    }
+
+    private static String toolCallName(String toolCallName) {
+        return toolCallName == null || toolCallName.isBlank() ? "unknown_tool" : toolCallName;
     }
 
     private AguiEvent.Custom toolObservation(

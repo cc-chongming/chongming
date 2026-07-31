@@ -45,4 +45,45 @@ describe('runtime conversation adapter', () => {
             { kind: 'message', role: 'PRODUCT', content: '产品风险已确认。', status: 'completed' }
         ]);
     });
+
+    it('keeps interleaved tool calls from different agents separate by run and tool call id', () => {
+        const conversation = buildRuntimeConversation([
+            {
+                type: 'CUSTOM', runId: 'runtime-1:DIRECTOR', name: 'chongming.runtime-lifecycle.v1',
+                value: { role: 'DIRECTOR', agentId: 'DIRECTOR', lifecycle: 'STARTED' }
+            },
+            { type: 'TOOL_CALL_START', runId: 'runtime-1:DIRECTOR', toolCallId: 'call-1', toolCallName: 'plan_write' },
+            {
+                type: 'CUSTOM', runId: 'runtime-1:DIRECTOR', name: 'chongming.tool-call.v1',
+                value: {
+                    toolCallId: 'call-1', toolName: 'plan_write', input: { plan: '评审计划' },
+                    output: { id: 'plan-1' }, status: 'SUCCESS', phase: 'completed', elapsedMs: 12
+                }
+            },
+            {
+                type: 'CUSTOM', runId: 'runtime-1:PRODUCT', name: 'chongming.runtime-event.v1',
+                value: { role: 'PRODUCT', agentId: 'PRODUCT', eventType: 'AGENT_START' }
+            },
+            { type: 'TOOL_CALL_START', runId: 'runtime-1:PRODUCT', toolCallId: 'call-1', toolCallName: 'searchText' },
+            {
+                type: 'CUSTOM', runId: 'runtime-1:PRODUCT', name: 'chongming.tool-call.v1',
+                value: {
+                    toolCallId: 'call-1', toolName: 'searchText', input: { query: '验收条件' },
+                    output: { matches: ['docs/requirement.md'] }, status: 'SUCCESS', phase: 'completed', elapsedMs: 24
+                }
+            }
+        ]);
+
+        expect(conversation).toMatchObject([
+            {
+                kind: 'tool', runId: 'runtime-1:DIRECTOR', role: 'DIRECTOR', toolCallId: 'call-1',
+                toolName: 'plan_write', input: { plan: '评审计划' }, output: { id: 'plan-1' }, elapsedMs: 12
+            },
+            {
+                kind: 'tool', runId: 'runtime-1:PRODUCT', role: 'PRODUCT', toolCallId: 'call-1',
+                toolName: 'searchText', input: { query: '验收条件' },
+                output: { matches: ['docs/requirement.md'] }, elapsedMs: 24
+            }
+        ]);
+    });
 });

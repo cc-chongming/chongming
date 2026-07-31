@@ -25,6 +25,7 @@ import ai.cc.chongming.review.infrastructure.agentscope.ContextScoutHarnessFacto
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewDirectorHarnessFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkspaceLayout;
 import ai.cc.chongming.review.infrastructure.agentscope.RoleSubagentFactory;
+import ai.cc.chongming.review.infrastructure.agentscope.ScoutToolTraceCollector;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.event.ToolCallStartEvent;
@@ -245,7 +246,9 @@ class AgentScopeReviewRuntimeAdapterTests {
         List<ReviewEventDraft> events = new ArrayList<>();
         HarnessAgent scout = Mockito.mock(HarnessAgent.class);
         ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
-        Mockito.when(scoutFactory.create(Mockito.any(), Mockito.any())).thenReturn(scout);
+        Mockito.when(scoutFactory.createRuntime(Mockito.any(), Mockito.any()))
+                .thenReturn(new ContextScoutHarnessFactory.ScoutRuntime(
+                        scout, new ScoutToolTraceCollector()));
         Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
                 .thenReturn(Flux.error(new ModelGatewayException(
                         ModelGatewayException.Code.MODEL_CALL_TIMEOUT, "token=must-not-reach-public-events")));
@@ -276,7 +279,7 @@ class AgentScopeReviewRuntimeAdapterTests {
         registry.register(review);
         List<ReviewEventDraft> events = new ArrayList<>();
         ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
-        Mockito.when(scoutFactory.create(Mockito.any(), Mockito.any())).thenThrow(new ModelGatewayException(
+        Mockito.when(scoutFactory.createRuntime(Mockito.any(), Mockito.any())).thenThrow(new ModelGatewayException(
                 ModelGatewayException.Code.MODEL_NETWORK_ERROR, "unavailable before stream subscription"));
         AtomicInteger directorModelCalls = new AtomicInteger();
         AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
@@ -302,7 +305,9 @@ class AgentScopeReviewRuntimeAdapterTests {
         List<ReviewEventDraft> events = new ArrayList<>();
         HarnessAgent scout = Mockito.mock(HarnessAgent.class);
         ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
-        Mockito.when(scoutFactory.create(Mockito.any(), Mockito.any())).thenReturn(scout);
+        Mockito.when(scoutFactory.createRuntime(Mockito.any(), Mockito.any()))
+                .thenReturn(new ContextScoutHarnessFactory.ScoutRuntime(
+                        scout, new ScoutToolTraceCollector()));
         Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
                 .thenReturn(Flux.range(1, 3)
                         .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "glob_files")));
