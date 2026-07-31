@@ -135,8 +135,10 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
         try {
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode choice = root.path("choices").path(0);
-            String content = choice.path("message").path("content").asText("");
-            java.util.List<ModelGateway.ToolCall> toolCalls = parseToolCalls(choice.path("message").path("tool_calls"));
+            JsonNode message = choice.path("message");
+            String content = message.path("content").asText("");
+            String thinking = providerThinking(message);
+            java.util.List<ModelGateway.ToolCall> toolCalls = parseToolCalls(message.path("tool_calls"));
             if (content.isBlank() && toolCalls.isEmpty()) {
                 throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model response has no public text");
             }
@@ -144,6 +146,7 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
             return new ProviderResponse(
                     text(root, "id", "provider-response"),
                     content,
+                    thinking,
                     new ModelGateway.Usage(
                             usage.path("prompt_tokens").asLong(0),
                             usage.path("completion_tokens").asLong(0),
@@ -153,6 +156,14 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
         } catch (JsonProcessingException exception) {
             throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model response is not valid JSON", exception);
         }
+    }
+
+    private static String providerThinking(JsonNode message) {
+        String reasoningContent = message.path("reasoning_content").asText("");
+        if (!reasoningContent.isBlank()) {
+            return reasoningContent;
+        }
+        return message.path("reasoning").asText("");
     }
 
     private String text(JsonNode node, String field, String fallback) {

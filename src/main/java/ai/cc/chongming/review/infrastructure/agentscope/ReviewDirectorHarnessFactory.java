@@ -83,6 +83,7 @@ public class ReviewDirectorHarnessFactory {
         List<AgentTool> debateTools = reviewDebateToolFactory == null ? List.of() : reviewDebateToolFactory.directorTools(runtimeContext);
         Toolkit toolkit = new Toolkit();
         debateTools.forEach(toolkit::registerAgentTool);
+        ScoutToolTraceCollector toolTraceCollector = new ScoutToolTraceCollector();
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(runtimeContext.directorLabel())
                 .agentId(runtimeContext.directorLabel())
@@ -92,7 +93,8 @@ public class ReviewDirectorHarnessFactory {
                 .filesystem(attemptFilesystem(workspace))
                 .model(new AgentScopeModelBridge(
                         modelGateway, runtimeContext, RoleType.DIRECTOR, "director", prompt,
-                        debateTools.stream().map(AgentTool::getName).collect(java.util.stream.Collectors.toSet())))
+                        debateTools.stream().map(AgentTool::getName).collect(java.util.stream.Collectors.toSet()),
+                        toolTraceCollector::captureModelToolUse))
                 .sysPrompt(prompt)
                 .maxIters(agentScopeProperties.directorMaxIterations())
                 .toolkit(toolkit)
@@ -107,6 +109,7 @@ public class ReviewDirectorHarnessFactory {
                 .disableDynamicSkills()
                 .disableDefaultWorkspaceSkills()
                 .skillsEnabled(false)
+                .middleware(toolTraceCollector)
                 .permissionContext(bypassPermissionContext());
         DistributedStore store = distributedStoreProvider.getIfAvailable();
         if (store != null) {
@@ -115,7 +118,7 @@ public class ReviewDirectorHarnessFactory {
         if (!agentScopeProperties.persistSession()) {
             builder.disableSessionPersistence();
         }
-        return new DirectorRuntime(runtimeContext, workspace, builder.build());
+        return new DirectorRuntime(runtimeContext, workspace, builder.build(), toolTraceCollector);
     }
 
     /** Native Harness file tools must resolve from the attempt root, not the Spring process directory. */
@@ -156,6 +159,7 @@ public class ReviewDirectorHarnessFactory {
     public record DirectorRuntime(
             ReviewRuntimeContext context,
             ReviewWorkspaceLayout.ReviewWorkspace workspace,
-            HarnessAgent agent) {
+            HarnessAgent agent,
+            ScoutToolTraceCollector toolTraceCollector) {
     }
 }

@@ -29,24 +29,22 @@ class RuntimeTraceRedactorTests {
     }
 
     @Test
-    void boundsAndRedactsStructuredToolInputAndOutputBeforeBrowserPublication() {
-        RuntimeTraceRedactor.TracePayload input = redactor.redactToolInput(Map.of(
+    void preservesRawStructuredToolInputAndOutputForTheLiveDebugConversation() {
+        RuntimeTraceRedactor.TracePayload input = redactor.rawToolInput(Map.of(
                 "pattern", "token=secret-value path=E:\\aicode\\chongming\\pom.xml",
                 "api_key", "structured-secret"));
-        RuntimeTraceRedactor.TracePayload output = redactor.redactToolOutput(
+        RuntimeTraceRedactor.TracePayload output = redactor.rawToolOutput(
                 "{\"api_key\":\"json-secret\"} bearer abc.def\n" + "x".repeat(5_000));
 
         assertThat(input.value().toString())
-                .doesNotContain("secret-value")
-                .doesNotContain("structured-secret")
-                .doesNotContain("E:\\aicode")
-                .contains("[REDACTED]")
-                .contains("[HOST_PATH_REDACTED]");
+                .contains("secret-value")
+                .contains("structured-secret")
+                .contains("E:\\aicode");
         assertThat(output.value().toString())
-                .doesNotContain("abc.def")
-                .doesNotContain("json-secret")
-                .contains("[REDACTED]");
-        assertThat(output.truncated()).isTrue();
+                .contains("abc.def")
+                .contains("json-secret")
+                .contains("x".repeat(5_000));
+        assertThat(output.truncated()).isFalse();
     }
 
     @Test

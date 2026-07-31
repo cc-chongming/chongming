@@ -50,7 +50,13 @@ public class ContextScoutHarnessFactory {
 
     /** Creates one attempt-local, read-only scout without Claim, debate or Gate capabilities. */
     public HarnessAgent create(ReviewRuntimeContext context, ReviewWorkspaceLayout.ReviewWorkspace workspace) {
-        return create(context, workspace, "primary");
+        return createRuntime(context, workspace).agent();
+    }
+
+    /** Creates the non-voting Scout together with its local runtime tool transcript. */
+    public ScoutRuntime createRuntime(ReviewRuntimeContext context, ReviewWorkspaceLayout.ReviewWorkspace workspace) {
+        ScoutToolTraceCollector collector = new ScoutToolTraceCollector();
+        return new ScoutRuntime(create(context, workspace, "primary", collector), collector);
     }
 
     /**
@@ -256,5 +262,9 @@ public class ContextScoutHarnessFactory {
                 toolTraceCollector.clear();
             }
         }
+    }
+
+    /** Runtime resources for the non-voting Scout before the Director starts. */
+    public record ScoutRuntime(HarnessAgent agent, ScoutToolTraceCollector toolTraceCollector) {
     }
 }

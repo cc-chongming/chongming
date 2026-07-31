@@ -106,6 +106,7 @@ public class RoleSubagentFactory {
                         : reviewRepositoryToolFactory.rolePublicContext(runtimeContext, rolePack, reviewContextAssembler);
         String prompt = rolePrompt(rolePack, publicContext);
         Toolkit toolkit = reviewToolkit(runtimeContext, roleType, rolePack.allowedTools());
+        ScoutToolTraceCollector toolTraceCollector = new ScoutToolTraceCollector();
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(runtimeContext.roleLabel(roleType))
                 .agentId(runtimeContext.roleLabel(roleType))
@@ -119,7 +120,7 @@ public class RoleSubagentFactory {
                         rolePack.modelProfile(),
                         prompt,
                         rolePack.allowedTools(),
-                        java.util.Set.of()))
+                        toolTraceCollector::captureModelToolUse))
                 .sysPrompt(prompt)
                 .maxIters(rolePack.maxIterations())
                 .toolkit(toolkit)
@@ -143,14 +144,15 @@ public class RoleSubagentFactory {
                 runtimeContext.roleSessionId(roleType),
                 rolePack,
                 roleWorkspace,
-                builder.build());
+                builder.build(),
+                toolTraceCollector);
     }
 
     /**
      * Creates the protocol-only continuation used after a bounded initial-review investigation
      * reaches its iteration budget. It deliberately omits every repository and debate tool.
      */
-    public HarnessAgent createInitialReviewFinalizer(
+    public RoleFinalizerRuntime createInitialReviewFinalizer(
             ReviewRuntimeContext runtimeContext, RoleRuntime roleRuntime) {
         Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
         Objects.requireNonNull(roleRuntime, "roleRuntime must not be null");
@@ -166,6 +168,7 @@ public class RoleSubagentFactory {
                         : reviewRepositoryToolFactory.rolePublicContext(runtimeContext, rolePack, reviewContextAssembler);
         String prompt = finalizationPrompt(rolePack, publicContext);
         Toolkit toolkit = reviewToolkit(runtimeContext, rolePack.roleType(), finalizationTools);
+        ScoutToolTraceCollector toolTraceCollector = new ScoutToolTraceCollector();
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(roleRuntime.label() + "-finalizer")
                 .agentId(roleRuntime.label() + "-finalizer")
@@ -179,7 +182,7 @@ public class RoleSubagentFactory {
                         rolePack.modelProfile(),
                         prompt,
                         finalizationTools,
-                        java.util.Set.of()))
+                        toolTraceCollector::captureModelToolUse))
                 .sysPrompt(prompt)
                 .maxIters(Integer.MAX_VALUE)
                 .toolkit(toolkit)
@@ -193,11 +196,12 @@ public class RoleSubagentFactory {
                 .disableDynamicSkills()
                 .disableDefaultWorkspaceSkills()
                 .skillsEnabled(false)
+                .middleware(toolTraceCollector)
                 .permissionContext(readOnlyPermissionContext());
         if (!agentScopeProperties.persistSession()) {
             builder.disableSessionPersistence();
         }
-        return builder.build();
+        return new RoleFinalizerRuntime(builder.build(), toolTraceCollector);
     }
 
     private PermissionContextState readOnlyPermissionContext() {
@@ -348,6 +352,11 @@ public class RoleSubagentFactory {
             String sessionId,
             RolePack rolePack,
             Path workspace,
-            HarnessAgent agent) {
+            HarnessAgent agent,
+            ScoutToolTraceCollector toolTraceCollector) {
+    }
+
+    /** Runtime resources for the protocol-only completion continuation. */
+    public record RoleFinalizerRuntime(HarnessAgent agent, ScoutToolTraceCollector toolTraceCollector) {
     }
 }

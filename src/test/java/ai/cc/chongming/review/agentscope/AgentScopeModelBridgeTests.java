@@ -6,6 +6,7 @@ import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeModelBridge;
+import io.agentscope.core.message.ThinkingBlock;
 import io.agentscope.core.message.ToolResultMessage;
 import io.agentscope.core.message.UserMessage;
 import io.agentscope.core.message.ToolUseBlock;
@@ -72,6 +73,25 @@ class AgentScopeModelBridgeTests {
                 toolUse.getContent(),
                 Map.of("type", "object", "required", List.of("query"), "properties", Map.of(
                         "query", Map.of("type", "string"))))).isNull();
+    }
+
+    @Test
+    void preservesProviderThinkingAsAnAgentScopeThinkingBlock() {
+        ModelGateway gateway = (request, cancellation) -> Mono.just(new ModelGateway.ModelResponse(
+                "response-001", "model-001", "公开结论。", "先核对需求与代码边界。",
+                new ModelGateway.Usage(1, 2, 3), ModelGateway.FinishReason.STOP,
+                Duration.ofMillis(20), 1, "trace-001"));
+        AgentScopeModelBridge bridge = new AgentScopeModelBridge(
+                gateway, context(), RoleType.PRODUCT, "role-reviewer", "Review public requirements", Set.of());
+
+        var response = bridge.stream(List.of(new UserMessage("Assess")), List.of(), null).blockFirst();
+
+        assertThat(response.getContent().stream()
+                .filter(ThinkingBlock.class::isInstance)
+                .map(ThinkingBlock.class::cast)
+                .map(ThinkingBlock::getThinking)
+                .toList())
+                .containsExactly("先核对需求与代码边界。");
     }
 
     @Test

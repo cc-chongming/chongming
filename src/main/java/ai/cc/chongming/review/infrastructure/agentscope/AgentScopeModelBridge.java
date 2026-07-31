@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ThinkingBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatResponse;
@@ -100,6 +101,30 @@ public final class AgentScopeModelBridge implements Model {
     }
 
     /**
+     * Adds a tool observer without narrowing the Harness's existing native filesystem surface.
+     * This is used by Director and review roles, whose native-tool boundary is unchanged by
+     * runtime observability.
+     */
+    public AgentScopeModelBridge(
+            ModelGateway modelGateway,
+            ReviewRuntimeContext runtimeContext,
+            RoleType roleType,
+            String profileId,
+            String systemInstruction,
+            Set<String> permittedTools,
+            Consumer<ToolUseBlock> toolCallObserver) {
+        this(
+                modelGateway,
+                runtimeContext,
+                roleType,
+                profileId,
+                systemInstruction,
+                permittedTools,
+                DEFAULT_NATIVE_FILESYSTEM_TOOLS,
+                toolCallObserver);
+    }
+
+    /**
      * Adds an observational callback for accepted model tool calls. The callback runs before AS2
      * emits its tool-call lifecycle event and must never alter the returned {@link ToolUseBlock}.
      */
@@ -175,6 +200,9 @@ public final class AgentScopeModelBridge implements Model {
 
     private List<ContentBlock> content(ModelGateway.ModelResponse response, Set<String> requestedTools) {
         List<ContentBlock> blocks = new java.util.ArrayList<>();
+        if (!response.thinkingText().isBlank()) {
+            blocks.add(ThinkingBlock.builder().thinking(response.thinkingText()).build());
+        }
         if (!response.publicText().isBlank()) {
             blocks.add(TextBlock.builder().text(response.publicText()).build());
         }

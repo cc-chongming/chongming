@@ -39,7 +39,7 @@ class OpenAiCompatibleModelClientTests {
     private final AtomicReference<String> requestBody = new AtomicReference<>();
     private final AtomicInteger responseStatus = new AtomicInteger(200);
     private final AtomicReference<String> responseBody = new AtomicReference<>("""
-            {"id":"chat-1","choices":[{"message":{"content":"{\\"tasks\\":[]}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}
+            {"id":"chat-1","choices":[{"message":{"content":"{\\"tasks\\":[]}","reasoning_content":"先判断评审范围。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}
             """);
 
     @BeforeEach
@@ -91,6 +91,7 @@ class OpenAiCompatibleModelClientTests {
         assertThat(authorization).hasValue("Bearer safe-test-key");
         assertThat(requestBody.get()).contains("\"model\":\"test-model\"").contains("Public context only.");
         assertThat(response.publicText()).isEqualTo("{\"tasks\":[]}");
+        assertThat(response.thinkingText()).isEqualTo("先判断评审范围。");
         assertThat(response.usage()).isEqualTo(new ModelGateway.Usage(3, 5, 8));
         assertThat(response.finishReason()).isEqualTo(ModelGateway.FinishReason.STOP);
     }

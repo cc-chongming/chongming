@@ -18,7 +18,7 @@ import reactor.core.publisher.Mono;
 public interface ModelGateway {
 
     /**
-     * Generates one public response without persisting model-private reasoning.
+     * Generates one response with optional provider-supplied reasoning for the local runtime observer.
      *
      * @param request server-assembled prompt and runtime metadata
      * @param cancellation cooperative cancellation signal
@@ -69,6 +69,7 @@ public interface ModelGateway {
             String responseId,
             String modelName,
             String publicText,
+            String thinkingText,
             Usage usage,
             FinishReason finishReason,
             Duration latency,
@@ -82,6 +83,7 @@ public interface ModelGateway {
             requireText(responseId, "responseId");
             requireText(modelName, "modelName");
             publicText = publicText == null ? "" : publicText;
+            thinkingText = thinkingText == null ? "" : thinkingText;
             toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
             if ((publicText == null || publicText.isBlank()) && toolCalls.isEmpty()) {
                 throw new IllegalArgumentException("publicText or toolCalls must not be empty");
@@ -99,7 +101,17 @@ public interface ModelGateway {
 
         public ModelResponse(String responseId, String modelName, String publicText, Usage usage,
                 FinishReason finishReason, Duration latency, int attempts, String traceId) {
-            this(responseId, modelName, publicText, usage, finishReason, latency, attempts, List.of(), traceId);
+            this(responseId, modelName, publicText, "", usage, finishReason, latency, attempts, List.of(), traceId);
+        }
+
+        public ModelResponse(String responseId, String modelName, String publicText, Usage usage,
+                FinishReason finishReason, Duration latency, int attempts, List<ToolCall> toolCalls, String traceId) {
+            this(responseId, modelName, publicText, "", usage, finishReason, latency, attempts, toolCalls, traceId);
+        }
+
+        public ModelResponse(String responseId, String modelName, String publicText, String thinkingText, Usage usage,
+                FinishReason finishReason, Duration latency, int attempts, String traceId) {
+            this(responseId, modelName, publicText, thinkingText, usage, finishReason, latency, attempts, List.of(), traceId);
         }
     }
 

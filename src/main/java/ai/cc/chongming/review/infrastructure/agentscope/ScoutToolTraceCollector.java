@@ -13,23 +13,19 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import reactor.core.publisher.Flux;
 
 /**
- * [AIREVIEW-PLAN-019#3.1] Observes the AS2 native Scout read-tool lifecycle through the official
- * acting middleware. It is deliberately observational: it never replaces a native tool, changes
- * its parameters, or makes filesystem decisions.
+ * [AIREVIEW-PLAN-019#3.1] Observes the AS2 tool lifecycle through the official acting middleware.
+ * It is deliberately observational: it never replaces a tool, changes its parameters, or makes
+ * filesystem decisions.
  *
  * @author wangli
  */
 public final class ScoutToolTraceCollector implements MiddlewareBase {
-
-    private static final Set<String> ALLOWED_TOOL_NAMES =
-            Set.of("glob_files", "grep_files", "read_file");
 
     private final ConcurrentMap<String, TraceState> traces = new ConcurrentHashMap<>();
 
@@ -65,7 +61,7 @@ public final class ScoutToolTraceCollector implements MiddlewareBase {
     }
 
     private void captureStart(ToolUseBlock toolUse) {
-        if (toolUse == null || !isAllowed(toolUse.getName()) || blank(toolUse.getId())) {
+        if (toolUse == null || blank(toolUse.getName()) || blank(toolUse.getId())) {
             return;
         }
         traces.putIfAbsent(
@@ -94,10 +90,6 @@ public final class ScoutToolTraceCollector implements MiddlewareBase {
             return Map.of();
         }
         return Collections.unmodifiableMap(new LinkedHashMap<>(input));
-    }
-
-    private static boolean isAllowed(String toolName) {
-        return ALLOWED_TOOL_NAMES.contains(toolName);
     }
 
     private static boolean blank(String value) {

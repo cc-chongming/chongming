@@ -158,7 +158,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             return scout.then(Mono.defer(() -> state.cancelled()
                     ? Mono.error(new CancellationException("review runtime was cancelled before Director execution"))
                     : run(state, director.agent(), RoleType.DIRECTOR, context.directorLabel(),
-                            context.directorSessionId(), ReviewStage.PLANNING, request.initialMessage())))
+                            context.directorSessionId(), ReviewStage.PLANNING, request.initialMessage(),
+                            director.toolTraceCollector())))
                     .thenReturn(new AgentRuntimeSession(request.runtimeId(), request.userId(), request.sessionId()));
         });
     }
@@ -176,7 +177,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ScoutInitToolBudget nativeToolBudget = new ScoutInitToolBudget(agentScopeProperties.scoutMaxToolCalls());
             Mono<Void> execution;
             try {
-                HarnessAgent scout = contextScoutHarnessFactory.create(context, workspace);
+                ContextScoutHarnessFactory.ScoutRuntime scoutRuntime = contextScoutHarnessFactory.createRuntime(context, workspace);
+                HarnessAgent scout = scoutRuntime.agent();
                 state.emit(AgentRuntimeEventType.ROLE_REGISTERED, "CONTEXT_SCOUT", "CONTEXT_SCOUT");
                 execution = scout.streamEvents(
                                 "请准备本次评审的公开项目上下文。",
@@ -193,7 +195,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                             }
                             emitRawObservation(
                                     state, event, RoleType.DIRECTOR, "CONTEXT_SCOUT",
-                                    context.runtimeId() + ":context-scout", ReviewStage.PLANNING);
+                                    context.runtimeId() + ":context-scout", ReviewStage.PLANNING,
+                                    scoutRuntime.toolTraceCollector());
                         })
                         .timeout(agentScopeProperties.scoutTimeout())
                         .onErrorMap(TimeoutException.class,
@@ -339,14 +342,15 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             state.cancellation().checkCancelled();
             if (recipientLabel.equals(state.context().directorLabel())) {
                 return run(state, state.director().agent(), RoleType.DIRECTOR, recipientLabel,
-                        state.context().directorSessionId(), ReviewStage.PLANNING, message);
+                        state.context().directorSessionId(), ReviewStage.PLANNING, message,
+                        state.director().toolTraceCollector());
             }
             RoleSubagentFactory.RoleRuntime role = state.roles().get(recipientLabel);
             if (role == null) {
                 return Mono.error(new IllegalArgumentException("unknown role label: " + recipientLabel));
             }
             return run(state, role.agent(), role.roleType(), role.label(), role.sessionId(),
-                    ReviewStage.INITIAL_REVIEW, message);
+                    ReviewStage.INITIAL_REVIEW, message, role.toolTraceCollector());
         }).then();
     }
 
@@ -417,14 +421,15 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             String agentId,
             String sessionId,
             ReviewStage stage,
-            String message) {
+            String message,
+            ScoutToolTraceCollector toolTraceCollector) {
         AtomicBoolean initialReviewBudgetExhausted = new AtomicBoolean();
         return agent.streamEvents(message, agentContext(state.context(), sessionId))
                 .doOnNext(event -> {
                     if (event instanceof ExceedMaxItersEvent) {
                         initialReviewBudgetExhausted.set(true);
                     }
-                    emitRawObservation(state, event, roleType, agentId, sessionId, stage);
+                    emitRawObservation(state, event, roleType, agentId, sessionId, stage, toolTraceCollector);
                 })
                 .doOnError(exception -> {
                     publishLifecycle(state, roleType, agentId, "FAILED");
@@ -460,15 +465,17 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         if (roleRuntime == null) {
             return Mono.empty();
         }
-        HarnessAgent finalizer = roleSubagentFactory.createInitialReviewFinalizer(state.context(), roleRuntime);
-        return finalizer.streamEvents(
+        RoleSubagentFactory.RoleFinalizerRuntime finalizer =
+                roleSubagentFactory.createInitialReviewFinalizer(state.context(), roleRuntime);
+        return finalizer.agent().streamEvents(
                         "调查轮次已结束。现在仅执行协议收尾：提交已有发现并调用 complete_initial_review。",
                         agentContext(state.context(), sessionId))
                 .doOnNext(event -> emitRawObservation(
-                        state, event, roleType, roleRuntime.label() + "-finalizer", sessionId, stage))
+                        state, event, roleType, roleRuntime.label() + "-finalizer", sessionId, stage,
+                        finalizer.toolTraceCollector()))
                 .then()
                 .timeout(Duration.ofMinutes(15))
-                .doFinally(signal -> finalizer.close());
+                .doFinally(signal -> finalizer.agent().close());
     }
 
     private void verifyInitialReviewCompletion(RuntimeState state, RoleType roleType) {
@@ -528,9 +535,10 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             RoleType roleType,
             String agentId,
             String sessionId,
-            ReviewStage stage) {
+            ReviewStage stage,
+            ScoutToolTraceCollector toolTraceCollector) {
         if (runtimeTraceRegistry != null && agUiEventMapper != null) {
-            agUiEventMapper.map(event, state.context(), roleType, agentId)
+            agUiEventMapper.map(event, state.context(), roleType, agentId, null, toolTraceCollector)
                     .forEach(agUiEvent -> runtimeTraceRegistry.publish(state.context().runtimeId(), agUiEvent));
         }
         eventAdapter.adapt(event, state.context(), roleType, agentId, sessionId, stage)

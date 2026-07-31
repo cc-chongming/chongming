@@ -1,23 +1,23 @@
 # 主持式多 Agent 评审观察台与 AG-UI 运行流计划
 
-> **状态**: 🟡 已实现运行流订阅与角色执行抽屉；主持叙事和真实角色全链路验收仍进行中
+> **状态**: 🟡 `/live` 已切换为对话式 AG-UI 运行流；收口、回归修复与真实多角色验收按 `AIREVIEW-PLAN-020` 继续
 > **创建日期**: 2026-07-22
-> **目标**: 将现有“领域事件时间线 + 公开对话”升级为以 Director 主持过程为中心的实时评审观察台；用户可看见初审立论、主持人归纳与追问、角色间辩论、Judge 收束，并按需展开每个 Agent 的 AG-UI 流式执行详情。
+> **目标**: 保留工作台的主持式领域视图，同时把 `/live` 建成类似主流 Agent 对话产品的实时观察页：按真实到达顺序呈现每个 Agent 的思考、回答、工具参数与工具结果。
 > **前置计划**: PLAN-008、PLAN-009、PLAN-010、PLAN-012、PLAN-016
 
 ## CAPABILITY
 
-评审发起者打开同一 review 的工作台后，默认看到的不是任务进度或混杂的日志，而是一场由 Director 主持的多 Agent 评审：角色完成初审后将公开结论交给 Director；Director 汇总冲突、发起针对性追问并推进议题辩论；Judge 在争议收束后给出裁决与 Gate 草案。用户可点击任一角色查看其同一运行中的 AG-UI 文本、推理（模型实际返回时）、工具调用和工具结果。
+评审发起者在工作台查看由 Director 主持的正式领域过程；进入同一 review 的 `/live` 后，看到的是一条连续的 Agent 对话时间线，而不是角色状态块。每个条目来自同一运行的真实 AG-UI 事件：模型实际返回的思考、可见回答、工具调用参数和工具结果按发生顺序交织呈现；工具细节可展开。
 
 ## 0. 当前事实与问题
 
 - `ReviewEvent` 与 `/api/reviews/{id}/events` 已承载可恢复、已提交的领域事实；它不能替代运行调试流，也不得混入未提交的模型文本。
-- `AgentScopeReviewRuntimeAdapter` 已在同一 `HarnessAgent.streamEvents` 链路接收原始 `AgentEvent`，但当前只转换为脱敏 `RuntimeObservation`，没有浏览器订阅面与消息内容。
-- 前端 `AgUiConversationPanel` 当前只将公开领域事实转换为 `CUSTOM + TEXT_MESSAGE_*`，且明确不渲染 `REASONING_*`；这不满足主持过程与角色执行详情的需求。
-- AgentScope Java 的 AG-UI 扩展提供 `AguiEvent`、`AguiAgentAdapter` 与文本、推理、工具、运行生命周期事件类型。当前模型桥只携带 `publicText`，要显示推理必须让网关明确提供并安全映射 `ThinkingBlock`；不得伪造推理内容。
+- `AgentScopeReviewRuntimeAdapter` 已在同一 `HarnessAgent.streamEvents` 链路旁路发布 AG-UI 事件；本次改造将同一个工具观察中间件安装到 Director、Context Scout、普通角色和初审收尾 Agent，而不再只覆盖 Scout 预览。
+- `/live` 不再复用 `ReviewRoundtable` 与固定的 `AgentTraceDrawer`。`LiveAgentConversation` 直接把运行事件归约为思考、回答、工具和异常四类对话条目，因此角色一旦出现文本或工具调用即会出现在时间线。
+- AgentScope Java 的 AG-UI 扩展提供文本、推理、工具和生命周期事件。本项目网关读取 OpenAI-compatible 响应中的 `reasoning_content` 或 `reasoning`，仅在供应商实际返回时映射为 `ThinkingBlock` 和 `REASONING_MESSAGE_*`，不伪造推理内容。
 - PLAN-016 已在 Director、普通角色和 Judge prompt 中要求所有可见输出使用简体中文；本计划的 UI 文案、主持指令摘要和工具状态同样统一中文。
 - 本次真实运行验证中，评审 `68c022e4-95fe-4831-aa21-6befddc9ef81` 仍停留在 `PLANNING`：领域流仅有 `PLAN_CREATED` 与 `CONTEXT_SCOUT_DEGRADED`，运行 AG-UI 流只出现 `CONTEXT_SCOUT`、`DIRECTOR` 与工具事件，尚未产生 `PRODUCT` 的角色运行、领域激活或完成事件。因此“后台日志提及产品经理”不能作为 PRODUCT 已实际启动或前端漏渲染的验收依据。
-- 当前主视图的“主持人叙事”只投影已提交的领域事件；角色的模型文本、工具入参与出参仅在对应角色的运行流中显示。页面默认选中 `DIRECTOR`，即使后续 PRODUCT 已正常启动，用户也需要从角色席位切换到 PRODUCT 才能查看其细节。该交互与“角色启动后自动可见”的目标仍有差距。
+- 旧 `/live` 默认选中 `DIRECTOR`，后续 PRODUCT 已启动时仍需手动切换角色；这正是“后台在运行、页面像没有输出”的直接原因。新页面不再有固定活动角色。
 
 ## 1. 体验与信息架构
 
@@ -41,21 +41,21 @@ Judge     待命
 - 主持人叙事按发生顺序展示 Director 的计划、任务分派、角色结论送达、冲突归纳、追问、议题创建/关闭、Judge 移交；每项可跳转至相关角色、Claim 或议题。
 - 议题区按 `topicId` 聚合，而不是按全局事件平铺。每个议题卡显示提出 Claim、冲突双方、轮次、Challenge、Rebuttal、立场变化、证据与关闭原因。
 
-### 1.2 按需详情：角色执行抽屉
+### 1.2 `/live`：连续 Agent 对话
 
-点击角色席位的“查看执行过程”后打开右侧抽屉；不替换主舞台。
+`/live` 以单列连续时间线显示，不要求用户先选角色或打开抽屉。
 
-- 按一次 Agent invocation/step 分段显示 AG-UI `RUN_*`、`TEXT_MESSAGE_*`、`REASONING_*`、`TOOL_CALL_*` 事件。
-- 工具名称与执行状态默认可见；参数和结果折叠。允许显示已脱敏的快照相对路径、行号、命中数量，不显示宿主绝对路径、密钥、受控目录外内容或其它角色私有 session。
-- 推理只在模型真实返回 `ThinkingBlock` 时显示；没有该块时显示“模型未返回可展示的推理流”，绝不由文本、工具调用或业务事实推断/补写。
-- 抽屉支持“定位到当前步骤”“仅工具”“仅消息”“仅推理”本地筛选；不提供对模型提示词、工具权限或领域状态的修改入口。
+- 每个条目带 Agent 身份；思考在流式期间展开，完成后保留可展开的全文；回答作为正常对话气泡呈现。
+- 工具名称、状态和耗时默认可见；参数与结果可展开。当前为本地调试模式，工具参数和文本结果按原始值转发，不做脱敏或长度截断。
+- 推理只在模型实际返回 `ThinkingBlock` 时显示；供应商没有返回时不创建空的“思考过程”，也绝不由文本或业务事实补写。
+- 工作台仍保留圆桌和角色抽屉，以服务正式领域状态和按角色回看；`/live` 不再依赖这些状态块。
 
 ## 2. 不变量、权限与边界
 
 1. 正式领域事实仍只由服务端业务工具提交，仍经 `ReviewProtocolGuard`、状态机和领域事件写入；AG-UI 观察流只能读取运行态，不能写 Claim、Turn、Gate 或 review 阶段。
 2. 领域 SSE 与 AG-UI 运行 SSE 是两个端点、两个 cursor 和两个语义：前者可持久化回放，后者是当前 attempt 的有限运行观察回放；两者不得互相伪装。
 3. 每个 AG-UI event 必须绑定 `reviewId + attemptNo + runtimeId + agentId + role`；订阅者只能订阅本 review 当前或明确指定的 attempt，拒绝跨 review、路径、session 猜测。
-4. 不输出原始系统提示、隐藏 memory、宿主文件路径、凭据、未允许的工具结果或模型供应商错误正文；错误按现有诊断脱敏规则处理。
+4. 不输出原始系统提示、隐藏 memory 或其它角色 session。用户已明确选择本地调试模式：`/live` 的已授权工具参数和文本结果按原始值展示，不应用 `RuntimeTraceRedactor` 的脱敏/截断；模型可见文本与运行错误仍走现有处理。
 5. 取消、失败、retry 必须关闭旧 attempt 的 live run，并把旧 attempt 只读留给回放；旧 runtime event 不得投递到新 attempt。
 6. 页面必须继续在无 AG-UI live stream 时展示持久化领域事件与正式辩论结果，不能因观察功能不可用阻塞评审。
 
@@ -76,7 +76,7 @@ Judge     待命
 
 - 由 `AgentScopeReviewRuntimeAdapter` 在 Agent 创建、raw event、正常结束、错误、取消时写入。
 - 按 runtime/attempt 建立有界事件环形缓存与订阅者列表；订阅者注册、历史回放、缓冲、激活的顺序复用 `ReviewSseRegistry` 的无丢失模式，但不共享领域 sequence。
-- 事件写入只做内存操作和脱敏转换，禁止在 Reactor callback 中做数据库查询或网络调用。
+- 事件写入只做内存操作和 AG-UI 转换，禁止在 Reactor callback 中做数据库查询或网络调用。
 
 ### 3.2 AgentScope → AG-UI 转换
 
@@ -92,8 +92,9 @@ Judge     待命
 | 正常结束/异常/超迭代/取消 | `RUN_FINISHED` / `RUN_ERROR` / `CUSTOM` | 可见收束或失败原因 |
 
 - `AgentScopeModelBridge` 需要扩展模型网关响应契约以携带可选 thinking；响应没有 thinking 时不创建 reasoning event。
-- 文本、工具参数、工具结果均先经过 `RuntimeTraceRedactor`；限制单字段与单事件大小，避免大文件内容或异常栈进入浏览器。
-- Tool result 只显示概要（成功/拒绝/失败、工具名、耗时、命中/证据 ID）；完整工具结果保留在既有受控存储而非 AG-UI payload。
+- `AgentScopeModelBridge` 将供应商的可选 thinking 写入 `ThinkingBlock`；`ReviewAgUiEventMapper` 仅在真实 `AgentResultEvent` 中出现该 block 时生成 `REASONING_MESSAGE_*`。
+- 每个 Harness 都安装观察型工具中间件，拦截原生工具生命周期而不改变工具权限、入参或执行结果；其 `CUSTOM(chongming.tool-call.v1)` 同时携带完整原始参数和文本结果。
+- `RuntimeTraceRedactor` 继续处理模型可见文本和错误；本地 `/live` 的工具输入/输出明确使用原始调试载荷，不再只显示概要。
 
 ### 3.3 主持人叙事读模型
 
@@ -123,6 +124,8 @@ Judge     待命
 | `RoleSeatList.vue` | 角色状态、结论摘要、风险/证据计数、打开抽屉 |
 | `DebateTopicBoard.vue` | 按 topic 聚合的质询、答辩、立场和收束 |
 | `AgentTraceDrawer.vue` | 单角色 AG-UI 文本/推理/工具流与本地筛选 |
+| `LiveAgentConversation.vue` | `/live` 的连续 Agent 对话时间线与可展开工具详情 |
+| `services/runtime-conversation-adapter.js` | 将同一运行的 AG-UI 事件归约为思考、回答、工具和异常条目 |
 | `services/ag-ui-runtime-sse.js` | AG-UI SSE 解析、重连、cursor 与停止 |
 | `stores/runtime-trace-store.js` | event 去重、按 agent/run 聚合、角色运行状态 |
 
@@ -143,7 +146,7 @@ Judge     待命
 ### 4.2 运行期 AG-UI trace 后端 ✅
 
 1. 增加 AgentScope AG-UI 扩展依赖与 `ReviewRuntimeTraceRegistry`。
-2. 在真实 Adapter stream 旁路写 trace，完成 run/text/tool/lifecycle 映射与脱敏。
+2. 在真实 Adapter stream 旁路写 trace，完成 run/text/tool/lifecycle 映射；所有 Harness 均采集原始工具参数和文本结果。
 3. 新增 SSE controller、有限回放、心跳、连接清理与 attempt 校验。
 
 **退出条件**：Mock Harness 能使浏览器订阅收到不同角色交错的标准 AG-UI 事件；未新增第二次模型调用。
@@ -160,15 +163,15 @@ Judge     待命
 
 **实际状态**：计划创建与 Scout 降级可投影到主持叙事；角色激活、初审完成、议题、Judge 与 Gate 的真实链路尚未通过同一 review 验收。本计划不将未提交的 Director 文本或日志替代为领域叙事。
 
-### 4.4 圆桌 UI 与角色抽屉 🟡
+### 4.4 圆桌 UI、角色抽屉与 `/live` 对话 🟡
 
 1. 先替换工作台主区域为阶段轨迹、角色席位、Director 叙事和议题板。
-2. 再接入单角色 AG-UI 抽屉、自动滚动、筛选与无 live stream 的降级状态。
+2. 工作台接入单角色 AG-UI 抽屉；`/live` 则接入连续对话时间线、自动滚动、工具折叠和无 live stream 的降级状态。
 3. 保持移动端单列顺序：阶段 → 主持人 → 当前议题 → 角色席位 → 执行抽屉。
 
 **退出条件**：用户在不展开日志时能解释当前阶段、谁已立论、Director 等待谁、当前争议是什么、何时移交 Judge。
 
-**实际状态**：圆桌、角色席位和单角色 trace 抽屉已存在；默认固定在 Director，且主持区不消费角色运行文本。待补“角色启动/有新文本时的可见提醒或自动聚焦”与完整议题板，避免真实角色开始后用户仍误以为页面没有更新。
+**实际状态**：圆桌、角色席位和单角色 trace 抽屉已存在；`/live` 已替换为按 Agent/事件排序的连续对话，移除了固定 Director 的可见性问题。尚待用同一真实 review 验收 PRODUCT、辩论、Judge、Gate 与失败/取消的跨角色交错顺序。
 
 ### 4.5 验证、构建与文档 🟡
 
@@ -192,12 +195,12 @@ Judge     待命
 
 | 风险 | 对策 |
 |---|---|
-| 运行流泄露 prompt/密钥/宿主路径 | 单独 Redactor、字段白名单、大小限制、敏感回归测试；默认只展示工具概要 |
+| 本地调试页展示完整工具内容 | 当前需求明确选择不脱敏；不得把该页面或运行 SSE 当作共享/生产观测台 |
 | 原始 trace 与领域事实冲突 | 两条流分端点、分 cursor；圆桌结论只由领域事件投影 |
 | 多角色并发造成 UI 时序混乱 | agent/run 独立 ID、事件单调 trace sequence、按 topic 与 Director 叙事分别排序 |
 | 观察功能拖慢 Agent | 旁路有界内存写入；订阅者慢时丢弃非终态细节并报告截断，不反压评审执行 |
 | 模型没有 reasoning | 显式空状态，不伪造；文本、工具与状态仍可完整解释执行过程 |
-| 页面信息过载 | 默认圆桌只显示主持叙事和公开结论，角色 trace 使用抽屉按需展开 |
+| 页面信息过载 | `/live` 仅保留对话条目，工具参数/结果和已完成思考默认折叠；圆桌继续只展示领域事实 |
 
 ## 7. 文件清单
 
@@ -205,13 +208,13 @@ Judge     待命
 |---|---|
 | `pom.xml` | 引入 AgentScope AG-UI extension |
 | `review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java` | 在真实运行 stream 旁路发布 AG-UI trace |
-| `review/infrastructure/agentscope/AgentScopeModelBridge.java` | 安全映射可选 thinking，不伪造 reasoning |
-| `review/infrastructure/agentscope/RuntimeTraceRedactor.java` | 新建运行流脱敏与大小限制 |
+| `review/infrastructure/agentscope/AgentScopeModelBridge.java` | 映射供应商真实 thinking，并将所有已授权工具调用送入观察器 |
+| `review/infrastructure/agentscope/RuntimeTraceRedactor.java` | 处理模型可见文本/错误；为本地工具调试提供原始载荷转换 |
 | `review/application/ReviewRuntimeTraceRegistry.java` | 新建有界回放与实时订阅注册表 |
 | `review/api/ReviewRuntimeTraceController.java` | 新建 AG-UI SSE 端点 |
 | `frontend/src/stores/runtime-trace-store.js` | 新建运行流状态与 AG-UI reducer |
 | `frontend/src/services/ag-ui-runtime-sse.js` | 新建 AG-UI SSE 客户端 |
-| `frontend/src/components/*Roundtable*.vue` | 新建阶段、角色席位、主持人叙事、议题板、trace 抽屉 |
+| `frontend/src/components/LiveAgentConversation.vue` | 新建连续 Agent 对话页面组件 |
 | `frontend/src/views/ReviewWorkbenchView.vue` | 接入圆桌主视图与抽屉 |
 | `frontend/src/styles/review.css` | 圆桌与抽屉响应式样式 |
 | `src/test/java/.../runtime/*Tests.java` | 后端转换、隔离、脱敏、SSE 测试 |
@@ -224,14 +227,14 @@ Judge     待命
 1. 用户无需打开任何日志即可从主视图辨识当前处于初审立论、辩论还是结论收束。
 2. 每个已完成角色都能在 Director 主线中体现“结论已送达”，并能跳转到公开 Claim/证据。
 3. 所有正式 Challenge/Rebuttal/PositionChanged 都按 topic 出现在辩论板，Judge 只在允许阶段出现。
-4. 角色抽屉能实时显示该角色的 AG-UI 文本、工具和真实 reasoning（如有），不显示其它角色的私有运行内容。
+4. `/live` 能实时按发生顺序显示多个角色的 AG-UI 文本、真实 reasoning（如有）及工具原始参数/结果，不要求用户切换角色。
 5. 刷新或短暂断线后，领域圆桌完整恢复；当前 attempt 的 trace 在有界缓存范围内恢复并明确提示截断。
 6. 失败、取消和 retry 不会把旧 attempt trace 投递给新 attempt；不影响领域 SSE 和正式业务状态。
 7. 所有可见 Agent 文本均为中文，前端没有通过翻译或拼接伪造模型内容。
 
 ## 9. Handoff
 
-计划已具备直接实施条件。建议按 **4.1 → 4.2 → 4.3 → 4.4 → 4.5** 顺序执行，避免先做页面后倒推运行协议；其中 4.2 与 4.3 的契约冻结完成后，前后端可以并行。
+本计划的首轮实现已进入工作区，但尚未达到可交付状态。后续不得只根据页面或后台日志宣布完成；必须按 `AIREVIEW-PLAN-020-Live连续Agent对话流收口与验收.md` 的“缺陷修复 → 自动化验证 → 新 attempt 浏览器验收”顺序继续。旧 attempt 不含新增的原始工具载荷，不能用于验收新 UI。
 
 ## 10. 变更记录
 
@@ -241,3 +244,5 @@ Judge     待命
 | 2026-07-22 | 已落地首个观察闭环：真实 Harness stream 旁路映射 AG-UI 的 run、文本、工具与 lifecycle 事件；新增按 review/attempt 隔离的有界 SSE 回放、`Last-Event-ID` 续传、浏览器去重、运行流脱敏、圆桌主视图与角色执行抽屉。尚未实现可选 ThinkingBlock 网关映射、缓存截断提示、完整的阶段和议题读模型与端到端覆盖。 |
 | 2026-07-23 | Director 改为可在自身 attempt 工作区中读写和编辑文件；服务端将不可变需求快照复制为 `input/requirement.md` 工作副本。共享仓库快照与宿主目录仍不暴露给 Harness filesystem。 |
 | 2026-07-31 | 基于真实评审 `68c022e4-95fe-4831-aa21-6befddc9ef81` 更新运行验收状态：AG-UI SSE 已收到 Scout/Director 事件，但评审仍在 PLANNING，未出现 PRODUCT 的角色运行或领域激活事件。将“运行流已订阅”与“多角色展示已验收”明确拆开，后者继续保持待验收。 |
+| 2026-07-31 | 根据“像对话机器人而不是状态块”的要求，将 `/live` 改为连续 Agent 对话；所有 Harness 采集工具参数与文本结果，OpenAI-compatible 网关转发供应商实际的 `reasoning_content`/`reasoning`。当前本地调试选择工具内容不脱敏、不截断；真实跨角色运行仍待验收。 |
+| 2026-07-31 | 补充收口计划 `AIREVIEW-PLAN-020`：冻结本地调试下工具参数/结果原样展示的范围，记录运行时适配器定向测试的 3 个 Scout 降级原因码回归，并明确以新 attempt 完成浏览器验收。 |

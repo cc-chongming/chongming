@@ -9,6 +9,7 @@ import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.ToolResultState;
+import io.agentscope.core.message.ThinkingBlock;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,16 +58,31 @@ public class ReviewAgUiEventMapper {
         }
         if (event instanceof AgentResultEvent result) {
             String text = result.getResult() == null ? "" : redactor.redactVisibleText(result.getResult().getTextContent());
-            if (text == null || text.isBlank()) return List.of(new AguiEvent.RunFinished(threadId, runId));
             String messageId = result.getResult().getId();
             if (messageId == null || messageId.isBlank()) {
                 messageId = runId + ":result:" + event.getId();
             }
-            return List.of(
-                    new AguiEvent.TextMessageStart(threadId, runId, messageId, "assistant"),
-                    new AguiEvent.TextMessageContent(threadId, runId, messageId, text),
-                    new AguiEvent.TextMessageEnd(threadId, runId, messageId),
-                    new AguiEvent.RunFinished(threadId, runId));
+            List<AguiEvent> mapped = new java.util.ArrayList<>();
+            if (result.getResult() != null) {
+                int index = 0;
+                for (ThinkingBlock thinking : result.getResult().getContentBlocks(ThinkingBlock.class)) {
+                    String content = redactor.redactVisibleText(thinking.getThinking());
+                    if (content.isBlank()) {
+                        continue;
+                    }
+                    String thinkingId = messageId + ":thinking:" + index++;
+                    mapped.add(new AguiEvent.ReasoningMessageStart(threadId, runId, thinkingId, "assistant"));
+                    mapped.add(new AguiEvent.ReasoningMessageContent(threadId, runId, thinkingId, content));
+                    mapped.add(new AguiEvent.ReasoningMessageEnd(threadId, runId, thinkingId));
+                }
+            }
+            if (text != null && !text.isBlank()) {
+                mapped.add(new AguiEvent.TextMessageStart(threadId, runId, messageId, "assistant"));
+                mapped.add(new AguiEvent.TextMessageContent(threadId, runId, messageId, text));
+                mapped.add(new AguiEvent.TextMessageEnd(threadId, runId, messageId));
+            }
+            mapped.add(new AguiEvent.RunFinished(threadId, runId));
+            return List.copyOf(mapped);
         }
         if (event instanceof ToolCallStartEvent tool) {
             AguiEvent.ToolCallStart standard =
@@ -113,11 +129,8 @@ public class ReviewAgUiEventMapper {
             ScoutToolTraceCollector.ToolTrace trace,
             String phase,
             ToolResultState terminalState) {
-        RuntimeTraceRedactor.TracePayload input = redactor.redactToolInput(trace.input());
-        boolean successful = terminalState == null || terminalState == ToolResultState.SUCCESS;
-        RuntimeTraceRedactor.TracePayload output = successful
-                ? redactor.redactToolOutput(trace.outputText())
-                : safeFailureOutput(terminalState);
+        RuntimeTraceRedactor.TracePayload input = redactor.rawToolInput(trace.input());
+        RuntimeTraceRedactor.TracePayload output = redactor.rawToolOutput(trace.outputText());
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("schemaVersion", 1);
         value.put("phase", phase);
@@ -132,12 +145,6 @@ public class ReviewAgUiEventMapper {
         value.put("elapsedMs", terminalState == null ? null : trace.elapsedMillis());
         value.put("truncated", input.truncated() || output.truncated());
         return new AguiEvent.Custom(threadId, runId, SCOUT_TOOL_CALL_EVENT_NAME, value);
-    }
-
-    private static RuntimeTraceRedactor.TracePayload safeFailureOutput(ToolResultState state) {
-        String status = state == null ? "UNKNOWN" : state.name();
-        return new RuntimeTraceRedactor.TracePayload(
-                Map.of("errorCode", "TOOL_" + status, "summary", "工具执行未成功，详细异常已隐藏。"), false);
     }
 
     public AguiEvent.Custom lifecycle(

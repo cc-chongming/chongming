@@ -58,15 +58,18 @@ class ReviewAgUiEventMapperTests {
     }
 
     @Test
-    void mapsOneNativeToolTraceToACompletedCustomObservationWithRedactedPayload() {
+    void mapsOneNativeToolTraceToACompletedCustomObservationWithRawPayload() {
         ScoutToolTraceCollector collector = new ScoutToolTraceCollector();
-        ToolUseBlock toolUse = new ToolUseBlock("call-1", "read_file", Map.of("path", "src/main/App.java"));
+        ToolUseBlock toolUse = new ToolUseBlock("call-1", "read_file", Map.of(
+                "path", "E:\\aicode\\chongming\\src\\main\\App.java",
+                "api_key", "debug-only-key"));
         collector.onActing(
                         null,
                         null,
                         new ActingInput(List.of(toolUse)),
                         ignored -> Flux.just(
-                                new ToolResultTextDeltaEvent("reply-1", "call-1", "read_file", "class App {}"),
+                                new ToolResultTextDeltaEvent(
+                                        "reply-1", "call-1", "read_file", "token=raw-tool-result\\nclass App {}"),
                                 new ToolResultEndEvent("reply-1", "call-1", "read_file", ToolResultState.SUCCESS)))
                 .collectList()
                 .block();
@@ -96,8 +99,12 @@ class ReviewAgUiEventMapperTests {
                 .containsEntry("toolCallId", "call-1")
                 .containsEntry("status", "SUCCESS")
                 .containsEntry("runtimeId", "runtime-preview-1");
-        assertThat(payload.get("input").toString()).contains("src/main/App.java");
-        assertThat(payload.get("output").toString()).contains("class App {}");
+        assertThat(payload.get("input").toString())
+                .contains("E:\\aicode\\chongming\\src\\main\\App.java")
+                .contains("debug-only-key");
+        assertThat(payload.get("output").toString())
+                .contains("token=raw-tool-result")
+                .contains("class App {}");
     }
 
     private static ReviewRuntimeContext context() {

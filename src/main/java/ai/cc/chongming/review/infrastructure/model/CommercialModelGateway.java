@@ -88,6 +88,7 @@ public class CommercialModelGateway implements ModelGateway {
                     providerResponse.responseId(),
                     effectiveProfile.modelName(),
                     providerResponse.publicText(),
+                    providerResponse.thinkingText(),
                     providerResponse.usage(),
                     providerResponse.finishReason(),
                     Duration.between(startedAt, Instant.now()),

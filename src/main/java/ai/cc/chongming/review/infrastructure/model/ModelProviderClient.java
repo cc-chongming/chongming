@@ -50,6 +50,7 @@ public interface ModelProviderClient {
     record ProviderResponse(
             String responseId,
             String publicText,
+            String thinkingText,
             ModelGateway.Usage usage,
             ModelGateway.FinishReason finishReason,
             java.util.List<ModelGateway.ToolCall> toolCalls) {
@@ -59,6 +60,7 @@ public interface ModelProviderClient {
                 throw new IllegalArgumentException("responseId must not be blank");
             }
             publicText = publicText == null ? "" : publicText;
+            thinkingText = thinkingText == null ? "" : thinkingText;
             toolCalls = toolCalls == null ? java.util.List.of() : java.util.List.copyOf(toolCalls);
             if ((publicText == null || publicText.isBlank()) && toolCalls.isEmpty()) {
                 throw new IllegalArgumentException("publicText or toolCalls must not be empty");
@@ -69,7 +71,12 @@ public interface ModelProviderClient {
 
         public ProviderResponse(String responseId, String publicText, ModelGateway.Usage usage,
                 ModelGateway.FinishReason finishReason) {
-            this(responseId, publicText, usage, finishReason, java.util.List.of());
+            this(responseId, publicText, "", usage, finishReason, java.util.List.of());
+        }
+
+        public ProviderResponse(String responseId, String publicText, ModelGateway.Usage usage,
+                ModelGateway.FinishReason finishReason, java.util.List<ModelGateway.ToolCall> toolCalls) {
+            this(responseId, publicText, "", usage, finishReason, toolCalls);
         }
     }
 }
