@@ -40,6 +40,7 @@
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
 | Markdown 受理与评审工作台 | 已可本地联调 | `POST /api/reviews` 创建评审，工作台入口为 `/review/` |
+| 需求全生命周期平台 | 代码已落地，待运行时验收 | Dashboard、需求 CRUD/生命周期、评审/报告列表及 MySQL 5.6 的 V11 迁移分别由 `/api/dashboard`、`/api/requirements/**`、`/api/reviews`、`/api/reports` 提供 |
 | 状态机、角色权限与幂等命令 | 已实现 | 非法阶段、越权角色和重复命令由服务端拒绝或安全重放 |
 | OpenAI 兼容模型网关 | 已实现 | 支持角色模型配置、超时/退避与 Tool Call；须填入实际可用模型名 |
 | 本地仓库读取 | 已接入 Role Harness | 角色可在服务端冻结、白名单保护的仓库快照内列举、检索和读取有限行；Evidence 提交仍待接入 |
@@ -122,7 +123,7 @@ repositories:
 .\mvnw.cmd spring-boot:run
 ```
 
-浏览器打开 [http://localhost:8080/review/](http://localhost:8080/review/)。注意入口是 `/review/`，不是根路径或省略末尾斜杠后的静态资源猜测路径。
+浏览器打开 [http://localhost:8080/review/](http://localhost:8080/review/)。默认进入需求 Dashboard；旧的直接创建评审表单仍保留在 `/review/#/create`。
 
 前端源码位于 `frontend/`。修改前端后需要重新构建并提交同步后的 `src/main/resources/static/review/` 产物：
 
@@ -164,6 +165,8 @@ npm run build
 - [辩论、Judge 与 Gate](docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md)
 - [领域事件、SSE 与恢复](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
 - [人工审核、报告与通知](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
+- [需求全生命周期平台](docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md)
+- [需求平台验证记录](docs/验证记录/RequirementPlatformReport.md)
 - [开发约束](AGENTS.md)
 
 ## 开源对标

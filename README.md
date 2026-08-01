@@ -40,6 +40,7 @@ The project draws from two production-oriented open-source directions: AgentScop
 | Capability | Status | Notes |
 |---|---|---|
 | Markdown intake and review workbench | Ready for local integration | Create a review with `POST /api/reviews`; UI entry is `/review/` |
+| Requirement lifecycle platform | Implementation ready; runtime acceptance pending | Dashboard, requirement CRUD/lifecycle, review/report lists, and the V11 MySQL 5.6 migration are available under `/api/dashboard`, `/api/requirements/**`, `/api/reviews`, and `/api/reports` |
 | State machine, role authorization, idempotent commands | Implemented | Invalid stages, unauthorized roles, and replayed commands are rejected or safely replayed server-side |
 | OpenAI-compatible model gateway | Implemented | Per-role model profiles, timeouts/backoff, and Tool Calls; a real model ID is required |
 | Local repository reads | Connected to role Harness | Roles can list, search, and read bounded lines from a server-frozen, allow-listed repository snapshot; evidence submission is still pending |
@@ -122,7 +123,7 @@ If a local configuration file was committed or shared, remove its credentials an
 .\mvnw.cmd spring-boot:run
 ```
 
-Open [http://localhost:8080/review/](http://localhost:8080/review/). The workbench entry is `/review/`, not the root path.
+Open [http://localhost:8080/review/](http://localhost:8080/review/). The default page is the requirement Dashboard; the legacy direct-review form remains at `/review/#/create`.
 
 Frontend sources are in `frontend/`. After frontend changes, rebuild and commit the matching assets under `src/main/resources/static/review/`:
 
@@ -164,6 +165,8 @@ The current version is suitable for local integration, demonstrations, and proto
 - [Debate, Judge, and Gate](docs/AIREVIEW-PLAN-009-对抗辩论Judge与Gate.md)
 - [Domain events, SSE, and recovery](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
 - [Human review, reports, and notification](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
+- [Requirement lifecycle platform](docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md)
+- [Requirement platform verification record](docs/验证记录/RequirementPlatformReport.md)
 - [Development rules](AGENTS.md)
 
 ## Open-source benchmark
