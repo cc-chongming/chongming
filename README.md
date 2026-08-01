@@ -193,3 +193,4 @@ docs/                            Technical design, integration contracts, and ph
 ## Contributing
 
 Every implementation change should update its matching `AIREVIEW-PLAN-xxx`, test evidence, and `.learnings/` entry. Run tests appropriate to the change before submitting; frontend changes must also rebuild the embedded static assets. See [AGENTS.md](AGENTS.md) for the detailed rules.
+ 
