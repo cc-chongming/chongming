@@ -4,6 +4,12 @@ import ReviewWorkbenchView from '../views/ReviewWorkbenchView.vue';
 import ReviewLiveView from '../views/ReviewLiveView.vue';
 import ReviewReportView from '../views/ReviewReportView.vue';
 import ContextScoutPreviewView from '../views/ContextScoutPreviewView.vue';
+import DashboardView from '../views/DashboardView.vue';
+import RequirementListView from '../views/RequirementListView.vue';
+import RequirementCreateView from '../views/RequirementCreateView.vue';
+import RequirementDetailView from '../views/RequirementDetailView.vue';
+import ReviewListView from '../views/ReviewListView.vue';
+import ReportListView from '../views/ReportListView.vue';
 
 /**
  * [AIREVIEW-PLAN-012#1.1] Hash history keeps refreshes compatible with Spring static resource hosting.
@@ -11,12 +17,18 @@ import ContextScoutPreviewView from '../views/ContextScoutPreviewView.vue';
 export default createRouter({
     history: createWebHashHistory(),
     routes: [
-        { path: '/', redirect: '/create' },
+        { path: '/', redirect: '/dashboard' },
+        { path: '/dashboard', name: 'dashboard', component: DashboardView },
+        { path: '/requirements', name: 'requirements', component: RequirementListView },
+        { path: '/requirements/create', name: 'requirement-create', component: RequirementCreateView },
+        { path: '/requirements/:requirementId', name: 'requirement-detail', component: RequirementDetailView, props: true },
+        { path: '/reviews', name: 'reviews', component: ReviewListView },
+        { path: '/reports', name: 'reports', component: ReportListView },
         { path: '/create', name: 'review-create', component: ReviewCreateView },
         { path: '/reviews/:reviewId/live', name: 'review-live', component: ReviewLiveView, props: true },
         { path: '/reviews/:reviewId/scout', name: 'context-scout-preview', component: ContextScoutPreviewView, props: true },
         { path: '/reviews/:reviewId', name: 'review-workbench', component: ReviewWorkbenchView, props: true },
         { path: '/reviews/:reviewId/report', name: 'review-report', component: ReviewReportView, props: true },
-        { path: '/:pathMatch(.*)*', redirect: '/create' }
+        { path: '/:pathMatch(.*)*', redirect: '/dashboard' }
     ]
 });

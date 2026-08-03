@@ -72,6 +72,58 @@ async function fetchAllPlans(reviewId) {
 }
 
 export const reviewApi = {
+    getDashboard() {
+        return request('/api/dashboard');
+    },
+
+    listRequirements({ status, assignee, keyword, page = 1, size = 20 } = {}) {
+        return request(withQuery('/api/requirements', { status, assignee, keyword, page, size }));
+    },
+
+    createRequirement(draft) {
+        return request('/api/requirements', { method: 'POST', ...jsonBody(draft) });
+    },
+
+    getRequirement(requirementId) {
+        return request(`/api/requirements/${requirementId}`);
+    },
+
+    reviseRequirement(requirementId, draft) {
+        return request(`/api/requirements/${requirementId}`, { method: 'PUT', ...jsonBody(draft) });
+    },
+
+    submitRequirement(requirementId, { reviewId, expectedVersion }) {
+        return request(`/api/requirements/${requirementId}/submit`, {
+            method: 'POST', ...jsonBody({ reviewId, expectedVersion })
+        });
+    },
+
+    startRequirementDevelopment(requirementId, expectedVersion) {
+        return request(`/api/requirements/${requirementId}/start-development`, {
+            method: 'POST', ...jsonBody({ expectedVersion })
+        });
+    },
+
+    completeRequirement(requirementId, expectedVersion) {
+        return request(`/api/requirements/${requirementId}/complete`, {
+            method: 'POST', ...jsonBody({ expectedVersion })
+        });
+    },
+
+    cancelRequirement(requirementId, expectedVersion) {
+        return request(`/api/requirements/${requirementId}/cancel`, {
+            method: 'POST', ...jsonBody({ expectedVersion })
+        });
+    },
+
+    listReviews({ stage, hasReport, page = 1, size = 20 } = {}) {
+        return request(withQuery('/api/reviews', { stage, hasReport, page, size }));
+    },
+
+    listReports({ page = 1, size = 20 } = {}) {
+        return request(withQuery('/api/reports', { page, size }));
+    },
+
     createReview({ requirementFile, repositoryPath, branch, commit, submitter, forceNewAttempt = false }) {
         const form = new FormData();
         form.append('requirementFile', requirementFile);

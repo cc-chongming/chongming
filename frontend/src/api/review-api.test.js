@@ -59,3 +59,24 @@ describe('Context Scout preview API', () => {
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ userId: 'scout-preview' });
     });
 });
+
+describe('requirement platform API', () => {
+    it('uses lifecycle and dashboard endpoints with explicit version commands', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(response({ id: 'requirement-001', version: 0 }))
+            .mockResolvedValueOnce(response({ id: 'requirement-001', reviewId, version: 1 }))
+            .mockResolvedValueOnce(response({ activeReviewCount: 1 }));
+        globalThis.fetch = fetchMock;
+
+        await reviewApi.createRequirement({ title: '身份同步', description: '需求', repositoryPath: 'cx-ai', priority: 'P1' });
+        await reviewApi.submitRequirement('requirement-001', { reviewId, expectedVersion: 0 });
+        await reviewApi.getDashboard();
+
+        expect(fetchMock.mock.calls[0][0]).toBe('/api/requirements');
+        expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ title: '身份同步' });
+        expect(fetchMock.mock.calls[1][0]).toBe('/api/requirements/requirement-001/submit');
+        expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ reviewId, expectedVersion: 0 });
+        expect(fetchMock.mock.calls[2][0]).toBe('/api/dashboard');
+    });
+});
