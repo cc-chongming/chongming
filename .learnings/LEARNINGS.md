@@ -389,3 +389,111 @@ Keep durable domain SSE and bounded runtime AG-UI SSE as separate endpoints. Kee
 - Tags: ag-ui, harness, sse, observability
 
 ---
+
+## [LRN-20260801-001] architecture
+
+**Logged**: 2026-08-01T14:50:00+08:00
+**Priority**: medium
+**Status**: active
+**Area**: requirement-platform
+
+### Summary
+
+需求生命周期不能复用 `ReviewStage`：它需要独立聚合和版本锁，而跨聚合的推进只应消费已提交的评审事件。
+
+### Details
+
+`Requirement` 保存跨多次评审的业务状态；`Review` 仅描述一次评审 attempt。实现中由 `RequirementLifecycleService` 监听 `PLAN_CREATED` 与 `HUMAN_GATE_FINALIZED`，避免 Controller 直接写两个聚合。反向 `review_request.requirement_id` 通过端口写入，内存与 MyBatis 同时实现；RETURN 后允许新 review 覆盖旧链接。Dashboard 与列表只能使用跨评审的只读事件投影，不能在逐条循环中查询数据库。
+
+### Suggested Action
+
+新增需求关联能力时，优先扩展读模型或显式端口，保持评审到需求为单向事件流。运行 MySQL 5.6 迁移验证时，确认字符串化 JSON 继续使用 `LONGTEXT`/`MEDIUMTEXT`，禁止引入 JSON 列。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 implementation
+- Related Files: src/main/java/ai/cc/chongming/review/domain/model/Requirement.java, src/main/java/ai/cc/chongming/review/application/RequirementLifecycleService.java, docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md
+- Tags: requirement, lifecycle, event-driven, projection, mysql56
+
+---
+
+## [LRN-20260801-002] correction
+
+**Logged**: 2026-08-01T15:30:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: requirement-platform
+
+### Summary
+
+输入受理幂等、需求—评审关联和平台分页必须作为同一个可验证契约设计；不能把“返回既有评审”误当成新需求可以复用的评审，也不能先截断固定窗口再对外宣称分页。
+
+### Details
+
+`ReviewIntakeService` 的 `forceNewAttempt` 语义是同一 review root 的新 attempt，而不是新 `reviewId`。因此需求创建页必须识别 `reused=true` 并停止绑定；写入 `review_request.requirement_id` 要原子限制为 PENDING 且未绑定/同绑定，避免覆盖既有业务关系。平台列表和报告列表则必须从持久化投影获得 COUNT、筛选和 LIMIT/OFFSET；进程内报告或“最近 500 条”只能作为短期显示窗口，不能冒充完整 API 契约。
+
+### Suggested Action
+
+在 REQLIFE-H1/H2/M1/M2 完成并有 MySQL、重启、501+ 数据样本证据之前，计划、README 和验证记录均使用“实现基线/待验收”，不得标记平台发布完成。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 code review
+- Related Files: docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md, docs/验证记录/RequirementPlatformReport.md
+- Tags: idempotency, aggregate-link, pagination, persistence, verification
+
+---
+
+## [LRN-20260801-003] testing
+
+**Logged**: 2026-08-01T16:30:00+08:00
+**Priority**: medium
+**Status**: active
+**Area**: requirement-platform
+
+### Summary
+
+跨评审平台能力必须把内存、MyBatis 和运行时证据分层记录：内存回归能证明领域契约，不能替代 MySQL 5.6 的事务、Flyway 与执行计划证据。
+
+### Details
+
+REQLIFE-H1 用“先验证需求、再原子保留评审绑定”的顺序，保证绑定失败不会把需求从草稿改为待评审；H2 的 501 条回归只证明读模型没有固定 500 条截断。报告持久化的 Mapper 替身测试可以验证重读映射，但无法替代真实进程重启和 MySQL SQL 执行。全量 Maven 225 项通过，Docker 不可用的 6 项 Testcontainers 测试必须保留为跳过，不得转换为数据库验收通过。
+
+### Suggested Action
+
+后续环境验收按 MySQL 迁移、H1 并发/复用、H2 分页和 M1 重启读取、M2 EXPLAIN、浏览器闭环的顺序执行；将命令、样本量和结果补入验证记录后，才更新 PLAN-021 为完成。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 closeout
+- Related Files: src/main/java/ai/cc/chongming/review/application/RequirementCommandService.java, src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java, docs/验证记录/RequirementPlatformReport.md
+- Tags: mysql56, testcontainers, paging, transaction, verification
+
+---
+
+## [LRN-20260801-004] handoff
+
+**Logged**: 2026-08-01T18:00:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: requirement-platform
+
+### Summary
+
+验收计划不能只罗列外部环境待办：一旦代码审查发现未关闭的并发一致性、投影载荷或排序契约问题，必须先把它们升格为代码收口门禁，并使历史测试结果失效为“仅基线”。
+
+### Details
+
+REQLIFE-H3 要求需求状态变更与反向评审绑定同处于需求聚合临界区，否则内存双并发路径会留下孤儿关联。REQLIFE-H4 要求跨评审列表只读取报告元数据，避免在分页列表中搬运正文。REQLIFE-M3 要求内存排序显式对齐 SQL 的同时间次序。三项修复都必须在 MySQL、性能和浏览器验收之前完成，且不能把旧的全量测试数字描述成修改后的验收结果。
+
+### Suggested Action
+
+交接时提供有顺序、修改边界、完成判据和禁止事项的控制卡；后续先运行最小相关测试，再跑当前工作树全量回归，最后才接外部环境验证。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 handoff review
+- Related Files: docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md, docs/验证记录/RequirementPlatformReport.md
+- Tags: handoff, code-review, concurrency, projection, deterministic-order
+
+---

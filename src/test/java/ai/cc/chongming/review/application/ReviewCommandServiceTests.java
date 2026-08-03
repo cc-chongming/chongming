@@ -16,9 +16,12 @@ import ai.cc.chongming.review.domain.model.RepositorySnapshot;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
+import ai.cc.chongming.review.domain.repository.ReviewStartReservationStore;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.event.InMemoryReviewEventStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
+import ai.cc.chongming.review.infrastructure.persistence.repository.MyBatisReviewStartReservationStore;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPersistenceMapper;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +30,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import reactor.core.publisher.Mono;
 
 /**
@@ -69,6 +73,83 @@ class ReviewCommandServiceTests {
         assertThat(replayed.replayed()).isTrue();
         assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
         verify(orchestrationService, timeout(1_000)).start(any());
+    }
+
+    @Test
+    void reservesThePersistedPendingRootBeforeChangingTheInMemoryAggregate() {
+        ReviewStartReservationStore reservationStore = mock(ReviewStartReservationStore.class);
+        when(reservationStore.claimStartFromPending(reviewId, 0L, 1, 3L)).thenReturn(false);
+        commandService = new ReviewCommandService(
+                reviewRegistry,
+                new ReviewLifecycleService(new InMemoryReviewDebateStore(), stateMachine, eventService),
+                orchestrationService,
+                stateMachine,
+                eventService,
+                new ai.cc.chongming.review.config.ReviewDiagnosticsProperties(false),
+                null,
+                null,
+                reservationStore);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> commandService.start(reviewId, startCommand(0L, "start-cas-001")))
+                .isInstanceOf(ai.cc.chongming.review.domain.exception.ReviewDomainException.class)
+                .hasMessageContaining("current persisted PENDING");
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.PENDING);
+        assertThat(review.version()).isZero();
+        verify(orchestrationService, never()).start(any());
+    }
+
+    @Test
+    void writesThePlanningCasWithTheVersionProducedByTheStartCommand() {
+        ReviewStartReservationStore reservationStore = mock(ReviewStartReservationStore.class);
+        when(reservationStore.claimStartFromPending(reviewId, 0L, 1, 3L)).thenReturn(true);
+        when(orchestrationService.start(any())).thenReturn(Mono.never());
+        commandService = new ReviewCommandService(
+                reviewRegistry,
+                new ReviewLifecycleService(new InMemoryReviewDebateStore(), stateMachine, eventService),
+                orchestrationService,
+                stateMachine,
+                eventService,
+                new ai.cc.chongming.review.config.ReviewDiagnosticsProperties(false),
+                null,
+                null,
+                reservationStore);
+
+        commandService.start(reviewId, startCommand(0L, "start-cas-002"));
+
+        verify(reservationStore).claimStartFromPending(reviewId, 0L, 1, 3L);
+    }
+
+    @Test
+    void springWiringInjectsThePersistentStartReservationInsteadOfTheNoop() {
+        ReviewPersistenceMapper mapper = mock(ReviewPersistenceMapper.class);
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
+        when(mapper.claimStartFromPending(reviewId.value().toString(), 0L, 1, 3L)).thenReturn(1);
+        when(orchestrationService.start(any())).thenReturn(Mono.never());
+        when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
+        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+                .thenReturn(Optional.of(repositorySnapshot()));
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(ai.cc.chongming.review.domain.repository.ReviewRegistry.class, () -> reviewRegistry);
+            context.registerBean(ReviewLifecycleService.class,
+                    () -> new ReviewLifecycleService(new InMemoryReviewDebateStore(), stateMachine, eventService));
+            context.registerBean(ReviewOrchestrationService.class, () -> orchestrationService);
+            context.registerBean(ReviewStateMachine.class, () -> stateMachine);
+            context.registerBean(ReviewEventPublisher.class, () -> eventService);
+            context.registerBean(ai.cc.chongming.review.config.ReviewDiagnosticsProperties.class,
+                    () -> new ai.cc.chongming.review.config.ReviewDiagnosticsProperties(false));
+            context.registerBean(ReviewIntakeService.class, () -> intakeService);
+            context.registerBean(RepositorySnapshotService.class, () -> snapshotService);
+            context.registerBean(ReviewStartReservationStore.class,
+                    () -> new MyBatisReviewStartReservationStore(mapper));
+            context.registerBean(ReviewCommandService.class);
+            context.refresh();
+
+            context.getBean(ReviewCommandService.class).start(reviewId, startCommand(0L, "start-wiring-001"));
+        }
+
+        verify(mapper).claimStartFromPending(reviewId.value().toString(), 0L, 1, 3L);
     }
 
     @Test

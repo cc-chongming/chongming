@@ -86,7 +86,8 @@ class ReviewReportServiceTests {
         assertEquals(2, service.findVersions(reviewId).size());
         try (java.io.InputStream input = java.util.Objects.requireNonNull(
                 getClass().getResourceAsStream("/golden/review-report.md"))) {
-            assertEquals(new String(input.readAllBytes(), StandardCharsets.UTF_8), first.markdown());
+            assertEquals(normalizeNewlines(new String(input.readAllBytes(), StandardCharsets.UTF_8)),
+                    normalizeNewlines(first.markdown()));
         }
     }
 
@@ -99,5 +100,9 @@ class ReviewReportServiceTests {
         service.onCommitted(event);
 
         assertTrue(reportStore.findLatest(reviewId).isPresent());
+    }
+
+    private String normalizeNewlines(String value) {
+        return value.replace("\r\n", "\n");
     }
 }

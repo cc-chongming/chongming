@@ -3,6 +3,9 @@ package ai.cc.chongming.review.infrastructure.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.mysql.cj.jdbc.MysqlDataSource;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewReportMapper;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPlatformProjectionMapper;
+import java.time.LocalDateTime;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -12,6 +15,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.flywaydb.core.Flyway;
+import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSession;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -59,6 +68,7 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "review_event",
                     "notification_outbox",
                     "review_report",
+                    "requirement",
                     "chongming_agentscope_state",
                     "chongming_agentscope_workspace");
             Map<String, String> expectedLongTextColumns = Map.of(
@@ -75,6 +85,12 @@ class ReviewPersistenceMigrationIntegrationTests {
             }
             assertThat(readColumnSize(connection.getMetaData(), connection.getCatalog(), "role_activation", "session_id"))
                     .isEqualTo(255);
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "requirement", "description_md"))
+                    .isEqualTo("MEDIUMTEXT");
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "review_request", "requirement_id"))
+                    .isEqualTo("CHAR");
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_event", "idx_review_event_occurred_at"))
+                    .containsExactly("OCCURRED_AT");
         }
     }
 
@@ -122,12 +138,97 @@ class ReviewPersistenceMigrationIntegrationTests {
         }
     }
 
+    @Test
+    void mapsAllPersistentReportReadsThroughTheActualMybatisMapper() throws SQLException {
+        MysqlDataSource dataSource = dataSource(MYSQL);
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        String reviewId = java.util.UUID.randomUUID().toString();
+        String reportId = java.util.UUID.randomUUID().toString();
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO review_request "
+                    + "(review_id, request_id, submitter_id, stage, input_idempotency_key, current_attempt_no, version) VALUES ('"
+                    + reviewId + "', 'request-" + reviewId + "', 'reviewer', 'COMPLETED', 'idempotency-" + reviewId
+                    + "', 1, 0)");
+        }
+        SqlSessionFactory sessionFactory = reportMapperSessionFactory(dataSource);
+        try (SqlSession session = sessionFactory.openSession(true)) {
+            ReviewReportMapper mapper = session.getMapper(ReviewReportMapper.class);
+            mapper.insert(new ReviewReportMapper.ReportRow(
+                    reportId, reviewId, 1, 1L, 1L, "a".repeat(64), "{\"summary\":\"mapped\"}",
+                    "# mapped", LocalDateTime.of(2026, 8, 1, 16, 0)));
+
+            assertThat(mapper.findLatest(reviewId)).extracting(ReviewReportMapper.ReportRow::attemptNo).isEqualTo(1);
+            assertThat(mapper.findVersion(reviewId, 1L)).extracting(ReviewReportMapper.ReportRow::attemptNo).isEqualTo(1);
+            assertThat(mapper.findVersions(reviewId)).singleElement()
+                    .extracting(ReviewReportMapper.ReportRow::attemptNo).isEqualTo(1);
+            assertThat(mapper.findLatestAcrossReviews(10)).anySatisfy(report -> {
+                assertThat(report.reportId()).isEqualTo(reportId);
+                assertThat(report.attemptNo()).isEqualTo(1);
+            });
+            assertThat(mapper.findLatestMetadataPage(0L, 10)).anySatisfy(report -> {
+                assertThat(report.reviewId()).isEqualTo(reviewId);
+                assertThat(report.reportVersion()).isEqualTo(1L);
+            });
+            assertThat(mapper.countLatestMetadata()).isGreaterThanOrEqualTo(1L);
+        }
+    }
+
+    @Test
+    void projectsAReviewRootBeforeItHasAnyRuntimeEvent() throws SQLException {
+        MysqlDataSource dataSource = dataSource(MYSQL);
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        String reviewId = java.util.UUID.randomUUID().toString();
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO review_request "
+                    + "(review_id, request_id, submitter_id, stage, input_idempotency_key, current_attempt_no, version) VALUES ('"
+                    + reviewId + "', 'request-" + reviewId + "', 'reviewer', 'PENDING', 'idempotency-" + reviewId
+                    + "', 1, 0)");
+        }
+        try (SqlSession session = platformProjectionSessionFactory(dataSource).openSession()) {
+            ReviewPlatformProjectionMapper mapper = session.getMapper(ReviewPlatformProjectionMapper.class);
+            assertThat(mapper.findReviewPage("PENDING", false, null, 0L, 10))
+                    .anySatisfy(row -> {
+                        assertThat(row.reviewId()).isEqualTo(reviewId);
+                        assertThat(row.stage()).isEqualTo("PENDING");
+                        assertThat(row.eventId()).isNull();
+                    });
+            assertThat(mapper.countReviewPage("PENDING", false, null)).isGreaterThanOrEqualTo(1L);
+        }
+    }
+
+    private Set<String> readIndexColumns(DatabaseMetaData metadata, String catalog, String tableName, String indexName)
+            throws SQLException {
+        Set<String> columns = new java.util.TreeSet<>();
+        try (ResultSet resultSet = metadata.getIndexInfo(catalog, null, tableName, false, false)) {
+            while (resultSet.next()) {
+                if (indexName.equalsIgnoreCase(resultSet.getString("INDEX_NAME"))) {
+                    columns.add(resultSet.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
+                }
+            }
+        }
+        return columns;
+    }
+
     private MysqlDataSource dataSource(MySQLContainer<?> mysql) {
         MysqlDataSource dataSource = new MysqlDataSource();
         dataSource.setUrl(mysql.getJdbcUrl());
         dataSource.setUser(mysql.getUsername());
         dataSource.setPassword(mysql.getPassword());
         return dataSource;
+    }
+
+    private SqlSessionFactory reportMapperSessionFactory(MysqlDataSource dataSource) {
+        Environment environment = new Environment("report-mapper", new JdbcTransactionFactory(), dataSource);
+        Configuration configuration = new Configuration(environment);
+        configuration.addMapper(ReviewReportMapper.class);
+        return new SqlSessionFactoryBuilder().build(configuration);
+    }
+
+    private SqlSessionFactory platformProjectionSessionFactory(MysqlDataSource dataSource) {
+        Environment environment = new Environment("platform-projection", new JdbcTransactionFactory(), dataSource);
+        Configuration configuration = new Configuration(environment);
+        configuration.addMapper(ReviewPlatformProjectionMapper.class);
+        return new SqlSessionFactoryBuilder().build(configuration);
     }
 
     private Map<String, String> serializedPayloadColumns() {

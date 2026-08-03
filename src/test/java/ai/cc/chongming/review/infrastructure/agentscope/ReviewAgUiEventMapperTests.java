@@ -176,7 +176,10 @@ class ReviewAgUiEventMapperTests {
         assertThat(payload)
                 .containsEntry("phase", "failed")
                 .containsEntry("status", "ERROR");
-        assertThat(payload.get("output")).isEqualTo("plan storage unavailable");
+        assertThat(payload.get("output"))
+                .isInstanceOf(Map.class)
+                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                .containsEntry("text", "plan storage unavailable");
     }
 
     private static ReviewRuntimeContext context() {

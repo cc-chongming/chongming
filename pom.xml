@@ -158,6 +158,56 @@
 							<goal>report</goal>
 						</goals>
 					</execution>
+					<execution>
+						<id>check-plan-021-production-coverage</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+						<configuration>
+							<rules>
+								<rule>
+									<element>BUNDLE</element>
+									<includes>
+										<include>ai/cc/chongming/review/api/DashboardController</include>
+										<include>ai/cc/chongming/review/api/RequirementCommandController</include>
+										<include>ai/cc/chongming/review/api/RequirementExceptionHandler</include>
+										<include>ai/cc/chongming/review/api/RequirementQueryController</include>
+										<include>ai/cc/chongming/review/api/ReviewListController</include>
+										<include>ai/cc/chongming/review/application/DashboardQueryService</include>
+										<include>ai/cc/chongming/review/application/RequirementCommandService</include>
+										<include>ai/cc/chongming/review/application/RequirementLifecycleService</include>
+										<include>ai/cc/chongming/review/application/RequirementQueryService</include>
+										<include>ai/cc/chongming/review/application/ReviewListQueryService</include>
+										<include>ai/cc/chongming/review/domain/exception/RequirementDomainException</include>
+										<include>ai/cc/chongming/review/domain/exception/RequirementErrorCode</include>
+										<include>ai/cc/chongming/review/domain/model/Requirement</include>
+										<include>ai/cc/chongming/review/domain/model/RequirementTypes*</include>
+										<include>ai/cc/chongming/review/domain/protocol/RequirementLifecycleStateMachine</include>
+										<include>ai/cc/chongming/review/domain/repository/RequirementRepository*</include>
+										<include>ai/cc/chongming/review/domain/repository/ReviewPlatformProjectionStore*</include>
+										<include>ai/cc/chongming/review/domain/repository/ReviewStartReservationStore*</include>
+										<include>ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisRequirementRepository</include>
+										<include>ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewPlatformProjectionStore*</include>
+										<include>ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewReportStore</include>
+										<include>ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewRequirementLinkStore</include>
+										<include>ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewStartReservationStore</include>
+										<include>ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewStateProjectionListener</include>
+										<include>ai/cc/chongming/review/infrastructure/review/InMemoryRequirementRepository</include>
+										<include>ai/cc/chongming/review/infrastructure/review/InMemoryReviewPlatformProjectionStore</include>
+										<include>ai/cc/chongming/review/infrastructure/review/InMemoryReviewRequirementLinkStore</include>
+									</includes>
+									<limits>
+										<limit>
+											<counter>INSTRUCTION</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.80</minimum>
+										</limit>
+									</limits>
+								</rule>
+							</rules>
+						</configuration>
+					</execution>
 				</executions>
 			</plugin>
 			<plugin>

@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Instant;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -117,6 +118,21 @@ class ReviewEventStoreIntegrationTests {
                 reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, 2).orElseThrow());
     }
 
+    @Test
+    void projectsRecentAndLatestFactsAcrossIndependentReviews() {
+        InMemoryReviewEventStore store = new InMemoryReviewEventStore();
+        ReviewId firstReview = new ReviewId(UUID.randomUUID());
+        ReviewId secondReview = new ReviewId(UUID.randomUUID());
+        Instant baseline = Instant.parse("2026-08-01T08:00:00Z");
+        ReviewEvent firstInitial = store.append(draft(firstReview, 1, "first-initial", baseline));
+        ReviewEvent secondLatest = store.append(draft(secondReview, 1, "second-latest", baseline.plusSeconds(1)));
+        ReviewEvent firstLatest = store.append(draft(firstReview, 1, "first-latest", baseline.plusSeconds(2)));
+
+        assertTrue(store.findLatestAcrossReviews(10).containsAll(List.of(firstLatest, secondLatest)));
+        assertTrue(store.findRecentAcrossReviews(2).containsAll(List.of(firstLatest, secondLatest)));
+        assertTrue(store.findRecentAcrossReviews(10).contains(firstInitial));
+    }
+
     private ReviewEvent get(Future<ReviewEvent> future) {
         try {
             return future.get();
@@ -126,10 +142,19 @@ class ReviewEventStoreIntegrationTests {
     }
 
     private ReviewEventDraft draft(ReviewId reviewId, int attemptNo, String value) {
-        return draft(reviewId, attemptNo, ReviewEventType.PLAN_CREATED, value);
+        return draft(reviewId, attemptNo, ReviewEventType.PLAN_CREATED, value, null);
     }
 
     private ReviewEventDraft draft(ReviewId reviewId, int attemptNo, ReviewEventType type, String value) {
+        return draft(reviewId, attemptNo, type, value, null);
+    }
+
+    private ReviewEventDraft draft(ReviewId reviewId, int attemptNo, String value, Instant occurredAt) {
+        return draft(reviewId, attemptNo, ReviewEventType.PLAN_CREATED, value, occurredAt);
+    }
+
+    private ReviewEventDraft draft(
+            ReviewId reviewId, int attemptNo, ReviewEventType type, String value, Instant occurredAt) {
         return new ReviewEventDraft(
                 reviewId,
                 attemptNo,
@@ -142,7 +167,7 @@ class ReviewEventStoreIntegrationTests {
                 null,
                 1,
                 20,
-                null,
+                occurredAt,
                 1,
                 Map.of("value", value));
     }
