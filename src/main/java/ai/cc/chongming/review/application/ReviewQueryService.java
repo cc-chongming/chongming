@@ -95,7 +95,8 @@ public class ReviewQueryService {
                 reviewVersion,
                 event == null ? null : format(event.occurredAt()),
                 gateView,
-                contextScout));
+                contextScout,
+                review == null ? List.of() : review.roleActivations().stream().map(this::toRoleActivationView).toList()));
     }
 
     /**
@@ -261,6 +262,11 @@ public class ReviewQueryService {
                         "Context Scout 未能完成项目上下文预处理，Director 将继续评审。"),
                 format(event.occurredAt()));
     }
+
+    private RoleActivationView toRoleActivationView(ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation activation) {
+        return new RoleActivationView(
+                activation.roleType().name(), activation.agentLabel(), activation.initialReviewCompleted());
+    }
     private EvidenceView toEvidenceView(EvidenceBlock evidence) {
         return new EvidenceView(
                 evidence.evidenceId().value(),
@@ -296,7 +302,34 @@ public class ReviewQueryService {
             Long reviewVersion,
             String occurredAt,
             GateView gate,
-            ContextScoutView contextScout) {
+            ContextScoutView contextScout,
+            List<RoleActivationView> activatedRoles) {
+        public ReviewSummary {
+            activatedRoles = List.copyOf(activatedRoles);
+        }
+
+        public ReviewSummary(
+                UUID reviewId,
+                Integer attempt,
+                String stage,
+                Integer progress,
+                long lastSequence,
+                Long reviewVersion,
+                String occurredAt,
+                GateView gate,
+                ContextScoutView contextScout) {
+            this(
+                    reviewId,
+                    attempt,
+                    stage,
+                    progress,
+                    lastSequence,
+                    reviewVersion,
+                    occurredAt,
+                    gate,
+                    contextScout,
+                    List.of());
+        }
     }
 
     /**
@@ -398,6 +431,12 @@ public class ReviewQueryService {
      * @author wangli
      */
     public record ContextScoutView(String status, String reasonCode, String publicSummary, String occurredAt) {
+    }
+
+    /**
+     * @author zyj
+     */
+    public record RoleActivationView(String role, String agentLabel, boolean initialReviewCompleted) {
     }
 
     /**

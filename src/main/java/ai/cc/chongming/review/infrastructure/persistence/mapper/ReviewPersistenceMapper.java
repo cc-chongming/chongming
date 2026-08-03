@@ -37,6 +37,32 @@ public interface ReviewPersistenceMapper {
             """)
     int updateReview(@Param("review") ReviewRow row, @Param("expectedVersion") long expectedVersion);
 
+    @Update("UPDATE review_request SET stage = 'PLANNING', current_attempt_no = #{attemptNo}, version = #{nextVersion} "
+            + "WHERE review_id = #{reviewId} AND stage = 'PENDING' AND version = #{expectedVersion}")
+    int claimStartFromPending(
+            @Param("reviewId") String reviewId,
+            @Param("expectedVersion") long expectedVersion,
+            @Param("attemptNo") int attemptNo,
+            @Param("nextVersion") long nextVersion);
+
+    @Update("UPDATE review_request SET stage = #{stage}, current_attempt_no = #{attemptNo}, version = #{version} "
+            + "WHERE review_id = #{reviewId} AND (current_attempt_no < #{attemptNo} "
+            + "OR (current_attempt_no = #{attemptNo} AND version <= #{version}))")
+    int synchronizeReviewRoot(
+            @Param("reviewId") String reviewId,
+            @Param("stage") String stage,
+            @Param("attemptNo") int attemptNo,
+            @Param("version") long version);
+
+    @Select("SELECT review_id AS reviewId, stage, requirement_id AS requirementId FROM review_request "
+            + "WHERE review_id = #{reviewId} FOR UPDATE")
+    ReviewRequirementBindingRow lockReviewRequirementBinding(@Param("reviewId") String reviewId);
+
+    @Update("UPDATE review_request SET requirement_id = #{requirementId} WHERE review_id = #{reviewId} "
+            + "AND stage = 'PENDING' AND requirement_id IS NULL")
+    int linkPendingUnboundReviewToRequirement(
+            @Param("requirementId") String requirementId, @Param("reviewId") String reviewId);
+
     @Select("""
             SELECT activation_id AS activationId, review_id AS reviewId, attempt_no AS attemptNo,
                    role_code AS roleCode, agent_name AS agentName, status
@@ -221,6 +247,35 @@ public interface ReviewPersistenceMapper {
             @Param("eventType") String eventType,
             @Param("attemptNo") int attemptNo);
 
+    @Select("""
+            SELECT event_id AS eventId, review_id AS reviewId, attempt_no AS attemptNo,
+                   event_sequence AS sequence, event_type AS eventType, event_category AS eventCategory,
+                   stage, actor_role AS actorRole, target_role AS targetRole, topic_id AS topicId,
+                   claim_id AS claimId, turn_id AS turnId, debate_round AS round, progress,
+                   payload_version AS payloadVersion, payload_json AS payloadJson, occurred_at AS occurredAt
+            FROM review_event
+            ORDER BY occurred_at DESC, review_id DESC, event_sequence DESC
+            LIMIT #{limit}
+            """)
+    List<ReviewEventRow> findRecentReviewEvents(@Param("limit") int limit);
+
+    @Select("""
+            SELECT event.event_id AS eventId, event.review_id AS reviewId, event.attempt_no AS attemptNo,
+                   event.event_sequence AS sequence, event.event_type AS eventType, event.event_category AS eventCategory,
+                   event.stage, event.actor_role AS actorRole, event.target_role AS targetRole, event.topic_id AS topicId,
+                   event.claim_id AS claimId, event.turn_id AS turnId, event.debate_round AS round, event.progress,
+                   event.payload_version AS payloadVersion, event.payload_json AS payloadJson, event.occurred_at AS occurredAt
+            FROM review_event event
+            INNER JOIN (
+                SELECT review_id, MAX(event_sequence) AS latest_sequence
+                FROM review_event
+                GROUP BY review_id
+            ) latest ON latest.review_id = event.review_id AND latest.latest_sequence = event.event_sequence
+            ORDER BY event.occurred_at DESC, event.review_id DESC
+            LIMIT #{limit}
+            """)
+    List<ReviewEventRow> findLatestReviewEvents(@Param("limit") int limit);
+
     /**
      * [AIREVIEW-PLAN-010#1.2] Row for the complete, append-only event envelope.
      *
@@ -255,6 +310,14 @@ public interface ReviewPersistenceMapper {
      * @author wangli
      */
     record ReviewRow(String reviewId, String stage, int attemptNo, long version) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-021#2][REQLIFE-H1] Locked reverse-link state for an atomic requirement reservation.
+     *
+     * @author zyj
+     */
+    record ReviewRequirementBindingRow(String reviewId, String stage, String requirementId) {
     }
 
     /**

@@ -30,4 +30,15 @@ public interface ReviewEventStore {
      * Returns the newest fact of one type for one review attempt.
      */
     Optional<ReviewEvent> findLatestByTypeAndAttempt(ReviewId reviewId, ReviewEventType eventType, int attemptNo);
+
+    /**
+     * Returns recent review facts across reviews for platform-level read models.
+     * The per-review replay contract remains unchanged.
+     */
+    List<ReviewEvent> findRecentAcrossReviews(int limit);
+
+    /**
+     * Returns at most one latest fact per review for review list and dashboard projections.
+     */
+    List<ReviewEvent> findLatestAcrossReviews(int limit);
 }

@@ -6,6 +6,7 @@ import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import org.springframework.stereotype.Repository;
 
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,5 +28,10 @@ public class InMemoryReviewRegistry implements ReviewRegistry {
     @Override
     public Optional<Review> find(ReviewId reviewId) {
         return Optional.ofNullable(reviews.get(reviewId));
+    }
+
+    @Override
+    public List<Review> findAll() {
+        return List.copyOf(reviews.values());
     }
 }

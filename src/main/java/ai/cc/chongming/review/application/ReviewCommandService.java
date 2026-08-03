@@ -13,6 +13,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import ai.cc.chongming.review.domain.repository.ReviewStartReservationStore;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.concurrent.CancellationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -49,6 +51,7 @@ public class ReviewCommandService {
     private final ReviewDiagnosticsProperties diagnosticsProperties;
     private final ReviewIntakeService intakeService;
     private final RepositorySnapshotService snapshotService;
+    private final ReviewStartReservationStore startReservationStore;
 
     public ReviewCommandService(
             ReviewRegistry reviewRegistry,
@@ -57,7 +60,20 @@ public class ReviewCommandService {
             ReviewStateMachine stateMachine,
             ReviewEventPublisher eventPublisher) {
         this(reviewRegistry, lifecycleService, orchestrationService, stateMachine, eventPublisher,
-                new ReviewDiagnosticsProperties(false), null, null);
+                new ReviewDiagnosticsProperties(false), null, null, ReviewStartReservationStore.noop());
+    }
+
+    public ReviewCommandService(
+            ReviewRegistry reviewRegistry,
+            ReviewLifecycleService lifecycleService,
+            ReviewOrchestrationService orchestrationService,
+            ReviewStateMachine stateMachine,
+            ReviewEventPublisher eventPublisher,
+            ReviewDiagnosticsProperties diagnosticsProperties,
+            ReviewIntakeService intakeService,
+            RepositorySnapshotService snapshotService) {
+        this(reviewRegistry, lifecycleService, orchestrationService, stateMachine, eventPublisher,
+                diagnosticsProperties, intakeService, snapshotService, ReviewStartReservationStore.noop());
     }
 
     @Autowired
@@ -69,7 +85,23 @@ public class ReviewCommandService {
             ReviewEventPublisher eventPublisher,
             ReviewDiagnosticsProperties diagnosticsProperties,
             ReviewIntakeService intakeService,
-            RepositorySnapshotService snapshotService) {
+            RepositorySnapshotService snapshotService,
+            ObjectProvider<ReviewStartReservationStore> startReservationStoreProvider) {
+        this(reviewRegistry, lifecycleService, orchestrationService, stateMachine, eventPublisher,
+                diagnosticsProperties, intakeService, snapshotService,
+                startReservationStoreProvider.getIfAvailable(ReviewStartReservationStore::noop));
+    }
+
+    ReviewCommandService(
+            ReviewRegistry reviewRegistry,
+            ReviewLifecycleService lifecycleService,
+            ReviewOrchestrationService orchestrationService,
+            ReviewStateMachine stateMachine,
+            ReviewEventPublisher eventPublisher,
+            ReviewDiagnosticsProperties diagnosticsProperties,
+            ReviewIntakeService intakeService,
+            RepositorySnapshotService snapshotService,
+            ReviewStartReservationStore startReservationStore) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.lifecycleService = Objects.requireNonNull(lifecycleService, "lifecycleService must not be null");
         this.orchestrationService = Objects.requireNonNull(orchestrationService, "orchestrationService must not be null");
@@ -78,6 +110,7 @@ public class ReviewCommandService {
         this.diagnosticsProperties = Objects.requireNonNull(diagnosticsProperties, "diagnosticsProperties must not be null");
         this.intakeService = intakeService;
         this.snapshotService = snapshotService;
+        this.startReservationStore = Objects.requireNonNull(startReservationStore, "startReservationStore must not be null");
     }
 
     /**
@@ -98,6 +131,12 @@ public class ReviewCommandService {
             if (review.stage() != ReviewStage.PENDING) {
                 throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                         "a review can start only from PENDING");
+            }
+            long nextVersion = Math.addExact(review.version(), 3L);
+            if (!startReservationStore.claimStartFromPending(
+                    review.id(), review.version(), review.attemptNo(), nextVersion)) {
+                throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                        "a review can start only from the current persisted PENDING state");
             }
             review.recordCommand(new ReviewCommandMetadata(reviewId, command.expectedVersion(), idempotencyKey),
                     "start-attempt-" + review.attemptNo());

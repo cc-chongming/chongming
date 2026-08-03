@@ -99,6 +99,20 @@ public class MyBatisReviewEventStore implements ReviewEventStore {
                 reviewId.value().toString(), eventType.name(), attemptNo)).map(this::toEvent);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReviewEvent> findRecentAcrossReviews(int limit) {
+        validateCrossReviewLimit(limit);
+        return mapper.findRecentReviewEvents(limit).stream().map(this::toEvent).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReviewEvent> findLatestAcrossReviews(int limit) {
+        validateCrossReviewLimit(limit);
+        return mapper.findLatestReviewEvents(limit).stream().map(this::toEvent).toList();
+    }
+
     private ReviewPersistenceMapper.ReviewEventRow toRow(ReviewEvent event) {
         return new ReviewPersistenceMapper.ReviewEventRow(
                 event.eventId().toString(),
@@ -146,6 +160,12 @@ public class MyBatisReviewEventStore implements ReviewEventStore {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
         if (afterSequence < 0 || limit < 1 || limit > 10_000) {
             throw new IllegalArgumentException("invalid event replay cursor or limit");
+        }
+    }
+
+    private void validateCrossReviewLimit(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("cross-review event limit must be positive");
         }
     }
 

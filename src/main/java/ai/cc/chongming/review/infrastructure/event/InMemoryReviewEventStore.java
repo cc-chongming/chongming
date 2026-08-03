@@ -108,4 +108,50 @@ public class InMemoryReviewEventStore implements ReviewEventStore {
             return Optional.empty();
         }
     }
+
+    @Override
+    public List<ReviewEvent> findRecentAcrossReviews(int limit) {
+        validateCrossReviewLimit(limit);
+        return eventsByReview.values().stream()
+                .flatMap(events -> snapshot(events).stream())
+                .sorted(recentFirst())
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public List<ReviewEvent> findLatestAcrossReviews(int limit) {
+        validateCrossReviewLimit(limit);
+        return eventsByReview.values().stream()
+                .map(this::latest)
+                .flatMap(Optional::stream)
+                .sorted(recentFirst())
+                .limit(limit)
+                .toList();
+    }
+
+    private List<ReviewEvent> snapshot(List<ReviewEvent> events) {
+        synchronized (events) {
+            return List.copyOf(events);
+        }
+    }
+
+    private Optional<ReviewEvent> latest(List<ReviewEvent> events) {
+        synchronized (events) {
+            return events.isEmpty() ? Optional.empty() : Optional.of(events.getLast());
+        }
+    }
+
+    private Comparator<ReviewEvent> recentFirst() {
+        return Comparator.comparing(ReviewEvent::occurredAt)
+                .thenComparing(event -> event.reviewId().value())
+                .thenComparingLong(ReviewEvent::sequence)
+                .reversed();
+    }
+
+    private void validateCrossReviewLimit(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("cross-review event limit must be positive");
+        }
+    }
 }
