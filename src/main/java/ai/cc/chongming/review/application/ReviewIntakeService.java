@@ -4,6 +4,7 @@ import ai.cc.chongming.review.domain.model.RequirementSnapshot;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot.RequirementDocument;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementParser;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementValidator;
@@ -12,7 +13,11 @@ import ai.cc.chongming.review.infrastructure.document.StoredRequirementSnapshot;
 import ai.cc.chongming.review.infrastructure.document.ValidatedMarkdown;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPersistenceMapper;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -20,6 +25,7 @@ import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -99,6 +105,12 @@ public class ReviewIntakeService {
             synchronized (submissions) {
                 request.cancellation().checkCancelled();
                 ReviewIntakeResult existing = submissions.get(key);
+                if (existing == null) {
+                    existing = findPersistedSubmission(key);
+                    if (existing != null) {
+                        submissions.put(key, existing);
+                    }
+                }
                 if (existing != null && !request.forceNewAttempt()) {
                     return new ReviewIntakeResult(existing.snapshot(), existing.workspaceSnapshot(), true);
                 }
@@ -125,7 +137,17 @@ public class ReviewIntakeService {
                         snapshot, markdown, request.cancellation());
                 ReviewIntakeResult created = new ReviewIntakeResult(snapshot, workspaceSnapshot, false);
                 if (existing == null) {
-                    persistReviewRoot(snapshot);
+                    try {
+                        persistReviewRoot(snapshot, key);
+                    } catch (DuplicateKeyException exception) {
+                        ReviewIntakeResult persisted = findPersistedSubmission(key);
+                        if (persisted == null) {
+                            throw exception;
+                        }
+                        submissions.put(key, persisted);
+                        return new ReviewIntakeResult(
+                                persisted.snapshot(), persisted.workspaceSnapshot(), true);
+                    }
                     reviewRegistry.register(Review.pending(reviewId));
                 }
                 submissions.put(key, created);
@@ -207,7 +229,31 @@ public class ReviewIntakeService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private void persistReviewRoot(RequirementSnapshot snapshot) {
+    private ReviewIntakeResult findPersistedSubmission(IntakeKey key) {
+        if (!persistenceEnabled) {
+            return null;
+        }
+        ReviewPersistenceMapper mapper = persistenceMapperProvider == null ? null : persistenceMapperProvider.getIfAvailable();
+        if (mapper == null) {
+            throw new IllegalStateException("review persistence mapper is unavailable during intake");
+        }
+        ReviewPersistenceMapper.ReviewRow row = mapper.findReviewByInputIdempotencyKey(key.persistenceKey());
+        if (row == null) {
+            return null;
+        }
+        ReviewId reviewId = new ReviewId(UUID.fromString(row.reviewId()));
+        RequirementSnapshot snapshot = snapshotStore.load(reviewId, row.attemptNo());
+        reviewRegistry.register(Review.restore(
+                reviewId,
+                ReviewStage.valueOf(row.stage()),
+                row.attemptNo(),
+                row.version(),
+                List.of(),
+                Map.of()));
+        return new ReviewIntakeResult(snapshot, snapshotStore.stored(reviewId, row.attemptNo()), true);
+    }
+
+    private void persistReviewRoot(RequirementSnapshot snapshot, IntakeKey key) {
         if (!persistenceEnabled) {
             return;
         }
@@ -217,7 +263,7 @@ public class ReviewIntakeService {
                 snapshot.snapshotId().toString(),
                 snapshot.submitter(),
                 "PENDING",
-                "intake:" + snapshot.snapshotId(),
+                key.persistenceKey(),
                 snapshot.attemptNo(),
                 0L)) != 1) {
             throw new IllegalStateException("review root was not persisted during intake");
@@ -231,5 +277,20 @@ public class ReviewIntakeService {
      */
     private record IntakeKey(
             String submitter, String repositoryPath, String branch, String commit, String contentHash) {
+
+        private String persistenceKey() {
+            String source = component(submitter) + component(repositoryPath) + component(branch)
+                    + component(commit) + component(contentHash);
+            try {
+                byte[] digest = MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8));
+                return "intake:" + java.util.HexFormat.of().formatHex(digest);
+            } catch (NoSuchAlgorithmException exception) {
+                throw new IllegalStateException("SHA-256 must be available", exception);
+            }
+        }
+
+        private String component(String value) {
+            return value == null ? "-1:" : value.length() + ":" + value;
+        }
     }
 }

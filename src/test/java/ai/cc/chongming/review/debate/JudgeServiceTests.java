@@ -73,6 +73,16 @@ class JudgeServiceTests {
         assertThat(review.stage()).isEqualTo(ReviewStage.WAITING_HUMAN);
     }
 
+    @Test
+    void movesReviewToHumanWaitingForEveryAiGateDraft() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        Review review = judgingReview();
+        JudgeService service = new JudgeService(store);
+
+        assertThat(service.draftGate(review).result()).isEqualTo(GateResult.AI_PASS);
+        assertThat(review.stage()).isEqualTo(ReviewStage.WAITING_HUMAN);
+    }
+
     private DebateTopic terminalTopic(ReviewId reviewId, Claim productClaim, Claim backendClaim) {
         DebateStateMachine stateMachine = new DebateStateMachine();
         DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), reviewId, "authentication",

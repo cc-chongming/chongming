@@ -1,12 +1,12 @@
 # 需求全生命周期管理平台建设（REQLIFE）
 
-> **状态**: 🚧 **主体代码与覆盖率门禁已收口，尚未达到发布/验收完成**。段 1-9 与 REQLIFE-H1/H2/M1/M2/H3/H4/M3/V2 已通过当前工作树回归和复审；仍须完成 MySQL 5.6、`EXPLAIN` 与浏览器全链路。
+> **状态**: 🚧 **主体代码、覆盖率门禁和主要实库验收已收口，尚未达到发布/验收完成**。测试库 MySQL 5.6 已执行 Flyway V1-V13、H1/H2/H3 与 M2 的运行时验证；浏览器已覆盖草稿、列表、概览和报告空态。真实 Gate→开发→完成及报告持久化仍依赖一次获授权的模型网关评审。
 > **创建日期**: 2026-07-31
 > **目标**: 将重明从"单一评审工作台"扩展为"需求全生命周期管理平台"——需求从新建、待评审、评审中、Gate 决策到开发完成全程可管理、可追踪，评审作为内核嵌入需求流转。
 > **前置**: 评审内核 `AIREVIEW-PLAN-001~020` 已完成（状态机、领域事件、辩论、Judge/Gate、人工审核、SSE、Live 运行流均已落地）
 > **设计原型**: `docs/ui-patterns-demo/platform.html`（编辑器风格，8 页面全链路）
 
-## 实施快照（2026-08-01）
+## 实施快照（2026-08-04）
 
 | 分段 | 状态 | 已交付 / 待验收 |
 |------|------|----------------|
@@ -15,7 +15,7 @@
 | #3 需求与评审联动 | ✅ | `PLAN_CREATED` 驱动进入评审，`HUMAN_GATE_FINALIZED` 映射 PASS/BLOCK/RETURN；单向事件监听。 |
 | #4 Dashboard | ✅ | 跨评审最新事件、近期活动与需求状态统计 API。 |
 | #5-9 前端平台与构建 | ✅ | Dashboard、需求列表/创建/详情、评审/报告列表、全局侧栏、静态包已落地；评审跨库读模型完成真实分页，报告投影完成持久化实现。 |
-| #10 验收 | 🟡 | IDEA 全量 Rebuild 成功；默认 `mvn verify` 全量 253 项通过、8 项因 Docker/Testcontainers 不可用跳过；前端 15 项测试和构建通过。PLAN-021 的 32 个可执行生产类（含带标记源文件中的嵌套值类型和读模型）已由默认 JaCoCo 门禁验证为 84.67% 指令覆盖率；实际 MySQL 5.6、`EXPLAIN` 和浏览器全链路待执行。 |
+| #10 验收 | 🟡 | 测试库 MySQL 5.6 已执行 Flyway V1-V13；历史 `review_event.progress=NULL` 已兼容；H1 跨进程重放、H2 实库分页、H3 并发绑定回滚和 M2 的 1,000 条临时事件 `EXPLAIN` 均已留证。浏览器已验证保存草稿、评审列表翻页、概览和报告空态。报告生成、`hasReport=true` 正例及真实 Gate→开发→完成仍待获授权的模型网关调用。 |
 
 **冻结接口**：`GET /api/dashboard`、`/api/requirements/**`、`GET /api/reviews`、`GET /api/reports`。旧的按 ID 评审接口和 `/review/` Hash 路由保持兼容。
 
@@ -27,15 +27,15 @@
 
 | 编号 | 优先级 | 当前事实 | 已完成的代码处理 | 仍需的验收证据 |
 |------|--------|----------|------------------|----------------|
-| REQLIFE-H1 | 代码完成 | 评审受理按输入幂等；相同输入会返回同一 `reviewId`，`forceNewAttempt` 仅增加 attempt，不会创建新的评审根。 | 页面收到 `reused=true` 后保留新草稿、停止启动且给出明确跳转；服务端先校验需求状态，再以“仅 `PENDING`、未绑定或绑定同一需求”的原子保留绑定评审。MyBatis 使用事务内条件更新；内存关联存储已校验阶段与现有关联。 | 在实际 MySQL 下覆盖重复提交、并发绑定、已启动/终态/已绑定评审的 4xx 响应。 |
-| REQLIFE-H2 | 代码完成 | `/api/reviews` 不再从固定 500 条窗口过滤分页。 | 新增平台读模型端口；内存实现返回真实 total，MyBatis 将最新事件、stage、hasReport、COUNT、LIMIT/OFFSET 下推到数据库；501 条后的目标评审回归已通过。 | 在实际 MySQL 下验证 stage、hasReport 与无筛选三种分页，覆盖 page 1/2。 |
+| REQLIFE-H1 | 部分实库完成 | 评审受理按输入幂等；相同输入会返回同一 `reviewId`。 | 输入幂等键改为持久化 SHA-256 键；重启后从 `review_request` 重建受理结果和工作区快照。测试库实测首提与进程重启后的重放返回相同 review/attempt，第二次 `reused=true`。 | 已启动/终态/已绑定评审的完整 4xx 矩阵仍待作为后续命令验收的一部分补齐。 |
+| REQLIFE-H2 | 部分实库完成 | `/api/reviews` 不再从固定 500 条窗口过滤分页。 | 新增平台读模型端口；内存实现返回真实 total，MyBatis 将最新事件、stage、hasReport、COUNT、LIMIT/OFFSET 下推到数据库；历史事件缺少 `progress` 时返回 0。 | 测试库实测无筛选、`stage=PENDING` 的第 1/2 页无重复；`hasReport=true` 响应形状正常但尚无真实报告正例。 |
 | REQLIFE-M1 | 代码完成 | `review_report` 已有足够的版本化表结构，但此前无持久化仓储。 | 新增 MyBatis 报告仓储与跨评审读取，保持报告正文、Markdown、哈希、Gate/报告版本；单测以同一 Mapper 实例模拟应用重启后仍可读取。 | 用本地 MySQL 生成报告、重启进程后验证报告详情、`GET /api/reports`、`GET /api/reviews?hasReport=true`。 |
-| REQLIFE-M2 | 代码完成 | Dashboard 的跨评审近期事件按 `occurred_at` 排序。 | 新增 V12：`review_event(occurred_at)`；迁移断言已补。 | MySQL 5.6 成功执行 V12，并以 1k+ 事件 `EXPLAIN` 记录索引使用和 filesort 情况。 |
-| REQLIFE-H3 | 已解决 | 同一需求并发提交给两个不同的 `PENDING` 评审时，内存实现不得留下第二条反向关联。 | `RequirementCommandService.submitForReview` 已在同一个 `Requirement` 聚合锁内完成版本校验、目标评审核验、`tryBindPendingReview`、状态迁移和保存；持久化实现保留事务回滚语义。双线程回归证明恰好一个成功、失败评审可再次绑定另一草稿需求。 | 在实际 MySQL 下执行同一竞争场景，确认回滚后的 `review_request.requirement_id` 无残留。 |
+| REQLIFE-M2 | 实库完成 | Dashboard 的跨评审近期事件按 `occurred_at DESC, review_id DESC, event_sequence DESC` 排序。 | V13 新增复合索引 `review_event(occurred_at, review_id, event_sequence)`，替代不足以覆盖完整排序的 V12 单列索引。 | 测试库 MySQL 5.6 成功执行 V13；1,000 条会话临时事件的 `EXPLAIN` 使用 `idx_review_event_recent_activity`，`Extra=Using index`，无 filesort。 |
+| REQLIFE-H3 | 实库完成 | 同一需求并发提交给两个不同的 `PENDING` 评审时，内存实现不得留下第二条反向关联。 | `RequirementCommandService.submitForReview` 已在同一个 `Requirement` 聚合锁内完成版本校验、目标评审核验、`tryBindPendingReview`、状态迁移和保存；持久化实现保留事务回滚语义。双线程回归证明恰好一个成功、失败评审可再次绑定另一草稿需求。 | 测试库并发提交得到一条 `200` 和一条 `409 VERSION_CONFLICT`；失败评审随后成功绑定另一草稿需求，证明无残留 `requirement_id`。 |
 | REQLIFE-H4 | 已解决 | `/api/reviews` 投影只需要报告版本与是否存在报告。 | 平台投影的 `latestReport` 已改为报告元数据；MyBatis 列表 SQL 仅选择 ID、版本、Gate、哈希和时间，报告详情 API 保持完整正文读取。Mapper 契约测试断言 SQL 不含 `report_content` 和 `markdown_content`。 | 在实际 MySQL 下以大正文报告验证列表的响应形状、分页和详情读取。 |
 | REQLIFE-M3 | 已解决 | 报告元数据分页必须与 MyBatis 的 `created_at DESC, review_id DESC` 契约一致。 | 内存两处跨评审排序均追加 `reviewId DESC`；同时间、两页、`size=1` 回归已通过。 | 在实际 MySQL 下以同时间报告验证两页无重复、无遗漏。 |
-| REQLIFE-V2 | 已解决 | 全项目 JaCoCo 仍为 68.00% 指令、50.19% 分支，不能作为本计划新增代码的质量结论；现已将带 `AIREVIEW-PLAN-021` 标记源文件中的 32 个可执行生产类（含嵌套类）固定为独立范围。 | 覆盖率 `check` 已进入默认 Maven `verify` 生命周期；实测 253 项通过、8 项 Docker/Testcontainers 跳过，范围内指令覆盖率 84.67%，门禁 ≥80% 通过。报告 Mapper 替身亦已按每评审最大 `reportVersion` 和 SQL 同时间排序契约测试；MyBatis 需求仓储、平台投影和报告仓储均覆盖成功与失败路径。 | 外部验收及后续变更直接运行默认 `mvn verify`；不得将全项目 68.00% 或 Docker 跳过混同为 PLAN-021 覆盖率。 |
-| REQLIFE-V1 | 待验收 | 当前工作树已完成 IDEA Rebuild、默认 Maven 253 项通过/8 项 Docker 跳过、PLAN-021 覆盖率门禁通过、前端 15 项通过和构建。 | 测试断言、验证记录和前端构建产物均已更新，复审完成后无 HIGH/MEDIUM。 | 完成 MySQL 5.6 Testcontainers/本地实例与“新建需求→启动评审→Gate→开发→完成”浏览器闭环；无证据不得写“验收完成”。 |
+| REQLIFE-V2 | 已解决 | 全项目 JaCoCo 仍为 68.00% 指令、50.19% 分支，不能作为本计划新增代码的质量结论；现已将带 `AIREVIEW-PLAN-021` 标记源文件中的 32 个可执行生产类（含嵌套类）固定为独立范围。 | 覆盖率 `check` 已进入默认 Maven `verify` 生命周期；2026-08-04 的 `clean verify` 运行 256 项，0 failure、0 error、6 项 Docker/Testcontainers 跳过，且范围内指令覆盖率 84.67%，门禁 ≥80% 通过。报告 Mapper 替身亦已按每评审最大 `reportVersion` 和 SQL 同时间排序契约测试；MyBatis 需求仓储、平台投影和报告仓储均覆盖成功与失败路径。 | 外部验收及后续变更直接运行默认 `mvn verify`；不得将全项目 68.00% 或 Docker 跳过混同为 PLAN-021 覆盖率。 |
+| REQLIFE-V1 | 部分验收 | 当前工作树已完成既有回归与覆盖率门禁，且已补入测试库和浏览器运行时证据。 | 测试断言、V13 迁移、验证记录均已更新；浏览器实测保存草稿、评审列表翻页、概览和报告空态。 | 仍须在一次真实模型评审后验证 Gate→开发→完成、报告持久化和报告筛选正例；无证据不得写“验收完成”。 |
 
 ### 接续控制卡（按此顺序执行，不跳步）
 
@@ -45,27 +45,26 @@
 | 1 | 修复 H3 绑定事务 | ✅ 已完成。 | 竞争的两个评审只有一个绑定；失败路径不遗留内存反向关联。 | 不以 `forceNewAttempt` 或重试覆盖来规避竞争。 |
 | 2 | 修复 H4 元数据投影 | ✅ 已完成。 | `/api/reviews` 只获取报告元数据；报告详情继续获取正文。 | 不删除报告正文存储；不把每条评审的报告读取改成数据库 N+1 查询。 |
 | 3 | 修复 M3 稳定排序 | ✅ 已完成。 | 同时间分页与 SQL 的 `created_at DESC, review_id DESC` 契约一致。 | 不依赖 `ConcurrentHashMap` 迭代顺序。 |
-| 4 | 当前工作树回归 | ✅ 已完成。 | 默认 `mvn verify` 253 项通过、0 failure、0 error、8 项 Docker/Testcontainers 跳过；IDEA Rebuild、前端 15 项测试及构建通过；最终复审无 HIGH/MEDIUM。 | Docker 不可用时不得把 Testcontainers 跳过写成通过。 |
+| 4 | 当前工作树回归 | ✅ 已完成。 | 2026-08-04 默认 `mvn clean verify` 运行 256 项，0 failure、0 error、6 项 Docker/Testcontainers 跳过；前端 15 项测试通过；最终复审无 HIGH/MEDIUM。 | Docker 不可用时不得把 Testcontainers 跳过写成通过。 |
 | 5 | 覆盖率门槛 | ✅ 已完成。 | 默认 `verify` 中的 JaCoCo `check` 固定 32 个带 PLAN-021 标记源文件的可执行生产类（含嵌套类）；实测指令覆盖率 84.67%，≥80% 门禁通过。 | 不降低阈值、不删除未覆盖代码，不将 Docker 跳过计为覆盖。 |
-| 6 | MySQL 5.6 与性能 | V11/V12、本地或 Testcontainers 实例、`EXPLAIN` 证据。 | 完成 H1/H2/M1/M2/H3/H4/M3 的实库语义与 1k+ 事件查询证据。当前 Windows `MySQL84` 服务为 Stopped，需先取得启动该外部服务的授权。 | 不用默认 InMemory 结果替代实库证据。 |
-| 7 | 浏览器闭环 | `/review/#/dashboard` 与 8 个平台页面。 | 新建草稿→提交→评审→Gate→开发→完成，列表和 Dashboard 一致。当前 `127.0.0.1:8080/review/` 返回连接被拒绝，须先由本机启动配置正确的服务与数据库。 | 不通过直接改库伪造 UI 闭环；不把连接被拒绝写成页面验收失败。 |
+| 6 | MySQL 5.6 与性能 | ✅ V1-V13 已在 `application-local.yml` 的测试库执行，且已保留 `EXPLAIN` 证据。 | H1 重启重放、H2 分页、H3 并发回滚、M2 索引均已验证；M1/H4/M3 的真实报告正例仍待模型生成。 | 不用默认 InMemory 结果替代实库证据。 |
+| 7 | 浏览器闭环 | 🟡 `/review/#/dashboard` 与平台路由已启动验证。 | 已保存 DRAFT、验证评审列表第 1/2 页、Dashboard 投影和报告空态；Gate→开发→完成及报告页面正例待真实模型评审后执行。 | 不通过直接改库伪造 UI 闭环；不把模型网关关闭写成页面验收失败。 |
 
 ### 交接命令
 
-代码收口已完成；后续先按以下顺序验证（前四条不启动应用）：
+代码与主要实库证据已收口；后续仅需在获授权的模型网关评审后完成以下正例验证：
 
 ```powershell
-$env:JAVA_HOME = 'D:\Tool\Java21'
-& 'C:\Users\cxwhdev\.m2\wrapper\dists\apache-maven-3.9.16-bin\5grr65jo27hi51sujmtcldfovl\apache-maven-3.9.16\bin\mvn.cmd' -Dtest=RequirementCommandServiceTests,ReviewListQueryServiceTests,DashboardQueryServiceTests,MyBatisReviewReportStoreTests test
-& 'C:\Users\cxwhdev\.m2\wrapper\dists\apache-maven-3.9.16-bin\5grr65jo27hi51sujmtcldfovl\apache-maven-3.9.16\bin\mvn.cmd' verify
+$env:JAVA_HOME = 'C:\Dev\Java\jdk-21.0.10'
+.\mvnw.cmd -Dtest=RequirementCommandServiceTests,ReviewListQueryServiceTests,DashboardQueryServiceTests,MyBatisReviewReportStoreTests test
+.\mvnw.cmd clean verify
 cd frontend
 npm test
-npm run build
 ```
 
 ### 完成状态的唯一转换条件
 
-PLAN-021 代码收口、覆盖率 ≥80%、当前工作树回归和代码审查已具备证据；仅当 MySQL 5.6/`EXPLAIN` 和浏览器闭环也全部留有可复核证据时，才可将本计划顶部及段 10 改为 `✅ 完成`。任何一项缺失都保持 `🚧`。
+PLAN-021 代码收口、覆盖率 ≥80%、测试库 MySQL 5.6/`EXPLAIN` 和浏览器基础路径均已具备证据；仅当真实模型评审产出 Gate 与报告，并完成 Gate→开发→完成和报告筛选正例后，才可将本计划顶部及段 10 改为 `✅ 完成`。任何一项缺失都保持 `🚧`。
 
 ### 不变约束
 
@@ -73,6 +72,14 @@ PLAN-021 代码收口、覆盖率 ≥80%、当前工作树回归和代码审查�
 - 不通过 `forceNewAttempt` 绕过输入幂等：它是同一评审根的重试机制，不是新需求的复用开关。
 - MySQL 5.6 继续只使用 `TEXT`/`MEDIUMTEXT`/`LONGTEXT`，后续迁移不得引入 JSON 列或 5.6.4 之后才支持的时间精度写法。
 - 在持久化与内存两种配置下保持相同的绑定失败语义和分页响应形状。
+
+### 2026-08-04 模型网关实测补充（未达到发布验收）
+
+本轮按授权启用 `local` 配置中的模型网关，未使用 Docker，所有写入均通过本地 HTTP API 创建的隔离测试数据完成。真实调用验证了 Context Scout、四个核心角色和 Director；其中一条隔离评审的四个角色均实际调用 `complete_initial_review`，进入 `CONFLICT_DETECTION`，Director 实际调用 `list_persisted_claims` 并读取 18 条持久化 Claim。
+
+实测还关闭了以下运行时缺口：Director 不再在核心角色注册前阻塞启动；角色和 Judge 获得只读的持久化辩题/Claim/turn 标识查询；无冲突 Claim 可经受服务端校验后跳过辩论进入 JUDGING；所有 AI Gate 草案均进入人工确认；角色与 Director 在正常文本结束而未提交阶段工具时均有受限收尾器，且收尾失败会显式失败，不会静默停滞。
+
+最终一次外部调用在首个角色阶段被网关返回的非 JSON 响应拒绝，服务按预期记录 `ModelGatewayException` 并将评审置为 `FAILED`。因此，真实 Gate 正例、报告持久化正例、`hasReport=true` 正例、人工 PASS 后的 `APPROVED → DEVELOPING → DONE` 以及对应浏览器正例仍未验证；本计划继续保持未完成状态，不能以单元测试或直接改库替代。
 
 ---
 
@@ -361,7 +368,7 @@ public record DashboardSnapshot(
 | 平台读模型 | `ReviewPlatformProjectionStore` 双实现、`MyBatisReviewReportStore`、`DashboardQueryService`、`ReviewListQueryService` 和两个控制器 | ✅ H2/M1/M2/H4/M3 已完成真实分页、元数据投影、报告持久化、排序索引和稳定排序；实际 MySQL 执行/性能证据待补。 |
 | 前端平台 | `DashboardView`、`RequirementList/Create/DetailView`、`ReviewListView`、`ReportListView`、统一 `review-api.js`、路由/侧栏/样式 | ✅ 页面与静态包已生成，创建流程已处理重复快照的草稿保留。 |
 | 构建产物 | `src/main/resources/static/review/` | ✅ |
-| 测试与证据 | Requirement 领域/服务/API/仓储/联动测试、Dashboard/评审列表测试、MySQL 5.6 迁移断言、`docs/验证记录/RequirementPlatformReport.md` | 🟡 默认 Maven `verify` 已通过 253 项，且强制 PLAN-021 32 个可执行生产类达到 84.67% 指令覆盖率；前端 15 项已通过。仅 Docker/MySQL、`EXPLAIN` 与浏览器环境证据待补。 |
+| 测试与证据 | Requirement 领域/服务/API/仓储/联动测试、Dashboard/评审列表测试、MySQL 5.6 迁移断言、`docs/验证记录/RequirementPlatformReport.md` | 🟡 `mvn clean verify` 已运行 256 项且全部通过（6 项 Docker/Testcontainers 跳过），PLAN-021 32 个可执行生产类达到 84.67% 指令覆盖率；前端 15 项已通过。测试库 MySQL、`EXPLAIN` 和浏览器基础证据已补；仅真实 Gate、报告和完整生命周期闭环待补。 |
 
 ### 2.2 原始新建清单（设计基线，实施结果以上表为准）
 
@@ -480,5 +487,6 @@ flowchart LR
 | 2026-08-01 | 完成 REQLIFE-H1/H2/M1/M2 代码收口：原子需求—评审绑定、跨评审数据库分页、持久化报告投影与 V12 事件索引已落地；Java 全量 225 项与前端 15 项回归通过。因 Docker 不可用，MySQL 5.6 执行与浏览器闭环仍保留为 V1 验收项。 |
 | 2026-08-01 | 交接复核发现 H3（同需求双评审竞争残留关联）、H4（平台列表读取报告正文）和 M3（内存同时间分页不稳定）。计划改为以接续控制卡驱动：先修代码与重跑当前工作树回归，再做 MySQL、性能和浏览器验收；此前 225 项仅保留为历史基线。 |
 | 2026-08-01 | H3/H4/M3 已以失败先行测试收口并复审通过：需求聚合锁覆盖绑定和保存、列表投影只取报告元数据、内存排序对齐 SQL。IDEA Rebuild 成功，Maven 全量 241 项通过/8 项 Docker 跳过，前端 15 项与构建通过；外部运行时验收仍未执行。 |
+| 2026-08-04 | 使用 `application-local.yml` 的测试库完成运行时验证（不使用 Docker）：Flyway 迁移至 V13；修复历史 `progress=NULL` 投影和跨进程输入幂等；H1 重启重放、H2 分页、H3 并发回滚、M2 1,000 条临时事件 `EXPLAIN` 及浏览器基础路径均已留证。`mvn clean verify` 运行 256 项，0 failure、0 error、6 项 Docker/Testcontainers 跳过；前端 15 项通过。真实 Gate、报告持久化和 Gate→开发→完成仍待获授权的模型网关调用。 |
 | 2026-08-01 | 运行时入口检查：`http://127.0.0.1:8080/review/` 返回 `ERR_CONNECTION_REFUSED`，未启动或重启服务；将其记录为浏览器验收的环境前置条件。 |
 | 2026-08-01 | 验收审计发现 JaCoCo 全项目指令覆盖率为 68.00%、分支覆盖率为 50.19%，且未固化 PLAN-021 新增生产类的独立统计。新增 REQLIFE-V2 覆盖率门禁，必须在外部环境验收前闭环。 |

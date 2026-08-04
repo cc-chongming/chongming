@@ -163,6 +163,19 @@ public class RequirementSnapshotStore {
     }
 
     /**
+     * Returns the controlled file locations for an existing immutable snapshot.
+     *
+     * @author wangli
+     */
+    public StoredRequirementSnapshot stored(ReviewId reviewId, int attemptNo) {
+        Path inputDirectory = snapshotInputDirectory(reviewId, attemptNo);
+        if (!Files.isRegularFile(inputDirectory.resolve("snapshot-manifest.json"))) {
+            throw new IllegalStateException("Requirement snapshot was not found for the active review attempt");
+        }
+        return storedSnapshot(inputDirectory);
+    }
+
+    /**
      * Rehydrates an immutable requirement snapshot from the controlled workspace manifest.
      *
      * @author wangli

@@ -12,11 +12,11 @@ import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
-import io.agentscope.core.event.ExceedMaxItersEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.time.Duration;
@@ -155,12 +155,10 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             }
             state.emit(AgentRuntimeEventType.STARTED, context.directorLabel(), "director-created");
             Mono<Void> scout = runScout(state, context, director.workspace());
-            return scout.then(Mono.defer(() -> state.cancelled()
-                    ? Mono.error(new CancellationException("review runtime was cancelled before Director execution"))
-                    : run(state, director.agent(), RoleType.DIRECTOR, context.directorLabel(),
-                            context.directorSessionId(), ReviewStage.PLANNING, request.initialMessage(),
-                            director.toolTraceCollector())))
-                    .thenReturn(new AgentRuntimeSession(request.runtimeId(), request.userId(), request.sessionId()));
+            // The director must stay idle until every core role has completed its independent review.
+            // ReviewWorkflowDispatcher wakes it from the committed INITIAL_REVIEW_COMPLETED event. Starting
+            // its conversational loop here would block role registration and lets it see a stale PLANNING state.
+            return scout.thenReturn(new AgentRuntimeSession(request.runtimeId(), request.userId(), request.sessionId()));
         });
     }
 
@@ -423,12 +421,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ReviewStage stage,
             String message,
             ScoutToolTraceCollector toolTraceCollector) {
-        AtomicBoolean initialReviewBudgetExhausted = new AtomicBoolean();
         return agent.streamEvents(message, agentContext(state.context(), sessionId))
                 .doOnNext(event -> {
-                    if (event instanceof ExceedMaxItersEvent) {
-                        initialReviewBudgetExhausted.set(true);
-                    }
                     emitRawObservation(state, event, roleType, agentId, sessionId, stage, toolTraceCollector);
                 })
                 .doOnError(exception -> {
@@ -437,7 +431,9 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 })
                 .then()
                 .then(Mono.defer(() -> runInitialReviewFinalizerIfNeeded(
-                        state, roleType, agentId, sessionId, stage, initialReviewBudgetExhausted.get())))
+                        state, roleType, agentId, sessionId, stage)))
+                .then(Mono.defer(() -> runDirectorConflictFinalizerIfNeeded(
+                        state, roleType, agentId, sessionId)))
                 .then(Mono.<Void>fromRunnable(() -> verifyInitialReviewCompletion(state, roleType)))
                 .doOnSuccess(ignored -> state.emit(AgentRuntimeEventType.MESSAGE_SENT, agentId, "completed"));
     }
@@ -447,9 +443,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             RoleType roleType,
             String agentId,
             String sessionId,
-            ReviewStage stage,
-            boolean budgetExhausted) {
-        if (!budgetExhausted || stage != ReviewStage.INITIAL_REVIEW
+            ReviewStage stage) {
+        if (stage != ReviewStage.INITIAL_REVIEW
                 || roleType == RoleType.DIRECTOR || roleType == RoleType.JUDGE
                 || !requiresInitialReviewCompletion(state, roleType)) {
             return Mono.empty();
@@ -499,6 +494,62 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                                 + " ended without complete_initial_review");
                     }
                 });
+    }
+
+    private Mono<Void> runDirectorConflictFinalizerIfNeeded(
+            RuntimeState state, RoleType roleType, String agentId, String sessionId) {
+        if (roleType != RoleType.DIRECTOR || state.cancelled() || reviewRegistry == null) {
+            return Mono.empty();
+        }
+        Review review = reviewRegistry.find(state.context().reviewId()).orElse(null);
+        if (review == null || review.stage() != ReviewStage.CONFLICT_DETECTION) {
+            return Mono.empty();
+        }
+        if (!state.directorConflictFinalizing().compareAndSet(false, true)) {
+            return Mono.empty();
+        }
+        ReviewDirectorHarnessFactory.DirectorFinalizerRuntime finalizer;
+        try {
+            finalizer = directorFactory.createNoConflictFinalizer(state.context());
+        } catch (IllegalStateException unavailable) {
+            return Mono.fromRunnable(() -> verifyDirectorConflictFinalization(state));
+        }
+        return finalizer.agent().streamEvents(
+                        "Director conflict analysis ended without a stage tool. Complete the only authorized no-conflict transition now.",
+                        agentContext(state.context(), sessionId))
+                .doOnNext(event -> emitRawObservation(
+                        state, event, RoleType.DIRECTOR, agentId + "-conflict-finalizer", sessionId,
+                        ReviewStage.CONFLICT_DETECTION, finalizer.toolTraceCollector()))
+                .then()
+                .timeout(Duration.ofMinutes(3))
+                .onErrorResume(failure -> Mono.<Void>fromRunnable(() -> verifyDirectorConflictFinalization(state))
+                        .then(Mono.<Void>error(failure)))
+                .then(Mono.<Void>fromRunnable(() -> verifyDirectorConflictFinalization(state)))
+                .doFinally(signal -> finalizer.agent().close());
+    }
+
+    private void verifyDirectorConflictFinalization(RuntimeState state) {
+        reviewRegistry.find(state.context().reviewId()).ifPresent(review -> {
+            synchronized (review) {
+                if (state.cancelled() || review.attemptNo() != state.context().attemptNo()
+                        || review.stage() != ReviewStage.CONFLICT_DETECTION) {
+                    return;
+                }
+                review.transitionTo(new ReviewStateMachine(), ReviewStage.FAILED);
+                eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                        review,
+                        ReviewEventType.REVIEW_FAILED,
+                        RoleType.DIRECTOR,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of("failureType", "DIRECTOR_CONFLICT_INCOMPLETE")));
+                throw new IllegalStateException("DIRECTOR_INCOMPLETE: conflict stage ended without a transition");
+            }
+        });
     }
 
     private boolean requiresInitialReviewCompletion(RuntimeState state, RoleType roleType) {
@@ -632,6 +683,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         private final ReviewDirectorHarnessFactory.DirectorRuntime director;
         private final ConcurrentMap<String, RoleSubagentFactory.RoleRuntime> roles = new ConcurrentHashMap<>();
         private final Set<RoleType> initialReviewFinalizingRoles = ConcurrentHashMap.newKeySet();
+        private final AtomicBoolean directorConflictFinalizing = new AtomicBoolean();
         private final AtomicLong sequence = new AtomicLong();
         private final Sinks.Many<AgentRuntimeEvent> events = Sinks.many().replay().all();
 
@@ -666,6 +718,10 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
         private Set<RoleType> initialReviewFinalizingRoles() {
             return initialReviewFinalizingRoles;
+        }
+
+        private AtomicBoolean directorConflictFinalizing() {
+            return directorConflictFinalizing;
         }
 
         private Sinks.Many<AgentRuntimeEvent> events() {

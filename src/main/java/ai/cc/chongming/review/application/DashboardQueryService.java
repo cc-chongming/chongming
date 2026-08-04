@@ -86,7 +86,9 @@ public class DashboardQueryService {
             return new ReviewView(
                     review.reviewId().value().toString(),
                     review.stage().name(),
-                    review.latestEvent() == null ? 0 : review.latestEvent().progress(),
+                    review.latestEvent() == null || review.latestEvent().progress() == null
+                            ? 0
+                            : review.latestEvent().progress(),
                     review.attemptNo(),
                     review.updatedAt() == null ? null : review.updatedAt().toString());
         }

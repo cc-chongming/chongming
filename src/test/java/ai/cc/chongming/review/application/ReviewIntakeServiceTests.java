@@ -157,6 +157,33 @@ class ReviewIntakeServiceTests {
         verify(mapper).insertReviewRequest(any(ReviewPersistenceMapper.ReviewRequestRow.class));
     }
 
+    @Test
+    void reusesPersistedIntakeAfterTheProcessIsRestarted() {
+        ReviewPersistenceMapper mapper = mock(ReviewPersistenceMapper.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ReviewPersistenceMapper> mapperProvider = mock(ObjectProvider.class);
+        when(mapperProvider.getIfAvailable()).thenReturn(mapper);
+        when(mapper.insertReviewRequest(any())).thenReturn(1);
+        RequirementSnapshotStore store = new RequirementSnapshotStore(
+                new ReviewProperties(workspaceRoot.toString(), 8, 2));
+        ReviewIntakeService firstProcess = new ReviewIntakeService(
+                new MarkdownRequirementValidator(), new MarkdownRequirementParser(), store,
+                ReviewRegistry.noop(), mapperProvider, true);
+
+        ReviewIntakeResult created = firstProcess.intake(request(false));
+        when(mapper.findReviewByInputIdempotencyKey(any())).thenReturn(new ReviewPersistenceMapper.ReviewRow(
+                created.snapshot().reviewId().value().toString(), "PENDING", 1, 0L));
+        ReviewIntakeService restartedProcess = new ReviewIntakeService(
+                new MarkdownRequirementValidator(), new MarkdownRequirementParser(), store,
+                ReviewRegistry.noop(), mapperProvider, true);
+
+        ReviewIntakeResult replayed = restartedProcess.intake(request(false));
+
+        assertThat(replayed.reused()).isTrue();
+        assertThat(replayed.snapshot().reviewId()).isEqualTo(created.snapshot().reviewId());
+        assertThat(replayed.snapshot().snapshotId()).isEqualTo(created.snapshot().snapshotId());
+    }
+
     private ReviewIntakeService newService() {
         MarkdownRequirementValidator validator = new MarkdownRequirementValidator();
         MarkdownRequirementParser parser = new MarkdownRequirementParser();

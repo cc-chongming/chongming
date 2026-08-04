@@ -21,9 +21,10 @@ class RolePackContractTests {
         assertThat(registry.all()).hasSize(8);
         assertThat(registry.require(RoleType.PRODUCT).modelProfile()).isEqualTo("role-reviewer");
         assertThat(registry.require(RoleType.JUDGE).allowedTools())
-                .containsExactlyInAnyOrder("submit_judgement", "draft_gate");
+                .containsExactlyInAnyOrder("list_persisted_debate_topics", "submit_judgement", "draft_gate");
         assertThat(registry.require(RoleType.BACKEND).allowedTools())
-                .contains("submit_claim", "complete_initial_review", "submit_challenge", "submit_rebuttal");
+                .contains("submit_claim", "complete_initial_review", "list_persisted_debate_topics",
+                        "submit_challenge", "submit_rebuttal");
         assertThat(registry.require(RoleType.SECURITY).activationRules()).isNotEmpty();
         assertThat(registry.all()).allSatisfy(rolePack -> {
             assertThat(rolePack.promptVersion()).matches("[a-z]+-v\\d+");

@@ -237,7 +237,29 @@ class AgentScopeReviewRuntimeAdapterTests {
     }
 
     @Test
-    void degradesScoutFailureAndStillRunsDirector() {
+    void failsReviewWhenDirectorEndsConflictDetectionWithoutTransition() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.CONFLICT_DETECTION, context.attemptNo(), 0,
+                List.of(), Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, null, events);
+
+        adapter.start(startRequest(context)).block();
+
+        assertThatThrownBy(() -> adapter.send(context.runtimeId(), context.directorLabel(),
+                "Persisted Claim analysis is complete.").block())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("DIRECTOR_INCOMPLETE");
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.FAILED);
+        assertThat(events).extracting(ReviewEventDraft::type).containsExactly(ReviewEventType.REVIEW_FAILED);
+        assertThat(events.getFirst().payload()).containsEntry("failureType", "DIRECTOR_CONFLICT_INCOMPLETE");
+    }
+
+    @Test
+    void degradesScoutFailureAndDefersDirectorUntilWorkflowDispatch() {
         ReviewRuntimeContext context = context(1);
         Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
                 List.of(), java.util.Map.of());
@@ -259,7 +281,7 @@ class AgentScopeReviewRuntimeAdapterTests {
 
         assertThat(session.runtimeId()).isEqualTo(context.runtimeId());
         assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
-        assertThat(directorModelCalls).hasValue(1);
+        assertThat(directorModelCalls).hasValue(0);
         assertThat(events).extracting(ReviewEventDraft::type)
                 .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
         assertThat(events.getFirst().payload())
@@ -268,10 +290,15 @@ class AgentScopeReviewRuntimeAdapterTests {
                 .containsEntry("publicSummary", "Context Scout 模型调用超时，已跳过项目上下文预处理，Director 将继续评审。");
         assertThat(events.getFirst().payload().toString()).doesNotContain("token=must-not-reach-public-events");
         Mockito.verify(scout).close();
+
+        adapter.send(context.runtimeId(), context.directorLabel(),
+                "All core initial reviews are complete. First call list_persisted_claims.").block();
+
+        assertThat(directorModelCalls).hasValue(1);
     }
 
     @Test
-    void degradesScoutConstructionFailureAndStillRunsDirector() {
+    void degradesScoutConstructionFailureAndKeepsDirectorIdle() {
         ReviewRuntimeContext context = context(1);
         Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
                 List.of(), java.util.Map.of());
@@ -287,7 +314,7 @@ class AgentScopeReviewRuntimeAdapterTests {
         adapter.start(startRequest(context)).block();
 
         assertThat(review.stage()).isEqualTo(ReviewStage.PLANNING);
-        assertThat(directorModelCalls.get()).isEqualTo(1);
+        assertThat(directorModelCalls.get()).isZero();
         assertThat(events).extracting(ReviewEventDraft::type)
                 .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
         assertThat(events.getFirst().payload())
@@ -316,7 +343,7 @@ class AgentScopeReviewRuntimeAdapterTests {
 
         adapter.start(startRequest(context)).block();
 
-        assertThat(directorModelCalls).hasValue(1);
+        assertThat(directorModelCalls).hasValue(0);
         assertThat(events).extracting(ReviewEventDraft::type)
                 .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
         assertThat(events.getFirst().payload())
@@ -385,6 +412,37 @@ class AgentScopeReviewRuntimeAdapterTests {
                         properties,
                         workspaceLayout),
                 new AgentEventAdapter(), registry, progressService);
+    }
+
+    private AgentScopeReviewRuntimeAdapter adapter(
+            InMemoryReviewRegistry registry,
+            InitialReviewProgressService progressService,
+            List<ReviewEventDraft> events) {
+        ReviewProperties reviewProperties = new ReviewProperties(temporaryDirectory.toString(), 8, 2);
+        ReviewWorkspaceLayout workspaceLayout = new ReviewWorkspaceLayout(
+                reviewProperties, new com.fasterxml.jackson.databind.ObjectMapper());
+        AgentScopeProperties properties = new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString());
+        ModelGateway gateway = (request, cancellation) -> Mono.just(new ModelGateway.ModelResponse(
+                "response-001", "test-model", "Review completed without a tool call.",
+                new ModelGateway.Usage(1, 1, 2), ModelGateway.FinishReason.STOP,
+                Duration.ofMillis(5), 1, request.traceId()));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<io.agentscope.harness.agent.DistributedStore> storeProvider = Mockito.mock(ObjectProvider.class);
+        return new AgentScopeReviewRuntimeAdapter(
+                new ReviewDirectorHarnessFactory(workspaceLayout, gateway, properties, storeProvider),
+                new RoleSubagentFactory(
+                        new ai.cc.chongming.review.domain.role.RolePackRegistry(
+                                new org.springframework.core.io.support.PathMatchingResourcePatternResolver()),
+                        gateway,
+                        properties,
+                        workspaceLayout),
+                new AgentEventAdapter(),
+                registry,
+                progressService,
+                null,
+                null,
+                null,
+                events::add);
     }
 
     private AgentScopeReviewRuntimeAdapter adapter(

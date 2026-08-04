@@ -23,6 +23,7 @@ public enum ReviewEventType {
     POSITION_CHANGED(ReviewEventCategory.DEBATE),
     EVIDENCE_REQUESTED(ReviewEventCategory.DEBATE),
     DEBATE_TOPIC_CLOSED(ReviewEventCategory.DEBATE),
+    DEBATE_SKIPPED(ReviewEventCategory.DEBATE),
     JUDGEMENT_SUBMITTED(ReviewEventCategory.JUDGEMENT),
     GATE_DRAFTED(ReviewEventCategory.GATE),
     HUMAN_REVIEW_REQUIRED(ReviewEventCategory.HUMAN),

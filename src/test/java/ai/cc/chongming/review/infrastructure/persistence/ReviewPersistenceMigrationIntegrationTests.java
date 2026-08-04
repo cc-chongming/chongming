@@ -91,6 +91,8 @@ class ReviewPersistenceMigrationIntegrationTests {
                     .isEqualTo("CHAR");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_event", "idx_review_event_occurred_at"))
                     .containsExactly("OCCURRED_AT");
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_event", "idx_review_event_recent_activity"))
+                    .containsExactly("EVENT_SEQUENCE", "OCCURRED_AT", "REVIEW_ID");
         }
     }
 

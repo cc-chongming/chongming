@@ -121,6 +121,61 @@ public class ReviewDirectorHarnessFactory {
         return new DirectorRuntime(runtimeContext, workspace, builder.build(), toolTraceCollector);
     }
 
+    /**
+     * Creates the protocol-only continuation used when a Director has read the authoritative
+     * Claim inventory but ended before making the mandatory conflict-stage transition.
+     */
+    public DirectorFinalizerRuntime createNoConflictFinalizer(ReviewRuntimeContext runtimeContext) {
+        Objects.requireNonNull(runtimeContext, "runtimeContext must not be null");
+        if (reviewDebateToolFactory == null) {
+            throw new IllegalStateException("director conflict finalizer requires review debate tools");
+        }
+        List<AgentTool> finalizationTools = reviewDebateToolFactory.directorTools(runtimeContext).stream()
+                .filter(tool -> tool.getName().equals("skip_debate_when_no_conflicts"))
+                .toList();
+        if (finalizationTools.size() != 1) {
+            throw new IllegalStateException("director conflict finalizer requires exactly one no-conflict tool");
+        }
+        ReviewWorkspaceLayout.ReviewWorkspace workspace = workspaceLayout.open(runtimeContext);
+        String prompt = "You are the ReviewDirectorHarness in conflict-finalization mode. Your conflict analysis ended "
+                + "without a stage transition. Do not plan, read files, create facts, open topics, or return a text substitute. "
+                + "The server has restricted you to one action: call skip_debate_when_no_conflicts now. "
+                + "The server independently rejects it if conflicting persisted Claim positions exist. "
+                + "Use Simplified Chinese for its public output.";
+        Toolkit toolkit = new Toolkit();
+        finalizationTools.forEach(toolkit::registerAgentTool);
+        ScoutToolTraceCollector toolTraceCollector = new ScoutToolTraceCollector();
+        HarnessAgent.Builder builder = HarnessAgent.builder()
+                .name(runtimeContext.directorLabel() + "-conflict-finalizer")
+                .agentId(runtimeContext.directorLabel() + "-conflict-finalizer")
+                .description("Protocol finalizer for a no-conflict Director transition")
+                .defaultSessionId(runtimeContext.directorSessionId())
+                .workspace(workspace.attempt())
+                .filesystem(attemptFilesystem(workspace))
+                .model(new AgentScopeModelBridge(
+                        modelGateway, runtimeContext, RoleType.DIRECTOR, "director", prompt,
+                        java.util.Set.of("skip_debate_when_no_conflicts"), toolTraceCollector::captureModelToolUse))
+                .sysPrompt(prompt)
+                .maxIters(4)
+                .toolkit(toolkit)
+                .disableFilesystemTools()
+                .disableShellTool()
+                .disableMemoryTools()
+                .disableMemoryHooks()
+                .disableWorkspaceContext()
+                .disableSubagents()
+                .disableDynamicSubagents()
+                .disableDynamicSkills()
+                .disableDefaultWorkspaceSkills()
+                .skillsEnabled(false)
+                .middleware(toolTraceCollector)
+                .permissionContext(bypassPermissionContext());
+        if (!agentScopeProperties.persistSession()) {
+            builder.disableSessionPersistence();
+        }
+        return new DirectorFinalizerRuntime(builder.build(), toolTraceCollector);
+    }
+
     /** Native Harness file tools must resolve from the attempt root, not the Spring process directory. */
     private static LocalFilesystemSpec attemptFilesystem(ReviewWorkspaceLayout.ReviewWorkspace workspace) {
         return new LocalFilesystemSpec()
@@ -144,7 +199,10 @@ public class ReviewDirectorHarnessFactory {
                 + "and plan_exit, then request only "
                 + "server-authorized role activation. You do not decide final Gate results, bypass ReviewProtocolGuard, "
                 + "read outside the current attempt workspace, run shell commands, access private role sessions, reveal hidden reasoning, "
-                + "or create agents directly. When woken after a committed event, advance only through the registered debate stage tools. "
+                + "or create agents directly. During CONFLICT_DETECTION, call list_persisted_claims before opening debate topics; "
+                + "it is the authoritative source for Claim IDs and is not materialized as a workspace file. "
+                + "If those Claims have no conflicting positions, call skip_debate_when_no_conflicts instead of opening a topic. "
+                + "When woken after a committed event, advance only through the registered debate stage tools. "
                 + "The current attempt workspace is the only filesystem root you may operate. Its input/requirement.md "
                 + "is a mutable working copy of the uploaded requirement, and plans/ is available for planning artifacts. "
                 + "All business facts must be submitted through strongly typed server tools. "
@@ -161,5 +219,9 @@ public class ReviewDirectorHarnessFactory {
             ReviewWorkspaceLayout.ReviewWorkspace workspace,
             HarnessAgent agent,
             ScoutToolTraceCollector toolTraceCollector) {
+    }
+
+    /** @author wangli */
+    public record DirectorFinalizerRuntime(HarnessAgent agent, ScoutToolTraceCollector toolTraceCollector) {
     }
 }

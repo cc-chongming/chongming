@@ -3,8 +3,10 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateTools;
 import io.agentscope.core.message.ToolResultBlock;
@@ -33,32 +35,38 @@ public class ReviewDebateToolFactory {
     private final DebateTools debateTools;
     private final DebateService debateService;
     private final ReviewWorkflowDispatcher workflowDispatcher;
+    private final ReviewDebateStore debateStore;
 
     public ReviewDebateToolFactory(
             ReviewRegistry reviewRegistry,
             DebateTools debateTools,
             DebateService debateService,
-            ReviewWorkflowDispatcher workflowDispatcher) {
+            ReviewWorkflowDispatcher workflowDispatcher,
+            ReviewDebateStore debateStore) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.debateTools = Objects.requireNonNull(debateTools, "debateTools must not be null");
         this.debateService = Objects.requireNonNull(debateService, "debateService must not be null");
         this.workflowDispatcher = Objects.requireNonNull(workflowDispatcher, "workflowDispatcher must not be null");
+        this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
     }
 
     public List<AgentTool> directorTools(ReviewRuntimeContext context) {
-        return List.of(new OpenTopicTool(context), new CloseTopicTool(context), new BeginSecondRoundTool(context), new BeginJudgingTool(context));
+        return List.of(new ListPersistedClaimsTool(context), new ListPersistedDebateTopicsTool(context, RoleType.DIRECTOR),
+                new OpenTopicTool(context), new CloseTopicTool(context), new BeginSecondRoundTool(context),
+                new BeginJudgingTool(context), new SkipDebateWhenNoConflictsTool(context));
     }
 
     public List<AgentTool> roleTools(ReviewRuntimeContext context, RoleType roleType) {
         if (roleType == RoleType.DIRECTOR || roleType == RoleType.JUDGE) {
             throw new IllegalArgumentException("only review roles may receive debate turn tools");
         }
-        return List.of(new ChallengeTool(context, roleType), new RebuttalTool(context, roleType),
-                new PositionChangeTool(context, roleType), new EvidenceRequestTool(context, roleType));
+        return List.of(new ListPersistedDebateTopicsTool(context, roleType), new ChallengeTool(context, roleType),
+                new RebuttalTool(context, roleType), new PositionChangeTool(context, roleType),
+                new EvidenceRequestTool(context, roleType));
     }
 
     public List<AgentTool> judgeTools(ReviewRuntimeContext context) {
-        return List.of(new JudgeTool(context), new DraftGateTool(context));
+        return List.of(new ListPersistedDebateTopicsTool(context, RoleType.JUDGE), new JudgeTool(context), new DraftGateTool(context));
     }
 
     private abstract class BoundTool implements AgentTool {
@@ -92,6 +100,57 @@ public class ReviewDebateToolFactory {
         }
     }
 
+    /**
+     * Exposes an authoritative, read-only Claim inventory to the Director during conflict detection.
+     *
+     * @author wangli
+     */
+    private final class ListPersistedClaimsTool extends BoundTool {
+
+        private ListPersistedClaimsTool(ReviewRuntimeContext context) {
+            super(context, RoleType.DIRECTOR);
+        }
+
+        @Override
+        public String getName() {
+            return "list_persisted_claims";
+        }
+
+        @Override
+        public String getDescription() {
+            return "List the authoritative persisted Claims and IDs before opening debate topics; this never changes review state.";
+        }
+
+        @Override
+        public Map<String, Object> getParameters() {
+            return objectSchema(Map.of(), List.of());
+        }
+
+        @Override
+        ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            requireNoInput(input);
+            List<Claim> claims = debateStore.findClaims(review.id());
+            if (claims.isEmpty()) {
+                return ToolResultBlock.text("claims=[]");
+            }
+            String payload = claims.stream()
+                    .map(claim -> "claimId=" + claim.claimId().value()
+                            + "; role=" + claim.roleType()
+                            + "; subjectKey=" + sanitize(claim.subjectKey())
+                            + "; severity=" + claim.severity()
+                            + "; position=" + claim.position()
+                            + "; status=" + claim.status()
+                            + "; statement=" + sanitize(claim.statement())
+                            + "; reason=" + sanitize(claim.reasonSummary()))
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            return ToolResultBlock.text(payload);
+        }
+
+        private String sanitize(String value) {
+            return value.replaceAll("\\s+", " ").trim();
+        }
+    }
+
     private final class OpenTopicTool extends BoundTool {
         private OpenTopicTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "open_debate_topic"; }
@@ -103,6 +162,77 @@ public class ReviewDebateToolFactory {
             DebateService.TopicResult result = debateTools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
                     metadata, RoleType.DIRECTOR, text(input, "subjectKey"), claimIds(input.get("claimIds"))));
             return ToolResultBlock.text("topicId=" + result.topic().id().value() + "; replayed=" + result.replayed());
+        }
+    }
+
+    /** Exposes only persisted public debate identifiers and facts needed for a bounded turn. */
+    private final class ListPersistedDebateTopicsTool extends BoundTool {
+
+        private ListPersistedDebateTopicsTool(ReviewRuntimeContext context, RoleType actorRole) {
+            super(context, actorRole);
+        }
+
+        @Override
+        public String getName() {
+            return "list_persisted_debate_topics";
+        }
+
+        @Override
+        public String getDescription() {
+            return "List authoritative persisted debate topics, Claim IDs, and turn IDs before a debate turn or Judge decision.";
+        }
+
+        @Override
+        public Map<String, Object> getParameters() {
+            return objectSchema(Map.of(), List.of());
+        }
+
+        @Override
+        ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            requireNoInput(input);
+            List<ai.cc.chongming.review.domain.model.DebateTopic> topics = debateStore.findTopics(review.id());
+            if (topics.isEmpty()) {
+                return ToolResultBlock.text("topics=[]");
+            }
+            Map<ClaimId, Claim> claims = debateStore.findClaims(review.id()).stream()
+                    .collect(java.util.stream.Collectors.toMap(Claim::claimId, claim -> claim));
+            Map<TopicId, List<DebateTurn>> turnsByTopic = debateStore.findTurns(review.id()).stream()
+                    .collect(java.util.stream.Collectors.groupingBy(DebateTurn::topicId));
+            String payload = topics.stream()
+                    .sorted(java.util.Comparator.comparing(topic -> topic.id().value()))
+                    .map(topic -> "topicId=" + topic.id().value()
+                            + "; subjectKey=" + sanitize(topic.subjectKey())
+                            + "; status=" + topic.status()
+                            + "; round=" + topic.currentRound()
+                            + "; claims=[" + topic.claimIds().stream()
+                                    .map(claimId -> describeClaim(claims.get(claimId)))
+                                    .collect(java.util.stream.Collectors.joining(", "))
+                            + "]; turns=[" + turnsByTopic.getOrDefault(topic.id(), List.of()).stream()
+                                    .sorted(java.util.Comparator.comparing(turn -> turn.turnId().value()))
+                                    .map(turn -> "turnId=" + turn.turnId().value()
+                                            + ":round=" + turn.round()
+                                            + ":actor=" + turn.actorRole()
+                                            + ":targetRole=" + turn.targetRole()
+                                            + ":type=" + turn.turnType())
+                                    .collect(java.util.stream.Collectors.joining(", "))
+                            + "]")
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            return ToolResultBlock.text(payload);
+        }
+
+        private String describeClaim(Claim claim) {
+            if (claim == null) {
+                return "missing";
+            }
+            return "claimId=" + claim.claimId().value()
+                    + ":role=" + claim.roleType()
+                    + ":position=" + claim.position()
+                    + ":severity=" + claim.severity()
+                    + ":statement=" + sanitize(claim.statement());
+        }
+
+        private String sanitize(String value) {
+            return value.replaceAll("\\s+", " ").trim();
         }
     }
 
@@ -148,6 +278,22 @@ public class ReviewDebateToolFactory {
             }
             boolean replayed = advanceStage(review, metadata, ReviewStage.DEBATE_ROUND_2, "begin-judging", () -> debateService.beginJudging(review));
             if (!replayed) workflowDispatcher.dispatchJudge(review);
+            return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
+        }
+    }
+
+    private final class SkipDebateWhenNoConflictsTool extends BoundTool {
+        private SkipDebateWhenNoConflictsTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
+        @Override public String getName() { return "skip_debate_when_no_conflicts"; }
+        @Override public String getDescription() { return "Enter judging only when persisted Claims have no conflicting positions and no debate topic exists."; }
+        @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(), List.of()); }
+        @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            requireNoInput(input);
+            boolean replayed = advanceStage(review, metadata, ReviewStage.CONFLICT_DETECTION,
+                    "skip-debate-no-conflicts", () -> debateService.skipDebateWhenNoConflicts(review));
+            if (!replayed) {
+                workflowDispatcher.dispatchJudge(review);
+            }
             return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
         }
     }

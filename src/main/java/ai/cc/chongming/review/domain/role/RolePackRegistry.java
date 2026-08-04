@@ -32,6 +32,7 @@ public class RolePackRegistry {
             "submitEvidence",
             "submit_claim",
             "complete_initial_review",
+            "list_persisted_debate_topics",
             "open_debate_topic",
             "close_debate_topic",
             "begin_second_debate_round",

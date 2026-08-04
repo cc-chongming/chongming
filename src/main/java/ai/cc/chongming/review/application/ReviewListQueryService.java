@@ -92,7 +92,7 @@ public class ReviewListQueryService {
             return new ReviewView(
                     projection.reviewId().value(),
                     projection.stage().name(),
-                    event == null ? 0 : event.progress(),
+                    event == null || event.progress() == null ? 0 : event.progress(),
                     projection.attemptNo(),
                     event == null ? 0L : event.sequence(),
                     event == null ? null : event.type().name(),

@@ -23,6 +23,17 @@ public interface ReviewPersistenceMapper {
             """)
     ReviewRow findReview(@Param("reviewId") String reviewId);
 
+    /**
+     * Resolves the review root that owns a deterministic Markdown intake identity.
+     *
+     * @author wangli
+     */
+    @Select("""
+            SELECT review_id AS reviewId, stage, current_attempt_no AS attemptNo, version
+            FROM review_request WHERE input_idempotency_key = #{inputIdempotencyKey}
+            """)
+    ReviewRow findReviewByInputIdempotencyKey(@Param("inputIdempotencyKey") String inputIdempotencyKey);
+
     @Insert("""
             INSERT INTO review_request
                 (review_id, request_id, submitter_id, stage, input_idempotency_key, current_attempt_no, version)

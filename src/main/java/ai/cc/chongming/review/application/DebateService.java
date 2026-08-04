@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.protocol.DebateStateMachine;
 import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
+import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import java.time.Instant;
@@ -237,6 +238,41 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         }
     }
 
+    /**
+     * Preserves the two-round state-machine audit trail when the completed initial review has no
+     * conflicting Claim positions, then hands the review to the Judge for an AI Gate draft.
+     */
+    public void skipDebateWhenNoConflicts(Review review) {
+        Objects.requireNonNull(review, "review must not be null");
+        if (review.stage() != ReviewStage.CONFLICT_DETECTION) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "debate can be skipped only during conflict detection");
+        }
+        if (!protocolGuard.validateDebateStart(review.roleActivations()).isValid()) {
+            throw new ReviewDomainException(ReviewErrorCode.CORE_ROLE_INITIAL_REVIEW_REQUIRED,
+                    "all core roles must complete independent initial review before debate can be skipped");
+        }
+        if (!debateStore.findTopics(review.id()).isEmpty() || hasConflictingClaimPositions(review)) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "debate can be skipped only when no conflicting Claim positions remain");
+        }
+        ReviewStateMachine stateMachine = new ReviewStateMachine();
+        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
+        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_2);
+        review.transitionTo(stateMachine, ReviewStage.JUDGING);
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_SKIPPED,
+                RoleType.DIRECTOR,
+                null,
+                null,
+                null,
+                null,
+                null,
+                80,
+                Map.of("reason", "NO_CONFLICTING_CLAIM_POSITIONS")));
+    }
+
     /** Closes a topic with a public resolution or escalation reason. */
     public TopicResult closeTopic(Review review, DebateToolCommands.CloseTopic command) {
         DebateTopic topic = requireTopic(review, command.metadata(), command.topicId());
@@ -290,6 +326,16 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
         return debateStore.findTopic(review.id(), topicId)
                 .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
                         "topic does not belong to this review"));
+    }
+
+    private boolean hasConflictingClaimPositions(Review review) {
+        return debateStore.findClaims(review.id()).stream()
+                .filter(claim -> claim.status() != ClaimStatus.WITHDRAWN)
+                .collect(java.util.stream.Collectors.groupingBy(
+                        claim -> claim.subjectKey().trim().toLowerCase(java.util.Locale.ROOT),
+                        java.util.stream.Collectors.mapping(Claim::position, java.util.stream.Collectors.toSet())))
+                .values().stream()
+                .anyMatch(positions -> positions.size() > 1);
     }
 
     private Claim requireClaimInTopic(ReviewId reviewId, DebateTopic topic, ClaimId claimId) {

@@ -77,7 +77,30 @@ class DashboardQueryServiceTests {
                 .isEqualTo(active.value().toString());
     }
 
+    @Test
+    void defaultsProgressForHistoricalEventsThatDoNotContainIt() {
+        InMemoryRequirementRepository requirements = new InMemoryRequirementRepository();
+        InMemoryReviewEventStore events = new InMemoryReviewEventStore();
+        InMemoryReviewRegistry reviews = new InMemoryReviewRegistry();
+        InMemoryReviewReportStore reports = new InMemoryReviewReportStore();
+        ReviewId active = new ReviewId(UUID.randomUUID());
+        reviews.register(Review.restore(active, ReviewStage.PLANNING, 1, 1L, List.of(), Map.of()));
+        events.append(draft(active, ReviewStage.PLANNING, "历史事件", null));
+        DashboardQueryService service = new DashboardQueryService(
+                requirements, events, new InMemoryReviewPlatformProjectionStore(events, reports, reviews));
+
+        DashboardQueryService.DashboardView result = service.getDashboard();
+
+        assertThat(result.activeReviews()).singleElement()
+                .extracting(DashboardQueryService.ReviewView::progress)
+                .isEqualTo(0);
+    }
+
     private ReviewEventDraft draft(ReviewId reviewId, ReviewStage stage, String summary) {
+        return draft(reviewId, stage, summary, 30);
+    }
+
+    private ReviewEventDraft draft(ReviewId reviewId, ReviewStage stage, String summary, Integer progress) {
         return new ReviewEventDraft(
                 reviewId,
                 1,
@@ -89,7 +112,7 @@ class DashboardQueryServiceTests {
                 null,
                 null,
                 null,
-                30,
+                progress,
                 Instant.now(),
                 1,
                 Map.of("publicSummary", summary));

@@ -71,6 +71,20 @@ class DebateGoldenPathIntegrationTests {
         assertThat(opened.topic().turns()).hasSize(4);
     }
 
+    @Test
+    void reachesJudgingWithoutInventingATopicWhenClaimsHaveNoConflict() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        Review review = conflictDetectionReview();
+        store.saveClaim(claim(review.id(), RoleType.PRODUCT, ClaimPosition.OPPOSE));
+        store.saveClaim(claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE));
+
+        debateService.skipDebateWhenNoConflicts(review);
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.JUDGING);
+        assertThat(store.findTopics(review.id())).isEmpty();
+    }
+
     private Review conflictDetectionReview() {
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         Review review = Review.pending(new ReviewId(UUID.randomUUID()));

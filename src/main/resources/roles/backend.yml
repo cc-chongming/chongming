@@ -14,6 +14,7 @@ checklist:
 allowedTools:
   - submit_claim
   - complete_initial_review
+  - list_persisted_debate_topics
   - submit_challenge
   - submit_rebuttal
   - change_claim_position

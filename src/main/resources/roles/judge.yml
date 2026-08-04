@@ -11,6 +11,7 @@ checklist:
   - Check cited evidence and disputed claims.
   - Check whether a human decision is required.
 allowedTools:
+  - list_persisted_debate_topics
   - submit_judgement
   - draft_gate
 outputKind: JUDGE_DECISION

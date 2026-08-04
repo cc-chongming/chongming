@@ -497,3 +497,111 @@ REQLIFE-H3 要求需求状态变更与反向评审绑定同处于需求聚合临
 - Tags: handoff, code-review, concurrency, projection, deterministic-order
 
 ---
+
+## [LRN-20260804-001] verification
+
+**Logged**: 2026-08-04T00:00:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: requirement-platform
+
+### Summary
+
+持久化受理幂等不能只依赖进程内 Map；历史评审事件的可空投影字段也必须在跨评审列表和 Dashboard 同时兼容。
+
+### Details
+
+测试库重启后，只有以输入身份派生的稳定键查询 `review_request.input_idempotency_key`，并从工作区清单恢复快照，才能继续返回同一 review root。仅用内存 `submissions` 会在重启后重复创建评审。另有历史 `review_event.progress=NULL`，直接拆箱会使 `/api/reviews` 和 `/api/dashboard` 失败；读模型应将缺失进度显式映射为 0，而不是假定新增列已回填。
+
+### Suggested Action
+
+涉及跨进程去重时，把唯一键和恢复路径一起测试，并用重启后的真实请求验证。为旧表新增可空字段时，同时检查所有投影与序列化边界。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 test-database verification
+- Related Files: src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java, src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java, src/main/java/ai/cc/chongming/review/application/DashboardQueryService.java
+- Tags: idempotency, restart, nullability, projection, mysql56
+
+---
+
+## [LRN-20260804-002] performance
+
+**Logged**: 2026-08-04T00:00:00+08:00
+**Priority**: medium
+**Status**: active
+**Area**: requirement-platform
+
+### Summary
+
+MySQL 5.6 的排序索引必须完整匹配 Dashboard 的排序键；只有 `occurred_at` 的单列索引仍会导致 filesort。
+
+### Details
+
+Dashboard 近期活动按 `occurred_at DESC, review_id DESC, event_sequence DESC` 读取。测试库中使用 1,000 条会话临时事件进行 `EXPLAIN` 后，V13 的 `(occurred_at, review_id, event_sequence)` 复合索引被选中，结果为 `Using index` 且无 filesort。临时样本不写入业务表，连接结束后自动清理。
+
+### Suggested Action
+
+为 `ORDER BY` 声明索引时，逐列比对筛选和排序顺序，并将迁移后的实际 `EXPLAIN` 作为性能验收证据。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 MySQL 5.6 verification
+- Related Files: src/main/resources/db/migration/V13__optimize_recent_review_event_order.sql, src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewPlatformQueryMapper.java
+- Tags: mysql56, explain, composite-index, dashboard, performance
+
+---
+
+## [LRN-20260804-003] runtime
+
+**Logged**: 2026-08-04T00:00:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: agentscope-workflow
+
+### Summary
+
+AgentScope Director 不能在核心角色注册之前同步耗尽首轮对话；否则它会在 `PLANNING` 读取不到 Claim 的情况下收到后续阶段提示，造成协议工具全部被拒绝。
+
+### Details
+
+运行时启动现在只创建 Director 与执行 Scout；核心角色完成并提交 `INITIAL_REVIEW_COMPLETED` 后，才由已提交事件唤醒 Director。Director、角色和 Judge 只能通过受限的持久化清单工具获得 Claim、topic 与 turn ID，不能假设这些业务事实会自动出现在工作区文件中。无冲突时必须经服务端校验的受限工具进入 JUDGING，不能构造虚假的辩题。
+
+### Suggested Action
+
+修改多 Agent 评审编排时，测试“运行时已注册”和“模型对话已运行”两个不同时间点；任何需要持久化 ID 的角色都应有最小只读查询工具。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 model-gateway validation
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewDebateToolFactory.java
+- Tags: agentscope, orchestration, director, persisted-facts
+
+---
+
+## [LRN-20260804-004] runtime
+
+**Logged**: 2026-08-04T00:00:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: model-gateway
+
+### Summary
+
+模型以正常文本结束、或网关返回非 JSON 响应时，不能让评审静默停在中间阶段；应使用受限收尾器或显式失败事件保持协议可诊断。
+
+### Details
+
+角色收尾器仅保留 `complete_initial_review`，避免模型在收尾阶段反复提交已被拒绝的 Claim。Director 在冲突分析后未作转换时仅获得“无冲突跳过辩论”工具；服务端仍会校验真实 Claim 立场，失败则记录 `DIRECTOR_CONFLICT_INCOMPLETE`。网关的非 JSON 响应仍属于外部失败，应记录为 `ModelGatewayException`，不能被收尾器伪装成成功。
+
+### Suggested Action
+
+所有模型工具流应同时覆盖：正常工具完成、正常文本结束、工具拒绝、模型格式错误和取消。发布验收必须把外部网关错误与本地状态机错误分开记录。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-021 model-gateway validation
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/agentscope/RoleSubagentFactory.java, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewDirectorHarnessFactory.java
+- Tags: finalizer, model-gateway, failure-handling, protocol
+
+---

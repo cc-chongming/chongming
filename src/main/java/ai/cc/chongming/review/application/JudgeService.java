@@ -113,8 +113,8 @@ debateStore.saveJudgeDecision(review.id(), decision);
         }
         GateDecision draft = gatePolicy.draft(review.id(), debateStore.findClaims(review.id()), decisions);
         debateStore.saveGateDraft(draft);
-        boolean humanReviewRequired = draft.result() == GateResult.HUMAN_REQUIRED && review.stage() == ReviewStage.JUDGING;
-        if (humanReviewRequired) {
+        boolean awaitingHumanDecision = review.stage() == ReviewStage.JUDGING;
+        if (awaitingHumanDecision) {
             review.transitionTo(new ReviewStateMachine(), ReviewStage.WAITING_HUMAN);
         }
         eventPublisher.publish(ReviewEventDrafts.completedCommand(
@@ -128,7 +128,7 @@ debateStore.saveJudgeDecision(review.id(), decision);
                 null,
                 90,
                 java.util.Map.of("result", draft.result().name(), "status", draft.status().name())));
-        if (humanReviewRequired) {
+        if (awaitingHumanDecision) {
             eventPublisher.publish(ReviewEventDrafts.completedCommand(
                     review,
                     ai.cc.chongming.review.domain.event.ReviewEventType.HUMAN_REVIEW_REQUIRED,

@@ -160,7 +160,7 @@ public class RoleSubagentFactory {
         if (!rolePack.allowedTools().contains("complete_initial_review")) {
             throw new IllegalArgumentException("role does not require initial-review completion: " + rolePack.roleType());
         }
-        java.util.Set<String> finalizationTools = java.util.Set.of("submit_claim", "complete_initial_review");
+        java.util.Set<String> finalizationTools = java.util.Set.of("complete_initial_review");
         String publicContext = reviewRepositoryToolFactory == null
                 ? ""
                 : reviewContextAssembler == null
@@ -184,7 +184,7 @@ public class RoleSubagentFactory {
                         finalizationTools,
                         toolTraceCollector::captureModelToolUse))
                 .sysPrompt(prompt)
-                .maxIters(Integer.MAX_VALUE)
+                .maxIters(4)
                 .toolkit(toolkit)
                 .disableFilesystemTools()
                 .disableShellTool()
@@ -216,7 +216,8 @@ public class RoleSubagentFactory {
     private String rolePrompt(RolePack rolePack, String publicContext) {
         if (rolePack.roleType() == RoleType.JUDGE) {
             return "You are the JUDGE role. Remain idle until the server sends a JUDGING-stage instruction. "
-                    + "Then use only submit_judgement and draft_gate over persisted public facts. "
+                    + "Then first call list_persisted_debate_topics, use submit_judgement for every terminal topic, "
+                    + "and call draft_gate over persisted public facts. "
                     + "Never create Claims, Evidence, or a final human Gate. "
                     + "Use Simplified Chinese for every visible response, judgement summary, tool summary, and final text.";
         }
@@ -241,6 +242,7 @@ public class RoleSubagentFactory {
                 + " Read repository files only through server-authorized snapshot tools; never access host files, shell commands, "
                 + "other role sessions, hidden reasoning, credentials, or final Gate authority. "
                 + workflowGuidance(rolePack.roleType())
+                + "During a debate-stage instruction, first call list_persisted_debate_topics before using a debate turn tool. "
                 + checklistGuidance
                 + " " + repositoryGuidance
                 + "for concrete files and symbols. Do not probe directories or read repository documents outside the assigned review. "
@@ -283,9 +285,8 @@ public class RoleSubagentFactory {
 
     private String finalizationPrompt(RolePack rolePack, String publicContext) {
         return "You are the " + rolePack.roleType().name() + " review role in protocol-finalization mode. "
-                + "The bounded investigation phase has ended. Do not investigate, read files, debate, or request more context. "
-                + "Only use submit_claim for findings already supported by the supplied context, then call complete_initial_review. "
-                + "You must continue until complete_initial_review is accepted, including when there are no findings. "
+                + "The bounded investigation phase has ended. Do not investigate, read files, debate, request context, or submit new Claims. "
+                + "Your only authorized action is complete_initial_review. Call it now with a concise public summary, including when there are no findings. "
                 + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
                 + publicContext;
     }

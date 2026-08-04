@@ -97,6 +97,25 @@ class ReviewListQueryServiceTests {
     }
 
     @Test
+    void defaultsProgressWhenTheLatestPersistedEventPredatesProgressTracking() {
+        InMemoryReviewEventStore events = new InMemoryReviewEventStore();
+        InMemoryReviewReportStore reports = new InMemoryReviewReportStore();
+        InMemoryReviewRegistry reviews = new InMemoryReviewRegistry();
+        ReviewId planning = new ReviewId(UUID.randomUUID());
+        register(reviews, planning, ReviewStage.PLANNING);
+        events.append(draft(planning, ReviewStage.PLANNING, null));
+        ReviewListQueryService service = new ReviewListQueryService(
+                new InMemoryReviewPlatformProjectionStore(events, reports, reviews), reports);
+
+        ReviewListQueryService.ReviewPage result = service.findPage("PLANNING", false, 1, 20);
+
+        assertThat(result.items()).singleElement().satisfies(view -> {
+            assertThat(view.progress()).isZero();
+            assertThat(view.lastEventType()).isEqualTo("PLAN_CREATED");
+        });
+    }
+
+    @Test
     void returnsOnlyBoundedMetadataForTheReportListPage() {
         InMemoryReviewEventStore events = new InMemoryReviewEventStore();
         InMemoryReviewReportStore reports = new InMemoryReviewReportStore();
@@ -149,6 +168,10 @@ class ReviewListQueryServiceTests {
     }
 
     private ReviewEventDraft draft(ReviewId reviewId, ReviewStage stage) {
+        return draft(reviewId, stage, 20);
+    }
+
+    private ReviewEventDraft draft(ReviewId reviewId, ReviewStage stage, Integer progress) {
         return new ReviewEventDraft(
                 reviewId,
                 1,
@@ -160,7 +183,7 @@ class ReviewListQueryServiceTests {
                 null,
                 null,
                 null,
-                20,
+                progress,
                 Instant.now(),
                 1,
                 Map.of("publicSummary", "平台列表事件"));
