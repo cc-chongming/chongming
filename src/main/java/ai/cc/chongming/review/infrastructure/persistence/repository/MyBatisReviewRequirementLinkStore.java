@@ -38,4 +38,10 @@ public class MyBatisReviewRequirementLinkStore implements ReviewRequirementLinkS
         return mapper.linkPendingUnboundReviewToRequirement(
                 requirementId.value().toString(), reviewId.value().toString()) == 1;
     }
+
+    @Override
+    @Transactional
+    public void unlinkRequirement(RequirementId requirementId) {
+        mapper.unlinkRequirement(Objects.requireNonNull(requirementId, "requirementId must not be null").value().toString());
+    }
 }

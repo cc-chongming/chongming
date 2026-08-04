@@ -47,4 +47,12 @@ public class InMemoryReviewRequirementLinkStore implements ReviewRequirementLink
             }
         }
     }
+
+    @Override
+    public void unlinkRequirement(RequirementId requirementId) {
+        RequirementId targetId = java.util.Objects.requireNonNull(requirementId, "requirementId must not be null");
+        synchronized (requirementByReview) {
+            requirementByReview.entrySet().removeIf(entry -> targetId.equals(entry.getValue()));
+        }
+    }
 }

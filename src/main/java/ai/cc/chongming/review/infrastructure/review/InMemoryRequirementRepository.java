@@ -34,6 +34,21 @@ public class InMemoryRequirementRepository implements RequirementRepository {
     }
 
     @Override
+    public boolean delete(RequirementId requirementId, long expectedVersion) {
+        RequirementId targetId = Objects.requireNonNull(requirementId, "requirementId must not be null");
+        Requirement requirement = requirements.get(targetId);
+        if (requirement == null) {
+            return false;
+        }
+        synchronized (requirement) {
+            if (requirement.version() != expectedVersion) {
+                return false;
+            }
+            return requirements.remove(targetId, requirement);
+        }
+    }
+
+    @Override
     public Optional<Requirement> findById(RequirementId requirementId) {
         return Optional.ofNullable(requirements.get(Objects.requireNonNull(requirementId, "requirementId must not be null")));
     }

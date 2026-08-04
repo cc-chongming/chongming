@@ -92,6 +92,10 @@ export const reviewApi = {
         return request(`/api/requirements/${requirementId}`, { method: 'PUT', ...jsonBody(draft) });
     },
 
+    deleteRequirement(requirementId, expectedVersion) {
+        return request(withQuery(`/api/requirements/${requirementId}`, { expectedVersion }), { method: 'DELETE' });
+    },
+
     submitRequirement(requirementId, { reviewId, expectedVersion }) {
         return request(`/api/requirements/${requirementId}/submit`, {
             method: 'POST', ...jsonBody({ reviewId, expectedVersion })

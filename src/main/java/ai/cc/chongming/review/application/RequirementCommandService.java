@@ -143,6 +143,24 @@ public class RequirementCommandService {
         return transition(requirementId, expectedVersion, RequirementStatus.CANCELLED);
     }
 
+    /**
+     * [AIREVIEW-PLAN-021#2] Permanently removes one user-visible requirement while retaining its
+     * independent review history.  The reverse review link is released before the command returns.
+     */
+    @Transactional
+    public void delete(RequirementId requirementId, long expectedVersion) {
+        Requirement requirement = require(requirementId);
+        synchronized (requirement) {
+            requirement.requireExpectedVersion(expectedVersion);
+            if (!requirementRepository.delete(requirementId, expectedVersion)) {
+                throw new RequirementDomainException(
+                        RequirementErrorCode.VERSION_CONFLICT,
+                        "requirement version no longer matches the persisted aggregate");
+            }
+            reviewRequirementLinkStore.unlinkRequirement(requirementId);
+        }
+    }
+
     private Requirement transition(RequirementId requirementId, long expectedVersion, RequirementStatus target) {
         Requirement requirement = require(requirementId);
         requirement.requireExpectedVersion(expectedVersion);

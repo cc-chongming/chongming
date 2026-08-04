@@ -490,3 +490,4 @@ flowchart LR
 | 2026-08-04 | 使用 `application-local.yml` 的测试库完成运行时验证（不使用 Docker）：Flyway 迁移至 V13；修复历史 `progress=NULL` 投影和跨进程输入幂等；H1 重启重放、H2 分页、H3 并发回滚、M2 1,000 条临时事件 `EXPLAIN` 及浏览器基础路径均已留证。`mvn clean verify` 运行 256 项，0 failure、0 error、6 项 Docker/Testcontainers 跳过；前端 15 项通过。真实 Gate、报告持久化和 Gate→开发→完成仍待获授权的模型网关调用。 |
 | 2026-08-01 | 运行时入口检查：`http://127.0.0.1:8080/review/` 返回 `ERR_CONNECTION_REFUSED`，未启动或重启服务；将其记录为浏览器验收的环境前置条件。 |
 | 2026-08-01 | 验收审计发现 JaCoCo 全项目指令覆盖率为 68.00%、分支覆盖率为 50.19%，且未固化 PLAN-021 新增生产类的独立统计。新增 REQLIFE-V2 覆盖率门禁，必须在外部环境验收前闭环。 |
+| 2026-08-04 | 补齐需求可维护性（#2/#6/#7）：新增带版本校验的 `DELETE /api/requirements/{requirementId}`，任意生命周期状态均可从列表或详情删除；删除仅移除需求并解除需求—评审关联，评审历史保留。详情页补充 DRAFT/RETURNED 编辑入口。创建页收到 Markdown 快照 `reused=true` 时自动删除本次临时需求并链接既有评审，清理失败时保留入口供人工处理。服务、HTTP、MyBatis、API 客户端和浏览器路径已覆盖；真实模型网关验收状态不因此改变。 |

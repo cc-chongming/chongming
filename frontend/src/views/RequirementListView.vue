@@ -19,6 +19,21 @@ async function load(page = 1) {
     }
 }
 
+async function remove(item) {
+    if (!globalThis.confirm(`确定删除需求“${item.title}”吗？需求会从列表移除，关联评审历史会保留。`)) return;
+    loading.value = true;
+    error.value = '';
+    try {
+        await reviewApi.deleteRequirement(item.id, item.version);
+        const page = result.value.items.length === 1 && result.value.page > 1 ? result.value.page - 1 : result.value.page;
+        await load(page);
+    } catch (requestError) {
+        error.value = formatApiError(requestError);
+    } finally {
+        loading.value = false;
+    }
+}
+
 onMounted(() => load());
 </script>
 
@@ -33,8 +48,8 @@ onMounted(() => load());
         <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
         <p v-if="loading" class="empty-note">正在读取需求…</p>
         <div v-else class="platform-table-wrap">
-            <table class="platform-table"><thead><tr><th>需求</th><th>状态</th><th>优先级</th><th>仓库</th><th>更新时间</th></tr></thead>
-                <tbody><tr v-for="item in result.items" :key="item.id"><td><RouterLink :to="`/requirements/${item.id}`">{{ item.title }}</RouterLink></td><td><span class="status-pill">{{ item.status }}</span></td><td>{{ item.priority || '—' }}</td><td>{{ item.repositoryPath || '—' }}</td><td>{{ item.updatedAt }}</td></tr></tbody>
+            <table class="platform-table"><thead><tr><th>需求</th><th>状态</th><th>优先级</th><th>仓库</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody><tr v-for="item in result.items" :key="item.id"><td><RouterLink :to="`/requirements/${item.id}`">{{ item.title }}</RouterLink></td><td><span class="status-pill">{{ item.status }}</span></td><td>{{ item.priority || '—' }}</td><td>{{ item.repositoryPath || '—' }}</td><td>{{ item.updatedAt }}</td><td><button class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td></tr></tbody>
             </table>
             <p v-if="!result.items.length" class="empty-note">没有符合条件的需求。</p>
             <div v-if="result.total > result.size" class="page-actions"><button class="button secondary" :disabled="loading || result.page <= 1" @click="load(result.page - 1)">上一页</button><span>第 {{ result.page }} 页，共 {{ Math.ceil(result.total / result.size) }} 页</span><button class="button secondary" :disabled="loading || result.page * result.size >= result.total" @click="load(result.page + 1)">下一页</button></div>

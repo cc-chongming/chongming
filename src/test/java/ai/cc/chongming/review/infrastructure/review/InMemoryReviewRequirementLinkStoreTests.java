@@ -46,4 +46,20 @@ class InMemoryReviewRequirementLinkStoreTests {
 
         assertThat(store.tryBindPendingReview(reviewId, new RequirementId(UUID.randomUUID()))).isFalse();
     }
+
+    @Test
+    void releasesTheReviewBindingWhenTheRequirementIsDeleted() {
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        InMemoryReviewRequirementLinkStore store = new InMemoryReviewRequirementLinkStore(registry);
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        RequirementId firstRequirement = new RequirementId(UUID.randomUUID());
+        RequirementId replacementRequirement = new RequirementId(UUID.randomUUID());
+        registry.register(Review.pending(reviewId));
+
+        assertThat(store.tryBindPendingReview(reviewId, firstRequirement)).isTrue();
+
+        store.unlinkRequirement(firstRequirement);
+
+        assertThat(store.tryBindPendingReview(reviewId, replacementRequirement)).isTrue();
+    }
 }

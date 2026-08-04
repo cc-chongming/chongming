@@ -18,4 +18,14 @@ public interface ReviewRequirementLinkStore {
      *         differently-bound review
      */
     boolean tryBindPendingReview(ReviewId reviewId, RequirementId requirementId);
+
+    /**
+     * Removes every reverse review link for a requirement that has been deleted.  The review itself
+     * and its immutable history remain available without a dangling requirement reference.
+     *
+     * @param requirementId deleted requirement identifier
+     */
+    default void unlinkRequirement(RequirementId requirementId) {
+        // Existing adapters remain source-compatible until they need to persist reverse links.
+    }
 }

@@ -49,6 +49,14 @@ public class MyBatisRequirementRepository implements RequirementRepository {
     }
 
     @Override
+    @Transactional
+    public boolean delete(RequirementId requirementId, long expectedVersion) {
+        return mapper.delete(
+                Objects.requireNonNull(requirementId, "requirementId must not be null").value().toString(),
+                expectedVersion) == 1;
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Optional<Requirement> findById(RequirementId requirementId) {
         return Optional.ofNullable(mapper.findById(requirementId.value().toString())).map(this::toRequirement);

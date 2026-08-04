@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+import org.apache.ibatis.annotations.Delete;
 
 /**
  * [AIREVIEW-PLAN-021#2] MyBatis statements for the requirement aggregate.
@@ -32,6 +33,9 @@ public interface RequirementMapper {
             WHERE requirement_id = #{row.id} AND version = #{expectedVersion}
             """)
     int update(@Param("row") RequirementRow row, @Param("expectedVersion") long expectedVersion);
+
+    @Delete("DELETE FROM requirement WHERE requirement_id = #{requirementId} AND version = #{expectedVersion}")
+    int delete(@Param("requirementId") String requirementId, @Param("expectedVersion") long expectedVersion);
 
     @Select("""
             SELECT requirement_id AS id, title, description_md AS description, requirement_status AS status,

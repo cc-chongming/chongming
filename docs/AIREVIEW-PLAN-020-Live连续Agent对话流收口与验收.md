@@ -1,6 +1,6 @@
 # `/live` 连续 Agent 对话流收口与验收计划
 
-> **状态**: 🟡 实施中（已通过 `cx-ai` 的真实浏览器运行流、工具 trace 与断线回放验收；多角色全流程终态仍在运行中）
+> **状态**: 🟡 实施中（已通过 `cx-ai` 的真实浏览器运行流、工具 trace 与断线回放验收；2026-08-04 开始将 `/live` 迁移为 full-flow 工作区；多角色全流程终态仍待验收）
 > **创建日期**: 2026-07-31
 > **目标**: 将 `/live` 收口为可靠的、按真实 AG-UI 事件顺序展示 Agent 思考、回答、工具入参和工具结果的连续对话页，并在不阻塞评审领域流程的前提下完成自动化与真实运行验收。
 > **关联计划**: AIREVIEW-PLAN-017、AIREVIEW-PLAN-018、AIREVIEW-PLAN-019
@@ -9,7 +9,7 @@
 
 ### 0.1 用户体验目标
 
-`/#/reviews/{reviewId}/live` 只保留一条连续的运行对话时间线：
+`/#/reviews/{reviewId}/live` 采用 `docs/ui-patterns-demo/full-flow.html` 的流程工作区信息架构：左侧是阶段轨道，中间是当前阶段的公开运行流和角色席位，右侧切换领域事实与运行调试。运行事件仍按真实 AG-UI 到达顺序展示，完整工具入参/结果仅在展开的调试区呈现：
 
 ```text
 CONTEXT_SCOUT
@@ -128,10 +128,10 @@ DIRECTOR
 
 **实现约束**
 
-1. `/live` 只渲染对话时间线与紧凑的 review/阶段头部；删除 `ReviewRoundtable`、`AgentTraceDrawer` 等状态块式主布局。
+1. `/live` 使用 full-flow 工作区：左侧阶段轨道、中间公开运行流与角色席位、右侧领域事实/运行调试侧栏；不再把原始 trace 时间线作为整页唯一主布局。
 2. 思考流式时展开，完成后折叠但可查看全文；回答用普通 Agent 消息气泡；工具默认显示名称、状态、耗时，点击展开原始参数/结果。
 3. 失败、取消、缓存截断等运行事实以 notice 展示，不冒充模型回答。
-4. 响应式布局保持单列，不依赖鼠标悬浮才能获取关键状态。
+4. 响应式布局在窄屏收为单列，不依赖鼠标悬浮才能获取关键状态。
 
 **退出条件**：前端单测证明 thinking → tool → answer 的顺序，且两次不同工具调用显示不同入参与出参；Vite 生产构建同步更新静态资源和 `index.html`。
 
@@ -233,7 +233,7 @@ DIRECTOR
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java` | #1.2/#3.1 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewAgUiEventMapper.java` | #1.3/#3.2 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/RuntimeTraceRedactor.java` | #1.3 | ✅ |
-| `frontend/src/views/ReviewLiveView.vue` | #2.2/#4.2 | ✅（终态无 trace notice；全流程验收待仓库配置） |
+| `frontend/src/views/ReviewLiveView.vue` | #2.2/#4.2 | ✅（full-flow 工作区迁移；全流程终态验收待执行） |
 | `frontend/src/components/LiveAgentConversation.vue` | #2.2/#4.2 | ✅（终态 notice 呈现；全流程验收待仓库配置） |
 | `frontend/src/styles/review.css` | #2.2 | ✅（待浏览器验收） |
 | `src/main/resources/static/review/index.html` | #2.2 | ✅（构建产物） |
@@ -303,3 +303,4 @@ DIRECTOR
 | 2026-07-31 | 用户提供真实仓库 `D:\GitCode\cx-ai`；已校验其存在且为独立 Git work tree。`cx-ai` root 在默认配置和本机覆盖中均改为可移植的 `${CX_AI_REPOSITORY_ROOT:../cx-ai}`：默认查找评审系统同级项目，非标准布局由本机环境变量覆盖，不固化开发机绝对路径且不放宽仓库边界。待用户重启服务后以新的 review/attempt 继续真实浏览器验收。 |
 | 2026-07-31 | 用户重启后的第三次真实验收创建 review `18fdabb2-e6b9-4b40-be74-89e8504e170d`（attempt 1）。`/live` 已观察到 Context Scout、Director、PRODUCT，至少 58 条真实运行条目及 `glob_files`、`list_files`、`read_file`、`todo_write`、`plan_enter`、`plan_write`、`searchText`、`readLines` 调用；刷新前后 31 条已展示条目保持一致，连接恢复后继续追加。查询阶段为 `INITIAL_REVIEW`（40%），Scout 记录 `CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED` 后由 Director 继续。`cx-ai` 仓库定位、运行流与回放验收通过；全角色/Gate/终态仍待当前 attempt 继续运行。 |
 | 2026-07-31 | `cx-ai` 可移植定位规则及本次验收记录回写后，IDEA 项目构建通过（无问题）；`git diff --check` 通过。 |
+| 2026-08-04 | 按用户确认，将 `/reviews/:reviewId/live` 从原始运行 trace 整页迁移为 `full-flow.html` 对应的流程工作区：阶段轨道、当前阶段公开运行流、角色席位和领域事实/调试侧栏复用同一 SSE 与持久化领域事件数据，不新增模型调用或后端协议。 |

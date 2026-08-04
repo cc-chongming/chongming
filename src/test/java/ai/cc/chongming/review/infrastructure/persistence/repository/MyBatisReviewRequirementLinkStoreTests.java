@@ -35,4 +35,14 @@ class MyBatisReviewRequirementLinkStoreTests {
         verify(mapper, never()).linkPendingUnboundReviewToRequirement(
                 requirementId.value().toString(), reviewId.value().toString());
     }
+
+    @Test
+    void clearsThePersistedReverseLinkWhenTheRequirementIsDeleted() {
+        ReviewPersistenceMapper mapper = mock(ReviewPersistenceMapper.class);
+        RequirementId requirementId = new RequirementId(UUID.randomUUID());
+
+        new MyBatisReviewRequirementLinkStore(mapper).unlinkRequirement(requirementId);
+
+        verify(mapper).unlinkRequirement(requirementId.value().toString());
+    }
 }

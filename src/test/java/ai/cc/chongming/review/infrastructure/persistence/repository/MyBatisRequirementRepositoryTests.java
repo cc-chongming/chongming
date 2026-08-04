@@ -63,6 +63,18 @@ class MyBatisRequirementRepositoryTests {
     }
 
     @Test
+    void deletesRequirementWithVersionBoundMapperStatement() {
+        RequirementMapper mapper = mock(RequirementMapper.class);
+        RequirementId requirementId = new RequirementId(UUID.randomUUID());
+        when(mapper.delete(requirementId.value().toString(), 3L)).thenReturn(1);
+
+        boolean deleted = new MyBatisRequirementRepository(mapper).delete(requirementId, 3L);
+
+        assertThat(deleted).isTrue();
+        verify(mapper).delete(requirementId.value().toString(), 3L);
+    }
+
+    @Test
     void restoresRowsForIdAndReviewLookups() {
         RequirementMapper mapper = mock(RequirementMapper.class);
         ReviewId reviewId = new ReviewId(UUID.randomUUID());

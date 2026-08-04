@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * [AIREVIEW-PLAN-021#2] Verifies requirement commands retain creator identity and bind reviews explicitly.
@@ -76,6 +77,46 @@ class RequirementCommandServiceTests {
 
         assertThat(created.status()).isEqualTo(RequirementStatus.DRAFT);
         assertThat(created.reviewId()).isNull();
+    }
+
+    @Test
+    void permanentlyDeletesRequirementAtItsCurrentVersion() {
+        RequirementRepository repository = new InMemoryRequirementRepository();
+        ReviewerIdentityProvider identityProvider = () -> new ReviewerIdentity("product-owner", Set.of(Permission.REVIEW));
+        RequirementCommandService service = new RequirementCommandService(repository, identityProvider);
+        Requirement created = service.create(new RequirementCommandService.CreateRequirementCommand(
+                "过期草稿", "# 草稿", null, "cx-ai", "P1"));
+
+        service.delete(created.id(), created.version());
+
+        assertThat(repository.findById(created.id())).isEmpty();
+    }
+
+    @Test
+    void deletesReviewBoundRequirementAndReleasesItsReverseLink() {
+        RequirementRepository repository = new InMemoryRequirementRepository();
+        ReviewerIdentityProvider identityProvider = () -> new ReviewerIdentity("product-owner", Set.of(Permission.REVIEW));
+        AtomicReference<RequirementId> unlinkedRequirement = new AtomicReference<>();
+        ReviewRequirementLinkStore linkStore = new ReviewRequirementLinkStore() {
+            @Override
+            public boolean tryBindPendingReview(ReviewId reviewId, RequirementId requirementId) {
+                return true;
+            }
+
+            @Override
+            public void unlinkRequirement(RequirementId requirementId) {
+                unlinkedRequirement.set(requirementId);
+            }
+        };
+        RequirementCommandService service = new RequirementCommandService(repository, identityProvider, linkStore);
+        Requirement created = service.create(new RequirementCommandService.CreateRequirementCommand(
+                "已绑定草稿", "# 草稿", null, "cx-ai", "P1"));
+        Requirement submitted = service.submitForReview(created.id(), new ReviewId(UUID.randomUUID()), created.version());
+
+        service.delete(submitted.id(), submitted.version());
+
+        assertThat(repository.findById(submitted.id())).isEmpty();
+        assertThat(unlinkedRequirement).hasValue(submitted.id());
     }
 
     @Test

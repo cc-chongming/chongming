@@ -74,6 +74,9 @@ public interface ReviewPersistenceMapper {
     int linkPendingUnboundReviewToRequirement(
             @Param("requirementId") String requirementId, @Param("reviewId") String reviewId);
 
+    @Update("UPDATE review_request SET requirement_id = NULL WHERE requirement_id = #{requirementId}")
+    int unlinkRequirement(@Param("requirementId") String requirementId);
+
     @Select("""
             SELECT activation_id AS activationId, review_id AS reviewId, attempt_no AS attemptNo,
                    role_code AS roleCode, agent_name AS agentName, status

@@ -17,6 +17,15 @@ public interface RequirementRepository {
 
     void save(Requirement requirement);
 
+    /**
+     * Deletes one requirement only when its persisted version still matches.
+     *
+     * @param requirementId requirement identifier
+     * @param expectedVersion optimistic-lock version
+     * @return whether exactly one matching requirement was deleted
+     */
+    boolean delete(RequirementId requirementId, long expectedVersion);
+
     Optional<Requirement> findById(RequirementId requirementId);
 
     Optional<Requirement> findByReviewId(ReviewId reviewId);

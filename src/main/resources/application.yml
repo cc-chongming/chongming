@@ -53,7 +53,7 @@ review:
         model-name: ${review.model-gateway.model-name:chongming-director-placeholder}
         temperature: 0.2
         timeout: PT45S
-        max-tokens: 2048
+        max-tokens: 65536
         retry:
           max-retries: 2
           initial-backoff: PT0.2S
@@ -64,7 +64,7 @@ review:
         temperature: 0.0
         # Repository exploration can be slow on a local model; switch once to the configured fallback after timeout.
         timeout: PT120S
-        max-tokens: 2048
+        max-tokens: 65536
         retry:
           max-retries: 0
           initial-backoff: PT0.2S
@@ -74,7 +74,7 @@ review:
         model-name: ${review.model-gateway.model-name:chongming-reviewer-placeholder}
         temperature: 0.2
         timeout: PT30S
-        max-tokens: 2048
+        max-tokens: 65536
         retry:
           max-retries: 2
           initial-backoff: PT0.2S
@@ -84,7 +84,7 @@ review:
         model-name: ${review.model-gateway.model-name:chongming-judge-placeholder}
         temperature: 0.0
         timeout: PT30S
-        max-tokens: 1024
+        max-tokens: 65536
         retry:
           max-retries: 2
           initial-backoff: PT0.2S
@@ -95,7 +95,7 @@ review:
         model-name: ${review.model-gateway.model-name:chongming-fallback-placeholder}
         temperature: 0.0
         timeout: PT120S
-        max-tokens: 2048
+        max-tokens: 65536
         retry:
           max-retries: 0
           initial-backoff: PT0.2S
