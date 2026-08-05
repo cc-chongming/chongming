@@ -3,7 +3,11 @@ package ai.cc.chongming.review.application;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
@@ -87,6 +91,36 @@ class ReviewQueryServiceTests {
                 reviewRegistry);
 
         assertThat(service.findSummary(reviewId).orElseThrow().contextScout()).isNull();
+    }
+
+    @Test
+    void exposesAllPersistedClaimsEvenBeforeDebateTopicsExist() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewDebateStore debateStore = mock(ReviewDebateStore.class);
+        Claim claim = new Claim(
+                new ClaimId(UUID.randomUUID()),
+                reviewId,
+                RoleType.FRONTEND,
+                "增量展示可行",
+                ClaimSeverity.P2,
+                ClaimPosition.SUPPORT,
+                "前端已有 DiffViewer，增量数据展示无技术障碍。",
+                "组件成熟。",
+                List.of());
+        when(debateStore.findClaims(reviewId)).thenReturn(List.of(claim));
+        ReviewQueryService service = new ReviewQueryService(
+                mock(ReviewEventStore.class),
+                debateStore,
+                mock(EvidenceLedgerService.class),
+                mock(HumanGateDecisionStore.class),
+                mock(ReviewRegistry.class));
+
+        List<ReviewQueryService.ClaimView> views = service.findClaims(reviewId);
+
+        assertThat(views).hasSize(1);
+        assertThat(views.get(0).role()).isEqualTo("FRONTEND");
+        assertThat(views.get(0).position()).isEqualTo("SUPPORT");
+        assertThat(views.get(0).statement()).isEqualTo("前端已有 DiffViewer，增量数据展示无技术障碍。");
     }
 
     private ReviewEvent event(

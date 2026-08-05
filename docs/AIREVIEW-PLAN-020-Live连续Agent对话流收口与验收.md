@@ -1,6 +1,6 @@
 # `/live` 连续 Agent 对话流收口与验收计划
 
-> **状态**: 🟡 实施中（已通过 `cx-ai` 的真实浏览器运行流、工具 trace 与断线回放验收；2026-08-04 开始将 `/live` 迁移为 full-flow 工作区；多角色全流程终态仍待验收）
+> **状态**: 🟡 实施中（已通过 `cx-ai` 的真实浏览器运行流、工具 trace 与断线回放验收；2026-08-04 开始将 `/live` 迁移为 full-flow 工作区；2026-08-05 `/live` 中间区已按 `docs/ui-patterns-demo/full-flow.html` 拆分为阶段专属视图；多角色全流程终态仍待验收）
 > **创建日期**: 2026-07-31
 > **目标**: 将 `/live` 收口为可靠的、按真实 AG-UI 事件顺序展示 Agent 思考、回答、工具入参和工具结果的连续对话页，并在不阻塞评审领域流程的前提下完成自动化与真实运行验收。
 > **关联计划**: AIREVIEW-PLAN-017、AIREVIEW-PLAN-018、AIREVIEW-PLAN-019
@@ -46,6 +46,38 @@ DIRECTOR
 - IDEA 全量构建及 7 个后端定向测试类（40 个用例）已通过。Scout 三种精确降级原因码均已恢复；`RoleSubagentIsolationTests` 已从过时的 `submitEvidence` 期望改为 RolePack 实际公开的 `submit_claim`/`complete_initial_review`，未放宽生产白名单。
 - 当前 shell 的 `JAVA_HOME` 指向 JDK 8，`./mvnw.cmd test` 在 Maven Enforcer 的 Java 21 基线检查前退出；已使用项目 IDEA JDK 21 完成构建和定向测试，不能将该 Maven 环境问题记为全量 Maven 通过。
 - 已修复 `ReviewDiagnosticsProperties` 的配置绑定构造器歧义：显式标记 record 的两参数主构造器，避免新增 Context Scout 诊断开关后在应用启动时回退到无参实例化。
+
+### 0.4 当前工作区事实（2026-08-05）
+
+- `ReviewLiveView.vue` 的中间区已对齐 `docs/ui-patterns-demo/full-flow.html`：左侧阶段点击后分别渲染 Scout/Director/Judge 运行流、独立审查 4 角色卡（可展开 Claim）、冲突检测卡（由 SUPPORT vs OPPOSE 的 Claim 推导）、辩论对局（回合 Tabs + 共识度环 + 对话流）、人工决策 Gate 草案与决策按钮条；不再有全局常驻的 Director 卡与评审席位块。
+- 冲突、共识度与回合均为前端从 `debates`/`summary.gate` 等公开数据推导，不引入任何 mock 内容；无数据时展示空态说明。
+- 人工决策按钮为跳转评审工作台的链接，正式提交仍走工作台的版本化 Gate 表单，不在观察台直接写领域事实。
+- `npm test`（7 文件、15 用例）、`npx playwright test`（6 用例，含新的阶段切换 E2E）与 `npm run build` 已通过；`static/review` 已同步新 hash 并移除旧资源。
+- 针对真实验收反馈的三项修复：PLAN_CREATED/PLAN_REVISED 事件 payload 新增 `changeReason` 与 `publicTasks`，Director 规划页在无运行时对话时也能展示任务清单与修订原因；新增 `GET /api/reviews/{reviewId}/claims`（`ReviewQueryService.findClaims`）暴露全部已持久化 Claim（含未挂载议题的），角色卡论点不再被最新运行消息覆盖而丢失；角色卡展开后呈现工具入参/结果与思考的可折叠详情。
+- 观察台收到 `INITIAL_REVIEW_COMPLETED` 时即时把对应角色标记为“初审完成”，收到 `CLAIM_SUBMITTED`/`POSITION_CHANGED` 时增量刷新 Claim；左侧独立审查副标题同步显示 `N/4 角色初审完成`。
+- 后端全量 `mvnw test` 89 个测试类、267 个用例全部通过（含真实 MySQL 5.6/8.4 Testcontainers 集成测试，无跳过）；前端 16 单测、6 E2E 用例通过；`static/review` 同步 `index-DeKMhTsU.js` 新 hash。
+- 真实验收 review `2600a48b-0835-43dd-80e5-60faa40569dc` 卡死在 JUDGING 的根因：Director 判定 23 条 Claim 无立场冲突后跳过辩论，Judge 两轮运行均因 `list_persisted_debate_topics` 返回空而拒绝调用 `draft_gate`，随后空转等待，系统无任何重派或兜底 → 永久停滞。修复：Judge 提示词与 Dispatcher 指令明确要求无议题时必须直接调用 `draft_gate`；`AgentScopeReviewRuntimeAdapter` 在 JUDGE 回合结束后新增确定性兜底（阶段仍为 JUDGING 且无 Gate 草案时由 `JudgeService.draftGate` 从持久化 Claim 直接起草），保证流程必然进入 WAITING_HUMAN。卡死的旧 attempt 需在工作台重试创建新 attempt 验证。
+- 本次 Docker 首次可用，MySQL/Testcontainers 集成测试真实执行：暴露并修复了 `ReviewPersistenceMigrationIntegrationTests` 遗留夹具缺陷（v7 基线桩表缺 `review_event` 信封列与 `review_request` 表导致 V10/V11 迁移失败；JSON 列空白重排导致逐字节断言不成立，改为语义等价）。修复后 267 个用例全部通过，此前记录的“环境跳过”不再是唯一依据。
+- 角色完成状态实时刷新修复：单角色初审完成事件是 `ROLE_COMPLETED`（actorRole=真实角色）；此前前端误监听聚合事件 `INITIAL_REVIEW_COMPLETED`（actorRole=DIRECTOR）导致徽标需手动刷新才更新，已改为监听 `ROLE_COMPLETED`，事件流标题同步修正。报告内容修复：`ReviewReportService` 新增“公开论点”章节，纳入全部持久化 Claim（含未挂载辩论议题的）并汇入证据回链，解决跳过辩论时报告只剩骨架的问题；黄金报告文件同步更新。
+- 新增 QQ 邮箱（SMTP）通知渠道（学习通 MCP 渠道保留待后续对接）：新增 `spring-boot-starter-mail` 依赖、`NotificationMailProperties`（review.notification.mail.*，含可选 `authCode`，多构造器场景用 `@ConstructorBinding` 显式指定绑定构造器）、`SmtpMailNotificationAdapter`（按 channel `smtp-mail` 投递，授权码优先取配置文件、其次环境变量，缺发件人/凭据时 fail-closed；认证失败不可重试、传输失败可重试）与 `NotificationDeliveryRouter`（@Primary，按 command.channel 路由邮件/学习通适配器）。本地启用已固化到 `application-local.yml`（worker/mail 开关、channel=smtp-mail、sender/destination/授权码占位符，跟随本文件既有本地密钥约定）；非本地部署仍可用 `REVIEW_QQ_MAIL_*` 环境变量注入。新增 9 个聚焦测试（适配器 6 + 路由 3），`ChongmingApplicationTests` 验证新配置下上下文可启动。
+- 状态不实时刷新根因修复：领域事件 SSE 直接序列化 `ReviewEvent` 领域记录，`reviewId` 等身份字段在 Jackson 3 下变成 `{"value":...}` 对象包装，前端 `event.reviewId !== reviewId` 过滤将所有事件静默丢弃（评审事实面板全程为空、角色徽标只能靠刷新）。修复：`ReviewSseRegistry` 新增扁平化 `SseEventView`（身份字段一律输出纯 UUID/字符串），前端 `review-sse.js` 同时兼容两种形态并归一化后再下发，各新增一个回归用例。
+- 后端工程师不输出论点根因修复：多模块仓库（cx-ai 代码在 `ai-app/*/src/main/...`）下，角色作用域为根锚定前缀匹配，BACKEND 的 `src/main/` 等前缀全部失配，`readLines` 报 INVALID_ARGUMENT、`listFiles/searchText` 全空，模型耗尽轮次后由收尾器以零 Claim 完成。修复：`RepositoryToolContext.allows` 对目录前缀改为任意目录边界匹配（`docs-src/` 类仿冒目录仍被拒绝，精确文件前缀仍根锚定），新增多模块布局聚焦测试。
+
+## 0.5 待办事项
+
+### 0.5.1 独立审查四角色并行执行 ⏳（待额度充足后实施）
+
+**现状结论**（已核实代码与真实运行时间线）：产品/项目/前端/后端四角色的初审目前是**严格串行**——`ReviewOrchestrationService.start()` 用 `concatMap(activateRole)` 逐个激活，而 `activateRole` 结尾的 `runtimeAdapter.send(...)` 会等该角色整个初审回合（多轮工具调用直至提交 Claim/完成初审）跑完才返回，下一个角色才开始。真实评审时间线印证：各角色完成时刻间隔约 4 分钟，初审阶段总耗时 ≈ 四角色耗时之和。
+
+**可行性结论**：协议层面四角色独立审查无先后依赖，可以并行。安全性依据：各角色有独立 Agent 实例/会话/快照授权范围；Claim 提交（`ClaimService.submitClaim`）与完成初审（`InitialReviewProgressService.completeWithoutClaim`）均在 `synchronized(review)` 聚合锁内，并发提交安全；`INITIAL_REVIEW_COMPLETED` 聚合事件由最后一个完成的角色触发，与完成顺序无关。
+
+**实施方案**（已在本机实施并用 `ReviewOrchestrationServiceTests` + `ReviewCommandServiceTests` 验证通过后按用户要求回退，可随时恢复）：
+
+1. 在 `ReviewOrchestrationService.start()` 中把“注册激活”与“回合执行”拆开：先 `concatMap` 串行完成全部角色（含 JUDGE 预注册）的 `registerRole + apply + ROLE_ACTIVATED`（无模型调用，保证聚合变更顺序安全）；
+2. 再用 `flatMapSequential` 并发向各角色下发 `"Perform the assigned review role..."` 指令并等待全部回合完成，保持 `StartResult.coreActivations` 的激活顺序；
+3. 保留既有 `activateRole`（追加角色路径仍用串行语义）。
+
+**注意事项**：并行后模型网关瞬时并发 ≈ 4-5 路，需关注模型端限流与超时（现有 retry 配置可兜底）；真实验收时对比各角色工作区落盘时间戳确认并行生效，并确认 `INITIAL_REVIEW_COMPLETED` 后冲突检测正常衔接。
 
 ## 1. 后端事件契约收口
 
@@ -304,3 +336,4 @@ DIRECTOR
 | 2026-07-31 | 用户重启后的第三次真实验收创建 review `18fdabb2-e6b9-4b40-be74-89e8504e170d`（attempt 1）。`/live` 已观察到 Context Scout、Director、PRODUCT，至少 58 条真实运行条目及 `glob_files`、`list_files`、`read_file`、`todo_write`、`plan_enter`、`plan_write`、`searchText`、`readLines` 调用；刷新前后 31 条已展示条目保持一致，连接恢复后继续追加。查询阶段为 `INITIAL_REVIEW`（40%），Scout 记录 `CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED` 后由 Director 继续。`cx-ai` 仓库定位、运行流与回放验收通过；全角色/Gate/终态仍待当前 attempt 继续运行。 |
 | 2026-07-31 | `cx-ai` 可移植定位规则及本次验收记录回写后，IDEA 项目构建通过（无问题）；`git diff --check` 通过。 |
 | 2026-08-04 | 按用户确认，将 `/reviews/:reviewId/live` 从原始运行 trace 整页迁移为 `full-flow.html` 对应的流程工作区：阶段轨道、当前阶段公开运行流、角色席位和领域事实/调试侧栏复用同一 SSE 与持久化领域事件数据，不新增模型调用或后端协议。 |
+| 2026-08-05 | 确认四角色初审当前为串行执行（concatMap + send 等待整回合），协议上可并行；并行方案已实施并验证测试通过后按用户要求回退，方案完整记入 §0.5.1，待额度充足后实施。 |

@@ -33,6 +33,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         summary: null,
         plans: [],
         debates: [],
+        claims: [],
         humanItems: [],
         humanGateVersions: [],
         report: null,
@@ -68,6 +69,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         state.summary = null;
         state.plans = [];
         state.debates = [];
+        state.claims = [];
         state.humanItems = [];
         state.humanGateVersions = [];
         state.report = null;
@@ -122,6 +124,20 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             if (domainEvent.type === 'REVIEW_CANCELLED') {
                 applyAgUiEvent(state.agUi, { type: EventType.RUN_FINISHED, threadId: state.agUi.threadId, runId: state.agUi.runId });
             }
+            if (domainEvent.type === 'ROLE_COMPLETED' && domainEvent.actorRole && state.summary) {
+                const entries = state.summary.activatedRoles ?? [];
+                if (entries.some((entry) => entry.role === domainEvent.actorRole && !entry.initialReviewCompleted)) {
+                    state.summary = {
+                        ...state.summary,
+                        activatedRoles: entries.map((entry) => entry.role === domainEvent.actorRole
+                            ? { ...entry, initialReviewCompleted: true }
+                            : entry)
+                    };
+                }
+            }
+            if (['CLAIM_SUBMITTED', 'POSITION_CHANGED'].includes(domainEvent.type)) {
+                refreshClaims().catch(() => {});
+            }
             return true;
         }
         applyAgUiEvent(state.agUi, event);
@@ -135,6 +151,11 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         ]);
         state.humanItems = items;
         state.humanGateVersions = gates;
+    }
+
+    async function refreshClaims() {
+        const claims = await optional(api.getClaims(state.reviewId), []);
+        state.claims = Array.isArray(claims) ? claims : [];
     }
 
     async function refreshNotifications() {
@@ -196,8 +217,9 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         reset(reviewId);
         state.loading = true;
         try {
-            const [summary, plans, debates] = await Promise.all([
-                optional(api.getSummary(reviewId), null), api.getPlans(reviewId), api.getDebates(reviewId)
+            const [summary, plans, debates, claims] = await Promise.all([
+                optional(api.getSummary(reviewId), null), api.getPlans(reviewId), api.getDebates(reviewId),
+                optional(api.getClaims(reviewId), [])
             ]);
             state.summary = summary;
             applyAgUiEvent(state.agUi, {
@@ -207,6 +229,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             });
             state.plans = plans;
             state.debates = debates;
+            state.claims = Array.isArray(claims) ? claims : [];
             await Promise.all([refreshHumanData(), refreshReports(), refreshNotifications()]);
             subscription = createReviewSseSubscription({
                 reviewId,
@@ -250,6 +273,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         retryReview,
         refreshSummary,
         refreshHumanData,
+        refreshClaims,
         refreshNotifications,
         refreshReports,
         selectEvidence

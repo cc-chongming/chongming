@@ -90,6 +90,8 @@ public class ReviewReportService implements ReviewEventListener {
                 .orElseThrow(() -> new IllegalStateException("review summary is unavailable"));
         List<HumanReviewItem> humanItems = itemStore.findByReview(review.id(), null, null);
         List<ReviewQueryService.DebateView> debates = queryService.findDebates(review.id());
+        List<ReviewQueryService.ClaimView> claims = queryService.findClaims(review.id());
+        claims = claims == null ? List.of() : List.copyOf(claims);
         ReportContent content = new ReportContent(
                 summary,
                 findAllPlans(review.id()),
@@ -97,10 +99,11 @@ public class ReviewReportService implements ReviewEventListener {
                         .map(activation -> new RoleView(
                                 activation.roleType().name(), activation.agentLabel(), activation.initialReviewCompleted()))
                         .toList(),
+                claims,
                 debates,
                 humanItems.stream().map(this::toHumanItemView).toList(),
                 decisionStore.findVersions(review.id()).stream().map(this::toGateView).toList(),
-                findEvidenceLinks(review.id(), debates, humanItems));
+                findEvidenceLinks(review.id(), claims, debates, humanItems));
         String contentJson = writeJson(content);
         ReviewReport report = new ReviewReport(
                 UUID.randomUUID(),
@@ -160,9 +163,11 @@ public class ReviewReportService implements ReviewEventListener {
 
     private List<EvidenceLinkView> findEvidenceLinks(
             ReviewId reviewId,
+            List<ReviewQueryService.ClaimView> claims,
             List<ReviewQueryService.DebateView> debates,
             List<HumanReviewItem> humanItems) {
         Set<UUID> evidenceIds = new LinkedHashSet<>();
+        claims.forEach(claim -> evidenceIds.addAll(claim.evidenceIds()));
         debates.forEach(debate -> {
             debate.claims().forEach(claim -> evidenceIds.addAll(claim.evidenceIds()));
             debate.turns().forEach(turn -> evidenceIds.addAll(turn.evidenceIds()));
@@ -208,6 +213,17 @@ public class ReviewReportService implements ReviewEventListener {
         markdown.append("\n## 计划\n\n");
         content.planEvents().forEach(plan -> markdown.append("- #").append(plan.sequence())
                 .append(' ').append(plan.type()).append(" (" ).append(plan.occurredAt()).append(")\n"));
+        markdown.append("\n## 公开论点\n\n");
+        content.claims().forEach(claim -> {
+            markdown.append("- ").append(claim.role())
+                    .append(" [").append(claim.severity()).append(" · ").append(claim.position()).append("] ")
+                    .append(claim.subjectKey()).append(": ").append(claim.statement());
+            if (claim.reasonSummary() != null && !claim.reasonSummary().isBlank()) {
+                markdown.append(" — ").append(claim.reasonSummary());
+            }
+            appendEvidenceReferences(markdown, claim.evidenceIds(), content.summary().reviewId());
+            markdown.append('\n');
+        });
         markdown.append("\n## 辩论与裁决\n\n");
         content.debates().forEach(debate -> {
             markdown.append("### ").append(debate.subjectKey()).append("\n\n");
@@ -280,6 +296,7 @@ public class ReviewReportService implements ReviewEventListener {
             ReviewQueryService.ReviewSummary summary,
             List<ReviewQueryService.EventView> planEvents,
             List<RoleView> roles,
+            List<ReviewQueryService.ClaimView> claims,
             List<ReviewQueryService.DebateView> debates,
             List<HumanReviewItemView> humanReviewItems,
             List<HumanGateView> gateDecisions,

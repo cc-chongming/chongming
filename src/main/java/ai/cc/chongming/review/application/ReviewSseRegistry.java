@@ -125,7 +125,7 @@ public class ReviewSseRegistry implements ReviewEventListener {
             subscription.emitter().send(SseEmitter.event()
                     .id(Long.toString(event.sequence()))
                     .name(event.type().name())
-                    .data(event, MediaType.APPLICATION_JSON));
+                    .data(toSseView(event), MediaType.APPLICATION_JSON));
             subscription.setLastDeliveredSequence(event.sequence());
             deliveredEvents.incrementAndGet();
         } catch (IOException exception) {
@@ -133,6 +133,52 @@ public class ReviewSseRegistry implements ReviewEventListener {
             remove(subscription);
             subscription.emitter().completeWithError(exception);
         }
+    }
+
+    /**
+     * Flattens strong-typed identity records into plain JSON values. Browsers compare reviewId
+     * against the path string and would silently drop every event serialized as an object wrapper.
+     */
+    private SseEventView toSseView(ReviewEvent event) {
+        return new SseEventView(
+                event.eventId(),
+                event.sequence(),
+                event.reviewId().value(),
+                event.attemptNo(),
+                event.type().name(),
+                event.category().name(),
+                event.stage().name(),
+                event.actorRole() == null ? null : event.actorRole().name(),
+                event.targetRole() == null ? null : event.targetRole().name(),
+                event.topicId() == null ? null : event.topicId().value(),
+                event.claimId() == null ? null : event.claimId().value(),
+                event.turnId() == null ? null : event.turnId().value(),
+                event.round(),
+                event.progress(),
+                event.occurredAt().toString(),
+                event.payloadVersion(),
+                event.payload());
+    }
+
+    /** @author wangli */
+    public record SseEventView(
+            UUID eventId,
+            long sequence,
+            UUID reviewId,
+            int attemptNo,
+            String type,
+            String category,
+            String stage,
+            String actorRole,
+            String targetRole,
+            UUID topicId,
+            UUID claimId,
+            UUID turnId,
+            Integer round,
+            Integer progress,
+            String occurredAt,
+            int payloadVersion,
+            Map<String, String> payload) {
     }
 
     private void sendHeartbeat(Subscription subscription) {

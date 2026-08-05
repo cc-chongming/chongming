@@ -46,9 +46,17 @@ export function createReviewSseSubscription({
         const consume = (message) => {
             try {
                 const event = JSON.parse(message.data);
-                if (!Number.isInteger(event.sequence) || event.sequence < 1 || event.reviewId !== reviewId) return;
+                // Tolerate both plain UUID strings and legacy {value} object wrappers for identity fields.
+                const reviewIdValue = typeof event.reviewId === 'string' ? event.reviewId : event.reviewId?.value;
+                if (!Number.isInteger(event.sequence) || event.sequence < 1 || reviewIdValue !== reviewId) return;
                 cursor = Math.max(cursor, event.sequence);
-                onEvent(event);
+                onEvent({
+                    ...event,
+                    reviewId: reviewIdValue,
+                    topicId: typeof event.topicId === 'string' ? event.topicId : event.topicId?.value ?? null,
+                    claimId: typeof event.claimId === 'string' ? event.claimId : event.claimId?.value ?? null,
+                    turnId: typeof event.turnId === 'string' ? event.turnId : event.turnId?.value ?? null
+                });
             } catch {
                 onState({ status: 'malformed-event', retryDelayMs: null });
             }

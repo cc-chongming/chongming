@@ -39,11 +39,16 @@ public record RepositoryToolContext(
         this(runtimeId, reviewId, roleType, snapshot, Set.of(""));
     }
 
+    /**
+     * Directory prefixes match at any directory boundary so multi-module layouts
+     * (e.g. {@code ai-app/module/src/main/java/...}) stay inside a role scope such as {@code src/main/}.
+     * Exact file prefixes (README.md, pom.xml) remain root-anchored.
+     */
     public boolean allows(String relativePath) {
         String safePath = normalizeRelativePath(relativePath);
         return allowedPathPrefixes.stream().anyMatch(prefix -> prefix.isEmpty()
                 || safePath.equals(prefix)
-                || (prefix.endsWith("/") && safePath.startsWith(prefix)));
+                || (prefix.endsWith("/") && (safePath.startsWith(prefix) || safePath.contains("/" + prefix))));
     }
 
     public String normalizeRelativePath(String relativePath) {

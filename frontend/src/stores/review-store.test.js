@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fixture from '../test/events-golden.json';
 import { createReviewStore } from './review-store';
 
@@ -7,6 +7,7 @@ function createApi() {
         getSummary: async () => ({ reviewId: fixture.reviewId, attempt: 1, reviewVersion: 4, lastSequence: 3, stage: 'DEBATE_ROUND_1', progress: 52 }),
         getPlans: async () => [fixture.events[0]],
         getDebates: async () => [],
+        getClaims: async () => [],
         getHumanItems: async () => [],
         getHumanGateVersions: async () => [],
         getReport: async () => null,
@@ -129,5 +130,38 @@ describe('review store', () => {
 
         expect(store.state.summary.attempt).toBe(2);
         expect(store.state.summary).not.toHaveProperty('contextScout');
+    });
+
+    it('marks the role complete and refreshes persisted claims as live review facts arrive', async () => {
+        let claimsReads = 0;
+        const claim = { claimId: '30000000-0000-0000-0000-000000000001', role: 'FRONTEND', subjectKey: '增量展示可行', severity: 'P2', position: 'SUPPORT', statement: '前端已有 DiffViewer。', reasonSummary: '组件成熟。', status: 'SUBMITTED', evidenceIds: [] };
+        const api = {
+            ...createApi(),
+            getSummary: async () => ({
+                reviewId: fixture.reviewId, attempt: 1, reviewVersion: 4, lastSequence: 3, stage: 'INITIAL_REVIEW', progress: 40,
+                activatedRoles: [{ role: 'FRONTEND', agentLabel: 'frontend-reviewer', initialReviewCompleted: false }]
+            }),
+            getClaims: async () => {
+                claimsReads += 1;
+                return claimsReads === 1 ? [] : [claim];
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'CLAIM_SUBMITTED', category: 'CLAIM',
+            actorRole: 'FRONTEND', occurredAt: '2026-08-05 11:00:00', payload: {}
+        });
+        await vi.waitFor(() => expect(store.state.claims).toEqual([claim]));
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 5, attemptNo: 1, type: 'ROLE_COMPLETED', category: 'ROLE',
+            actorRole: 'FRONTEND', occurredAt: '2026-08-05 11:05:00', payload: { summary: '初审完成。' }
+        });
+
+        expect(store.state.summary.activatedRoles).toEqual([
+            { role: 'FRONTEND', agentLabel: 'frontend-reviewer', initialReviewCompleted: true }
+        ]);
     });
 });

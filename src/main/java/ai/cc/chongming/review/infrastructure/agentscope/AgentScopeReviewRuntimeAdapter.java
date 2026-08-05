@@ -2,6 +2,7 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.ReviewCancellationToken;
 import ai.cc.chongming.review.application.InitialReviewProgressService;
+import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewEventDrafts;
 import ai.cc.chongming.review.application.ReviewEventPublisher;
 import ai.cc.chongming.review.application.ReviewRuntimeTraceRegistry;
@@ -13,6 +14,7 @@ import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
+import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
@@ -62,6 +64,9 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     private final ConcurrentMap<String, RuntimeState> runtimes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> activeRuntimeByReview = new ConcurrentHashMap<>();
     private final Set<String> cancelledRuntimeIds = ConcurrentHashMap.newKeySet();
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(AgentScopeReviewRuntimeAdapter.class);
+    private JudgeService judgeService;
+    private ReviewDebateStore reviewDebateStore;
 
     public AgentScopeReviewRuntimeAdapter(
             ReviewDirectorHarnessFactory directorFactory,
@@ -118,6 +123,16 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         this.contextScoutHarnessFactory = contextScoutHarnessFactory;
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
+    }
+
+    /**
+     * Supplies the deterministic judging fallback. Optional so existing constructor call sites keep
+     * working; when absent the judge agent remains the only path to a Gate draft.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void configureJudgeFallback(JudgeService judgeService, ReviewDebateStore reviewDebateStore) {
+        this.judgeService = judgeService;
+        this.reviewDebateStore = reviewDebateStore;
     }
 
     @Override
@@ -435,7 +450,38 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 .then(Mono.defer(() -> runDirectorConflictFinalizerIfNeeded(
                         state, roleType, agentId, sessionId)))
                 .then(Mono.<Void>fromRunnable(() -> verifyInitialReviewCompletion(state, roleType)))
+                .then(Mono.<Void>fromRunnable(() -> draftJudgeGateFallbackIfNeeded(state, roleType)))
                 .doOnSuccess(ignored -> state.emit(AgentRuntimeEventType.MESSAGE_SENT, agentId, "completed"));
+    }
+
+    /**
+     * Guarantees liveness after a judge turn: when the review is already JUDGING but the judge ended
+     * without drafting a Gate (for example because no debate topic exists), the deterministic
+     * GatePolicy drafts one from persisted Claims so the flow can reach WAITING_HUMAN instead of
+     * stalling forever in JUDGING.
+     */
+    private void draftJudgeGateFallbackIfNeeded(RuntimeState state, RoleType roleType) {
+        if (roleType != RoleType.JUDGE || judgeService == null || reviewDebateStore == null || reviewRegistry == null) {
+            return;
+        }
+        if (state.cancelled()) {
+            return;
+        }
+        Review review = reviewRegistry.find(state.context().reviewId()).orElse(null);
+        if (review == null || review.stage() != ReviewStage.JUDGING) {
+            return;
+        }
+        if (reviewDebateStore.findGateDraft(review.id()).isPresent()) {
+            return;
+        }
+        try {
+            judgeService.draftGate(review);
+            LOGGER.info("JUDGE_GATE_FALLBACK_DRAFTED reviewId={} attemptNo={}",
+                    state.context().reviewId().value(), state.context().attemptNo());
+        } catch (RuntimeException exception) {
+            LOGGER.warn("JUDGE_GATE_FALLBACK_FAILED reviewId={} attemptNo={}",
+                    state.context().reviewId().value(), state.context().attemptNo(), exception);
+        }
     }
 
     private Mono<Void> runInitialReviewFinalizerIfNeeded(

@@ -74,7 +74,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     public void dispatchJudge(Review review) {
         String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
         send(runtimeId, roleLabel(runtimeId, RoleType.JUDGE),
-                "All debate topics are terminal. Use submit_judgement for each topic, then use draft_gate. Do not add facts.");
+                "All debate topics are terminal. Use submit_judgement for each topic; if the topic list is empty, skip it. Then always call draft_gate exactly once so the judging stage can finish. Do not add facts.");
     }
 
     private void send(String runtimeId, String recipient, String message) {

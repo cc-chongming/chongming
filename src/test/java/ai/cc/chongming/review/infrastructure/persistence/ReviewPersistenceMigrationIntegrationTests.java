@@ -97,7 +97,7 @@ class ReviewPersistenceMigrationIntegrationTests {
     }
 
     @Test
-    void convertsExistingJsonPayloadsToLongTextWithoutLosingSerializedContent() throws SQLException {
+    void convertsExistingJsonPayloadsToLongTextWithoutLosingSerializedContent() throws Exception {
         MysqlDataSource dataSource = dataSource(MYSQL8);
         Map<String, String> serializedPayloads = serializedPayloadColumns();
         try (Connection connection = dataSource.getConnection()) {
@@ -118,8 +118,9 @@ class ReviewPersistenceMigrationIntegrationTests {
                 String[] tableAndColumn = payloadColumn.getKey().split("\\.", 2);
                 assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), tableAndColumn[0], tableAndColumn[1]))
                         .isEqualTo("LONGTEXT");
-                assertThat(readStoredPayload(connection, tableAndColumn[0], tableAndColumn[1]))
-                        .isEqualTo(payloadColumn.getValue());
+                // MySQL JSON columns reformat whitespace on store, so only semantic equality is guaranteed.
+                assertThat(new com.fasterxml.jackson.databind.ObjectMapper().readTree(readStoredPayload(connection, tableAndColumn[0], tableAndColumn[1])))
+                        .isEqualTo(new com.fasterxml.jackson.databind.ObjectMapper().readTree(payloadColumn.getValue()));
             }
         }
     }
@@ -247,8 +248,21 @@ class ReviewPersistenceMigrationIntegrationTests {
         try (Statement statement = connection.createStatement()) {
             for (String tableAndColumn : payloadColumns.keySet()) {
                 String[] parts = tableAndColumn.split("\\.", 2);
+                if ("review_event".equals(parts[0])) {
+                    // The real v7 review_event envelope carried these columns before V8 widened payload_json;
+                    // later index migrations (V10/V12/V13) reference them, so the stub must mirror that shape.
+                    statement.execute("CREATE TABLE review_event (id BIGINT NOT NULL PRIMARY KEY, "
+                            + "review_id CHAR(36) NULL, event_type VARCHAR(64) NULL, attempt_no INT NULL, "
+                            + "event_sequence BIGINT NULL, occurred_at DATETIME(3) NULL, payload_json JSON NULL)");
+                    continue;
+                }
                 statement.execute("CREATE TABLE " + parts[0] + " (id BIGINT NOT NULL PRIMARY KEY, " + parts[1] + " JSON NULL)");
             }
+            // V11 links requirement to the pre-existing review_request table, so the legacy stub needs it too.
+            statement.execute("CREATE TABLE review_request (review_id CHAR(36) NOT NULL PRIMARY KEY, "
+                    + "request_id VARCHAR(128) NULL, submitter_id VARCHAR(128) NULL, stage VARCHAR(32) NULL, "
+                    + "input_idempotency_key VARCHAR(128) NULL, current_attempt_no INT NULL, version BIGINT NULL) "
+                    + "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         }
     }
 

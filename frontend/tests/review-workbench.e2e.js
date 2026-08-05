@@ -14,6 +14,7 @@ test('renders a replayable debate workbench without executing report content', a
         if (path === `/api/reviews/${reviewId}`) return json({ reviewId, attempt: 1, stage: 'DEBATE_ROUND_1', progress: 52, lastSequence: 3, reviewVersion: 4, occurredAt: '2026-07-16 15:00:10', gate: null });
         if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
         if (path.endsWith('/debates')) return json([{ topicId, subjectKey: '登录幂等边界', claimIds: [claimId], status: 'CHALLENGED', currentRound: 1, resolution: null, closedAt: null, claims: [{ claimId, role: 'PRODUCT', subjectKey: '登录幂等边界', severity: 'P1', position: 'SUPPORT', statement: '需要一次性登录令牌。', reasonSummary: '防止重复提交。', status: 'SUBMITTED', evidenceIds: [evidenceId] }], turns: [], judgement: null }]);
+        if (path.endsWith('/claims')) return json([]);
         if (path.endsWith(`/evidence/${evidenceId}`)) return json({ evidenceId, repoRevision: 'demo', snapshotRelativePath: 'src/main/java/App.java', lineNumber: 12, excerpt: '<script>window.__xss = true</script>', excerptHash: 'a', fileHash: 'b', createdAt: '2026-07-16 15:00:00' });
         if (path.endsWith('/human-review-items') || path.endsWith('/human-gate-decisions') || path.endsWith('/notifications') || path.endsWith('/report/versions')) return json([]);
         if (path.endsWith('/report')) return json({ title: '报告' }, 404);
@@ -42,7 +43,7 @@ test('starts a pending review with its server command contract', async ({ page }
         }
         if (path === `/api/reviews/${reviewId}`) return json({ reviewId, attempt: 1, stage: 'PENDING', progress: 0, lastSequence: 0, reviewVersion: 0, occurredAt: null, gate: null });
         if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
-        if (path.endsWith('/debates')) return json([]);
+        if (path.endsWith('/debates') || path.endsWith('/claims')) return json([]);
         if (path.endsWith('/human-review-items') || path.endsWith('/human-gate-decisions') || path.endsWith('/notifications') || path.endsWith('/report/versions')) return json([]);
         if (path.endsWith('/report')) return json({ title: '报告' }, 404);
         return json({});
@@ -57,7 +58,8 @@ test('starts a pending review with its server command contract', async ({ page }
     await expect(page.getByText('启动命令已受理，正在等待服务端事件。')).toBeVisible();
 });
 
-test('renders the live review page as the full-flow workspace', async ({ page }) => {
+test('renders the live review page as the full-flow workspace with phase-specific views', async ({ page }) => {
+    const debateTopicId = '20000000-0000-0000-0000-000000000002';
     await page.route('**/api/reviews/**', async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
@@ -73,7 +75,25 @@ test('renders the live review page as the full-flow workspace', async ({ page })
             });
         }
         if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
-        if (path.endsWith('/debates') || path.endsWith('/human-review-items') || path.endsWith('/human-gate-decisions')
+        if (path.endsWith('/debates')) {
+            return json([{
+                topicId: debateTopicId, subjectKey: '数据冲突解决策略', claimIds: [claimId], status: 'CHALLENGED',
+                currentRound: 1, resolution: null, closedAt: null,
+                claims: [
+                    { claimId, role: 'PRODUCT', subjectKey: '增量同步是核心诉求', severity: 'P1', position: 'SUPPORT', statement: '增量同步必须上线。', reasonSummary: '全量方案已到瓶颈。', status: 'SUBMITTED', evidenceIds: [] },
+                    { claimId: '30000000-0000-0000-0000-000000000002', role: 'BACKEND', subjectKey: '冲突策略未定义', severity: 'P0', position: 'OPPOSE', statement: '并发写入一致性无法保证。', reasonSummary: '缺少版本号字段。', status: 'SUBMITTED', evidenceIds: [] }
+                ],
+                turns: [{ turnId: '40000000-0000-0000-0000-000000000001', round: 1, actorRole: 'BACKEND', targetRole: 'PRODUCT', type: 'CHALLENGE', targetClaimId: claimId, targetTurnId: null, content: '业务上能接受数据丢失吗？', evidenceIds: [], stanceBefore: 'OPPOSE', stanceAfter: null }],
+                judgement: null
+            }]);
+        }
+        if (path.endsWith('/claims')) {
+            return json([
+                { claimId, role: 'PRODUCT', subjectKey: '增量同步是核心诉求', severity: 'P1', position: 'SUPPORT', statement: '增量同步必须上线。', reasonSummary: '全量方案已到瓶颈。', status: 'SUBMITTED', evidenceIds: [] },
+                { claimId: '30000000-0000-0000-0000-000000000002', role: 'BACKEND', subjectKey: '冲突策略未定义', severity: 'P0', position: 'OPPOSE', statement: '并发写入一致性无法保证。', reasonSummary: '缺少版本号字段。', status: 'SUBMITTED', evidenceIds: [] }
+            ]);
+        }
+        if (path.endsWith('/human-review-items') || path.endsWith('/human-gate-decisions')
             || path.endsWith('/notifications') || path.endsWith('/report/versions')) return json([]);
         if (path.endsWith('/report')) return json({ title: '报告' }, 404);
         return json({});
@@ -83,10 +103,34 @@ test('renders the live review page as the full-flow workspace', async ({ page })
 
     await expect(page.getByText('需求评审全流程', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '评审流程' })).toBeVisible();
-    await expect(page.getByText('Director 协调者', { exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '评审席位' })).toBeVisible();
     await expect(page.getByRole('button', { name: '运行调试' })).toBeVisible();
-    await expect(page.getByText('参数与完整结果仅在展开后可见。')).toBeVisible();
+
+    // 默认停留在当前阶段：独立审查，展示 4 角色卡片；已持久化的 Claim 始终保留在卡片上
+    await expect(page.getByRole('heading', { name: /独立审查/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /产品经理/ })).toBeVisible();
+    await expect(page.getByText('提交 1 个 Claim · P1: 增量同步是核心诉求')).toBeVisible();
+    await expect(page.getByText('等待 Director 分配评审任务。').first()).toBeVisible();
+    // 展开角色卡后可看到论点与可折叠的运行详情
+    await page.getByRole('button', { name: /后端工程师/ }).click();
+    await expect(page.getByText('并发写入一致性无法保证。')).toBeVisible();
+
+    // 切换到冲突检测：展示 SUPPORT vs OPPOSE 推导出的冲突卡
+    await page.getByRole('button', { name: /冲突检测/ }).click();
+    await expect(page.getByText('冲突 #1 [P0] · 数据冲突解决策略')).toBeVisible();
+    await expect(page.getByText('增量同步必须上线。')).toBeVisible();
+
+    // 切换到多轮辩论：展示回合 Tabs、支持/质疑对局与对话流
+    await page.getByRole('button', { name: /多轮辩论/ }).click();
+    await expect(page.getByRole('heading', { name: /多轮辩论 — 数据冲突解决策略/ })).toBeVisible();
+    await expect(page.getByText('🟢 支持方')).toBeVisible();
+    await expect(page.getByText('🔴 质疑方')).toBeVisible();
+    await expect(page.getByText('业务上能接受数据丢失吗？')).toBeVisible();
+    await expect(page.getByText('共识度（支持 Claim 占比）')).toBeVisible();
+
+    // 切换到人工决策：展示 Gate 草案区与决策按钮条
+    await page.getByRole('button', { name: /人工决策/ }).click();
+    await expect(page.getByText('系统已暂停 AI 输出，等待人类做出最终版本化决策')).toBeVisible();
+    await expect(page.getByRole('link', { name: '✅ 通过' })).toBeVisible();
 });
 
 test('removes the temporary draft when the uploaded Markdown already has a review', async ({ page }) => {

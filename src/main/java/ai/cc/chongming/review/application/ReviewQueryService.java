@@ -149,6 +149,17 @@ public class ReviewQueryService {
                 .map(this::toEvidenceView);
     }
 
+    /**
+     * Exposes every persisted public claim regardless of debate topic membership, so role cards keep
+     * showing submitted viewpoints before conflict detection binds claims to topics.
+     */
+    public List<ClaimView> findClaims(ReviewId reviewId) {
+        return debateStore.findClaims(reviewId).stream()
+                .sorted(Comparator.comparing(claim -> claim.claimId().value()))
+                .map(this::toClaimView)
+                .toList();
+    }
+
     private DebateView toDebateView(
             DebateTopic topic,
             Map<ClaimId, Claim> claimsById,

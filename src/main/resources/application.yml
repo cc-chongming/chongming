@@ -5,6 +5,21 @@ spring:
     name: chongming
   flyway:
     enabled: false
+  mail:
+    # QQ 邮箱 SMTP（SSL 465）；password 必须使用 QQ 邮箱授权码，通过环境变量注入，不入库不入仓。
+    host: ${REVIEW_QQ_MAIL_HOST:smtp.qq.com}
+    port: ${REVIEW_QQ_MAIL_PORT:465}
+    username: ${REVIEW_QQ_MAIL_SENDER:}
+    password: ${REVIEW_QQ_MAIL_AUTH_CODE:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+          connectiontimeout: 10000
+          timeout: 30000
+          writetimeout: 30000
 
 review:
   workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}
@@ -122,9 +137,19 @@ review:
     # Delivery is disabled until a verified Learning Platform MCP client and its real contract are supplied.
     worker-enabled: ${REVIEW_NOTIFICATION_WORKER_ENABLED:false}
     mcp-enabled: ${REVIEW_LEARNING_PLATFORM_MCP_ENABLED:false}
+    # QQ/SMTP mail channel: set REVIEW_QQ_MAIL_ENABLED=true plus REVIEW_QQ_MAIL_SENDER and
+    # REVIEW_QQ_MAIL_AUTH_CODE (QQ 邮箱授权码), then use channel smtp-mail with the recipient address as destination.
+    mail-enabled: ${REVIEW_QQ_MAIL_ENABLED:false}
     channel: ${REVIEW_NOTIFICATION_CHANNEL:learning-platform}
     destination: ${REVIEW_NOTIFICATION_DESTINATION:learning-platform-recipient-placeholder}
     credential-environment-variable: ${REVIEW_LEARNING_PLATFORM_MCP_TOKEN_ENV:REVIEW_LEARNING_PLATFORM_MCP_TOKEN}
     max-attempts: ${REVIEW_NOTIFICATION_MAX_ATTEMPTS:5}
     initial-retry-delay: ${REVIEW_NOTIFICATION_INITIAL_RETRY_DELAY:PT30S}
     worker-delay: ${REVIEW_NOTIFICATION_WORKER_DELAY:PT5S}
+    mail:
+      host: ${REVIEW_QQ_MAIL_HOST:smtp.qq.com}
+      port: ${REVIEW_QQ_MAIL_PORT:465}
+      sender: ${REVIEW_QQ_MAIL_SENDER:}
+      credential-environment-variable: ${REVIEW_QQ_MAIL_AUTH_CODE_ENV:REVIEW_QQ_MAIL_AUTH_CODE}
+      subject-prefix: ${REVIEW_QQ_MAIL_SUBJECT_PREFIX:【重明需求评审】}
+      auth-code: ${REVIEW_QQ_MAIL_AUTH_CODE:}

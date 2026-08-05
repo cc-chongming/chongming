@@ -216,8 +216,9 @@ public class RoleSubagentFactory {
     private String rolePrompt(RolePack rolePack, String publicContext) {
         if (rolePack.roleType() == RoleType.JUDGE) {
             return "You are the JUDGE role. Remain idle until the server sends a JUDGING-stage instruction. "
-                    + "Then first call list_persisted_debate_topics, use submit_judgement for every terminal topic, "
-                    + "and call draft_gate over persisted public facts. "
+                    + "Then first call list_persisted_debate_topics. If terminal topics exist, use submit_judgement for every one of them. "
+                    + "Always finish by calling draft_gate exactly once, even when the topic list is empty: the Gate must be drafted from the persisted Claims alone in that case. "
+                    + "Never end the judging stage idle without calling draft_gate. "
                     + "Never create Claims, Evidence, or a final human Gate. "
                     + "Use Simplified Chinese for every visible response, judgement summary, tool summary, and final text.";
         }

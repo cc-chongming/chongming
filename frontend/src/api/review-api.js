@@ -191,6 +191,10 @@ export const reviewApi = {
         return request(`/api/reviews/${reviewId}/debates`);
     },
 
+    getClaims(reviewId) {
+        return request(`/api/reviews/${reviewId}/claims`);
+    },
+
     getEvidence(reviewId, evidenceId) {
         return request(`/api/reviews/${reviewId}/evidence/${evidenceId}`);
     },

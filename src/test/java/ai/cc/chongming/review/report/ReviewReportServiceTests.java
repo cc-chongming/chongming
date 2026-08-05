@@ -62,6 +62,11 @@ class ReviewReportServiceTests {
                 null)));
         when(queryService.findPlans(reviewId, 0L, 500)).thenReturn(new ReviewQueryService.EventPage(List.of(), null));
         when(queryService.findDebates(reviewId)).thenReturn(List.of());
+        when(queryService.findClaims(reviewId)).thenReturn(List.of(new ReviewQueryService.ClaimView(
+                UUID.fromString("30000000-0000-0000-0000-000000000001"),
+                "PRODUCT", "incremental-sync-core", "P1", "SUPPORT",
+                "增量同步必须上线。", "全量方案已到瓶颈。", "SUBMITTED",
+                List.of(UUID.fromString("50000000-0000-0000-0000-000000000001")))));
         service = new ReviewReportService(
                 reportStore,
                 queryService,
@@ -81,7 +86,9 @@ class ReviewReportServiceTests {
         assertEquals(2L, second.reportVersion());
         assertEquals(first.contentHash(), second.contentHash());
         assertTrue(first.contentJson().contains("approved for release"));
+        assertTrue(first.contentJson().contains("incremental-sync-core"));
         assertTrue(first.markdown().contains("# 审核报告"));
+        assertTrue(first.markdown().contains("公开论点"));
         assertTrue(first.markdown().contains("最终决定版本"));
         assertEquals(2, service.findVersions(reviewId).size());
         try (java.io.InputStream input = java.util.Objects.requireNonNull(

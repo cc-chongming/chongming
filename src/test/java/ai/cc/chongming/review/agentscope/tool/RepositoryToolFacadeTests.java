@@ -91,6 +91,47 @@ class RepositoryToolFacadeTests {
                 .hasMessageContaining("snapshot-relative path is unsafe");
     }
 
+    @Test
+    void keepsMultiModuleSourceTreesInsideBackendScopeAndRejectsLookalikeDirectories() throws Exception {
+        RepositorySnapshot snapshot = multiModuleSnapshot();
+        RepositoryToolContext backendContext = new RepositoryToolContext(
+                "runtime-1", snapshot.reviewId(), RoleType.BACKEND, snapshot, Set.of("src/main/", "src/test/"));
+        ReadOnlyRepositoryTools repositoryTools = new ReadOnlyRepositoryTools(new RepositorySearchIndex());
+
+        assertThat(repositoryTools.listFiles(backendContext, 10, IntakeCancellation.neverCancelled()))
+                .extracting(RepositorySearchIndex.FileMetadata::relativePath)
+                .containsExactly("ai-app/module-a/src/main/java/App.java");
+        assertThat(repositoryTools.readLines(
+                backendContext, "ai-app/module-a/src/main/java/App.java", 1, 10, IntakeCancellation.neverCancelled()))
+                .isNotEmpty();
+        assertThatThrownBy(() -> repositoryTools.readLines(
+                backendContext, "docs-src/main/java/Fake.java", 1, 10, IntakeCancellation.neverCancelled()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("outside this role's assigned snapshot scope");
+    }
+
+    private RepositorySnapshot multiModuleSnapshot() throws Exception {
+        Path root = temporaryDirectory.resolve("multi-module/repository");
+        Files.createDirectories(root.resolve("ai-app/module-a/src/main/java"));
+        Files.createDirectories(root.resolve("docs-src/main/java"));
+        Files.writeString(root.resolve("ai-app/module-a/src/main/java/App.java"),
+                "class App {\n}\n", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("docs-src/main/java/Fake.java"),
+                "class Fake {\n}\n", StandardCharsets.UTF_8);
+        return new RepositorySnapshot(
+                UUID.randomUUID(),
+                new ReviewId(UUID.randomUUID()),
+                "multi-module-repository",
+                root,
+                root,
+                "c".repeat(40),
+                "main",
+                false,
+                "d".repeat(64),
+                1,
+                Instant.now());
+    }
+
     private RepositorySnapshot snapshot() throws Exception {
         Path root = temporaryDirectory.resolve("snapshot/repository");
         Files.createDirectories(root.resolve("src"));

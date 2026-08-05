@@ -47,6 +47,11 @@ public class ReviewQueryController {
         return reviewQueryService.findDebates(new ReviewId(reviewId));
     }
 
+    @GetMapping("/{reviewId}/claims")
+    public java.util.List<ReviewQueryService.ClaimView> claims(@PathVariable UUID reviewId) {
+        return reviewQueryService.findClaims(new ReviewId(reviewId));
+    }
+
     @GetMapping("/{reviewId}/evidence/{evidenceId}")
     public ResponseEntity<ReviewQueryService.EvidenceView> evidence(
             @PathVariable UUID reviewId,

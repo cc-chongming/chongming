@@ -15,6 +15,7 @@ import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkspaceLayout;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -83,7 +84,8 @@ public class ReviewOrchestrationService {
         ReviewWorkspaceLayout.ReviewWorkspace workspace = workspaceLayout.open(context);
         ReviewPlan initialPlan = appendPlan(context, request.publicTasks(), request.changeReason(), "DIRECTOR");
         writePlan(workspace, initialPlan, context);
-        emit(context, OrchestrationEventType.PLAN_CREATED, ReviewStage.PLANNING, "DIRECTOR", initialPlan.planVersion());
+        emit(context, OrchestrationEventType.PLAN_CREATED, ReviewStage.PLANNING, "DIRECTOR", initialPlan.planVersion(),
+                planPayload(initialPlan));
 
         AgentRuntimeStartRequest runtimeRequest = new AgentRuntimeStartRequest(
                 context.runtimeId(), context.userId(), context.directorSessionId(), request.initialMessage(), context);
@@ -157,7 +159,8 @@ public class ReviewOrchestrationService {
         }
         ReviewPlan revised = appendPlan(context, publicTasks, reason, "DIRECTOR");
         writePlan(workspace, revised, context);
-        emit(context, OrchestrationEventType.PLAN_REVISED, ReviewStage.PLANNING, "DIRECTOR", revised.planVersion());
+        emit(context, OrchestrationEventType.PLAN_REVISED, ReviewStage.PLANNING, "DIRECTOR", revised.planVersion(),
+                planPayload(revised));
         return new PlanRevision(previous.planVersion(), revised, reason);
     }
 
@@ -253,6 +256,38 @@ public class ReviewOrchestrationService {
             ReviewStage stage,
             String actor,
             long referenceVersion) {
+        emit(context, type, stage, actor, referenceVersion, Map.of());
+    }
+
+    /**
+     * Carries the public plan content (tasks and revision reason) on PLAN events so read models can
+     * show what the Director actually planned without reading workspace artifacts.
+     */
+    private Map<String, String> planPayload(ReviewPlan plan) {
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("changeReason", plan.changeReason());
+        payload.put("publicTasks", String.join("\n", plan.publicTasks()));
+        return payload;
+    }
+
+    private Map<String, String> mergedPayload(long referenceVersion, Map<String, String> extraPayload) {
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("referenceVersion", Long.toString(referenceVersion));
+        extraPayload.forEach((key, value) -> {
+            if (key != null && !key.isBlank() && value != null) {
+                payload.put(key, value);
+            }
+        });
+        return payload;
+    }
+
+    private void emit(
+            ReviewRuntimeContext context,
+            OrchestrationEventType type,
+            ReviewStage stage,
+            String actor,
+            long referenceVersion,
+            Map<String, String> extraPayload) {
         List<OrchestrationEvent> events = eventsByRuntime.computeIfAbsent(
                 context.runtimeId(), ignored -> java.util.Collections.synchronizedList(new ArrayList<>()));
         long sequence = eventSequences.computeIfAbsent(context.runtimeId(), ignored -> new AtomicLong()).incrementAndGet();
@@ -272,7 +307,7 @@ public class ReviewOrchestrationService {
                 progressFor(stage),
                 null,
                 1,
-                Map.of("referenceVersion", Long.toString(referenceVersion))));
+                mergedPayload(referenceVersion, extraPayload)));
     }
 
     private ai.cc.chongming.review.domain.event.ReviewEventType toBusinessEventType(OrchestrationEventType type) {
