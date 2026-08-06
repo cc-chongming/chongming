@@ -40,7 +40,6 @@ public class NotificationOutboxController {
 
     @GetMapping
     public List<NotificationOutboxEntry> list(@PathVariable UUID reviewId) {
-        requireReview(reviewId);
         return outboxService.findByReview(new ReviewId(reviewId));
     }
 

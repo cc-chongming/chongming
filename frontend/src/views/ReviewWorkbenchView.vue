@@ -34,6 +34,47 @@ const connectionText = computed(() => ({
     unsupported: '浏览器不支持实时连接', 'malformed-event': '收到无效事件', closed: '连接已关闭'
 }[state.connection.status] ?? state.connection.status));
 
+const stageList = ['PENDING', 'SNAPSHOTTING', 'PLANNING', 'INITIAL_REVIEW', 'CONFLICT_DETECTION', 'DEBATE_ROUND_1', 'DEBATE_ROUND_2', 'JUDGING', 'WAITING_HUMAN', 'NOTIFYING', 'COMPLETED'];
+const pipelineSteps = [
+    { key: 'scout', label: 'Scout', onStages: ['SNAPSHOTTING', 'PLANNING'] },
+    { key: 'director', label: 'Director', onStages: ['PLANNING'] },
+    { key: 'review', label: '独立审查', onStages: ['INITIAL_REVIEW'] },
+    { key: 'conflict', label: '冲突检测', onStages: ['CONFLICT_DETECTION'] },
+    { key: 'debate', label: '多轮辩论', onStages: ['DEBATE_ROUND_1', 'DEBATE_ROUND_2'] },
+    { key: 'judge', label: 'Judge', onStages: ['JUDGING'] },
+    { key: 'human', label: '人工决策', onStages: ['WAITING_HUMAN', 'NOTIFYING'] }
+];
+const pipeline = computed(() => {
+    const stage = state.summary?.stage;
+    return pipelineSteps.map((step) => {
+        let status = 'pend';
+        if (stage === 'COMPLETED' || stage === 'NOTIFYING') {
+            status = 'done';
+        } else if (stage === 'FAILED' || stage === 'CANCELLED') {
+            status = 'pend';
+        } else {
+            const current = stageList.indexOf(stage);
+            const maxOn = Math.max(-1, ...step.onStages.map((s) => stageList.indexOf(s)));
+            if (current === -1) status = 'pend';
+            else if (step.onStages.includes(stage)) status = 'on';
+            else status = current > maxOn ? 'done' : 'pend';
+        }
+        return { ...step, status };
+    });
+});
+function pipelineIcon(step) {
+    if (step.status === 'done') return '✓';
+    if (step.status === 'on') return step.key === 'debate' ? (state.summary?.stage === 'DEBATE_ROUND_1' ? 'R1' : 'R2') : '●';
+    return '·';
+}
+function pipelineSub(step) {
+    if (step.status === 'pend') return '等待';
+    if (step.status === 'done') return '已完成';
+    if (step.key === 'debate') return state.summary?.stage === 'DEBATE_ROUND_1' ? 'R1 进行中' : 'R2 进行中';
+    if (step.key === 'human') return '等待人工';
+    return '进行中';
+}
+
 async function load(reviewId) {
     const generation = ++loadGeneration;
     await store.load(reviewId);
@@ -117,6 +158,16 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
             </div>
             <div class="workbench-actions"><RouterLink class="button" :to="{ name: 'review-live', params: { reviewId } }">进入实时观察台</RouterLink><RouterLink class="button secondary" :to="{ name: 'context-scout-preview', params: { reviewId } }">调试 Context Scout</RouterLink><RouterLink class="button secondary" :to="{ name: 'review-report', params: { reviewId } }">查看最终报告</RouterLink></div>
         </header>
+
+        <div v-if="state.summary" class="wb-pipe" aria-label="评审流程">
+            <template v-for="(step, index) in pipeline" :key="step.key">
+                <span v-if="index > 0" class="wpi-conn" :class="{ done: step.status === 'done' }" aria-hidden="true"></span>
+                <div class="wpi" :class="step.status">
+                    <div class="wpi-i" aria-hidden="true">{{ pipelineIcon(step) }}</div>
+                    <div class="wpi-t"><div class="nm">{{ step.label }}</div><div class="sb">{{ pipelineSub(step) }}</div></div>
+                </div>
+            </template>
+        </div>
 
         <p v-if="state.error" class="error-banner" role="alert">{{ formatApiError(state.error) }}</p>
         <div v-if="state.loading" class="loading-grid" aria-label="正在加载评审数据"><span></span><span></span><span></span></div>

@@ -5,17 +5,20 @@ import { formatApiError, reviewApi } from '../api/review-api';
 
 const router = useRouter();
 const file = ref(null);
+const fileInput = ref(null);
 const submitting = ref(false);
 const error = ref('');
 const savedDraftId = ref(null);
 const reusedReviewId = ref(null);
 const form = reactive({
-    title: '', description: '', assigneeId: '', repositoryPath: '', priority: 'P1', branch: '', commit: '', submitter: 'demo-reviewer',
-    publicTasks: '核对需求范围、验收标准与实现风险', changeReason: '初始评审计划', initialMessage: '请根据公开计划开始需求评审。'
+    title: '', description: '', assigneeId: '', repositoryPath: '', priority: 'P1', branch: 'main', commit: '', submitter: 'demo-reviewer',
+    publicTasks: '核对需求范围、验收标准与实现风险', changeReason: '初始评审计划', initialMessage: '请根据公开计划开始需求评审.', remark: ''
 });
 
 function tasks() { return form.publicTasks.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
 function onFileChange(event) { file.value = event.target.files?.[0] ?? null; }
+function openFilePicker() { fileInput.value?.click(); }
+function fileSize() { return file.value ? `${(file.value.size / 1024).toFixed(1)} KB` : ''; }
 function idempotencyKey() { return globalThis.crypto?.randomUUID?.() ?? `requirement-start-${Date.now()}`; }
 
 async function submit() {
@@ -68,14 +71,47 @@ async function saveDraft() {
 </script>
 
 <template>
-    <section class="platform-page"><header class="platform-page-header"><div><p class="eyebrow">New Requirement</p><h1>新建需求并发起评审</h1><p class="muted">先创建需求聚合，再受理评审快照并绑定本次评审。</p></div></header>
-        <form class="review-form create-form" @submit.prevent="submit"><p v-if="error" class="error-banner full" role="alert">{{ error }} <RouterLink v-if="savedDraftId" :to="`/requirements/${savedDraftId}`">查看已保存草稿</RouterLink><RouterLink v-if="reusedReviewId" :to="`/reviews/${reusedReviewId}/live`">查看既有评审</RouterLink></p>
-            <label class="full">需求标题<input v-model="form.title" required maxlength="256" /></label><label class="full">需求描述<textarea v-model="form.description" /></label>
-            <label>优先级<select v-model="form.priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></label><label>负责人（可选）<input v-model="form.assigneeId" /></label>
-            <label class="full">仓库标识<input v-model="form.repositoryPath" required placeholder="服务端白名单中的仓库路径或标识" /></label><label>分支（可选）<input v-model="form.branch" placeholder="main" /></label><label>Commit（可选）<input v-model="form.commit" placeholder="40 位 SHA" /></label>
-            <label class="full">评审需求文档（.md）<input type="file" accept=".md,text/markdown" required @change="onFileChange" /></label><label class="full">提交人<input v-model="form.submitter" required /></label>
-            <label class="full">公开评审计划（每行一项）<textarea v-model="form.publicTasks" required /></label><label class="full">计划原因<input v-model="form.changeReason" required /></label><label class="full">启动说明<textarea v-model="form.initialMessage" required /></label>
-            <div class="form-actions full"><button class="button" type="submit" :disabled="submitting">{{ submitting ? '正在创建与启动…' : '创建需求并启动评审' }}</button><button class="button secondary" type="button" :disabled="submitting" @click="saveDraft">保存草稿</button><RouterLink class="button secondary" to="/requirements">取消</RouterLink></div>
+    <section class="platform-page">
+        <header class="platform-page-header"><div><p class="eyebrow">New Requirement</p><h1>新建需求</h1><p class="muted">创建需求聚合并绑定一次 AI 对抗评审。</p></div></header>
+        <form class="create-wrap" @submit.prevent="submit">
+            <p v-if="error" class="error-banner" role="alert">{{ error }} <RouterLink v-if="savedDraftId" :to="`/requirements/${savedDraftId}`">查看已保存草稿</RouterLink><RouterLink v-if="reusedReviewId" :to="`/reviews/${reusedReviewId}/live`">查看既有评审</RouterLink></p>
+            <div class="create-note"><span aria-hidden="true">ℹ</span> 提交后，Director AI 将自动分析需求内容并选择合适的参与角色进行对抗评审。</div>
+            <div class="card"><div class="card-bd">
+                <div class="form-field"><label>需求名称</label><input v-model="form.title" required maxlength="256" placeholder="简短描述需求内容" /></div>
+                <div class="form-field">
+                    <label>需求文档</label>
+                    <div class="upload-zone" :class="{ 'has-file': file }" role="button" tabindex="0" aria-label="上传 Markdown 需求文档" @click="openFilePicker" @keyup.enter="openFilePicker">
+                        <div class="uz-icon">{{ file ? '✓' : '📄' }}</div>
+                        <div class="uz-txt">{{ file ? file.name : '点击或拖拽上传 Markdown 需求文档' }}</div>
+                        <div class="uz-hint">{{ file ? fileSize() : '支持 .md 格式，最大 2MB' }}</div>
+                    </div>
+                    <input ref="fileInput" type="file" accept=".md,text/markdown" class="uz-input" @change="onFileChange" />
+                </div>
+                <div class="form-row">
+                    <div class="form-field"><label>目标仓库</label><input v-model="form.repositoryPath" required placeholder="服务端白名单中的仓库路径或标识" /></div>
+                    <div class="form-field"><label>分支</label><input v-model="form.branch" placeholder="main" /></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field"><label>优先级</label><select v-model="form.priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></div>
+                    <div class="form-field"><label>负责人</label><input v-model="form.assigneeId" placeholder="（可选）" /></div>
+                </div>
+                <div class="form-field"><label>Commit（可选）</label><input v-model="form.commit" placeholder="40 位 SHA" /></div>
+                <div class="form-field"><label>需求描述</label><textarea v-model="form.description" placeholder="详细描述需求背景、目标、验收标准..." /></div>
+                <div class="form-field"><label>备注（可选）</label><textarea v-model="form.remark" placeholder="补充信息（可选）" style="min-height:56px" /></div>
+            </div></div>
+
+            <details class="review-settings">
+                <summary>评审启动设置</summary>
+                <div class="form-field"><label>提交人</label><input v-model="form.submitter" required /></div>
+                <div class="form-field"><label>公开评审计划（每行一项）</label><textarea v-model="form.publicTasks" required /></div>
+                <div class="form-field"><label>计划原因</label><input v-model="form.changeReason" required /></div>
+                <div class="form-field"><label>启动说明</label><textarea v-model="form.initialMessage" required /></div>
+            </details>
+
+            <div class="form-actions">
+                <button class="button secondary" type="button" :disabled="submitting" @click="saveDraft">保存草稿</button>
+                <button class="button" type="submit" :disabled="submitting">{{ submitting ? '正在创建与启动…' : '提交并启动评审 →' }}</button>
+            </div>
         </form>
     </section>
 </template>

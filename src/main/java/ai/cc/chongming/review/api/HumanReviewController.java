@@ -46,7 +46,7 @@ public class HumanReviewController {
     public List<HumanReviewItem> findDrafts(
             @PathVariable UUID reviewId,
             @RequestParam(value = "severity", required = false) ClaimSeverity severity) {
-        return humanReviewService.findDrafts(requireReview(reviewId), severity);
+        return humanReviewService.findDrafts(new ReviewId(reviewId), severity);
     }
 
     @PostMapping

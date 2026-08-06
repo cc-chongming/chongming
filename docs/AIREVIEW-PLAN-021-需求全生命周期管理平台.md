@@ -1,12 +1,21 @@
-# 需求全生命周期管理平台建设（REQLIFE）
 
-> **状态**: 🚧 **主体代码、覆盖率门禁和主要实库验收已收口，尚未达到发布/验收完成**。测试库 MySQL 5.6 已执行 Flyway V1-V13、H1/H2/H3 与 M2 的运行时验证；浏览器已覆盖草稿、列表、概览和报告空态。真实 Gate→开发→完成及报告持久化仍依赖一次获授权的模型网关评审。
-> **创建日期**: 2026-07-31
-> **目标**: 将重明从"单一评审工作台"扩展为"需求全生命周期管理平台"——需求从新建、待评审、评审中、Gate 决策到开发完成全程可管理、可追踪，评审作为内核嵌入需求流转。
-> **前置**: 评审内核 `AIREVIEW-PLAN-001~020` 已完成（状态机、领域事件、辩论、Judge/Gate、人工审核、SSE、Live 运行流均已落地）
-> **设计原型**: `docs/ui-patterns-demo/platform.html`（编辑器风格，8 页面全链路）
+| 2026-08-05 | 工作台按 `platform.html` 对齐：`DashboardView` 改为 KPI 卡片（需求总数/评审中/已通过/已驳回，对接 `getDashboard` 投影）+ 待处理评审（可点击进 `/live`）+ 最近动态双卡片布局；`review.css` 新增 dashboard 样式（kpi/feed/card/tag）。修复 `package.json` 的 `test` 脚本 `--exclude tests/**` 在 shell 下被通配展开导致多个 e2e 文件时误跑 e2e 的问题（加引号）。前端单测 20/20、build 通过，static/review 同步新产物；新增 `tests/platform-shell.e2e.js` 壳冒烟用例（mock API，无需后端，需本机浏览器环境运行）。 |# 需求全生命周期管理平台建设（REQLIFE）
 
-## 实施快照（2026-08-04）
+| 2026-08-05 | 门户壳微调：主内容区 `.platform-page` 居中并放宽到 1280px（修复宽屏下内容靠左留白）；侧边栏新增折叠按钮（`App.vue` + `.sidebar-collapsed`，折叠后收窄为 64px 图标列，隐藏分组标题/标签/徽章/用户区；移动端自动禁用折叠）。前端单测 20/20、build 通过，static/review 同步新产物。 |
+
+| 2026-08-05 | 需求库按 `platform.html` 对齐：`RequirementListView` 改为胶囊状态过滤（全部/草稿/待评审/评审中/已通过/已驳回/开发中，计数来自 `getDashboard.requirementStatusCounts`）+ 右侧搜索框（回车触发）+ platform 风格表格（编号/需求名称/状态 tag/优先级 badge/负责人 assigneeId/更新时间/删除操作，保留真实分页与删除）。`review.css` 新增 req-filter/req-search/tag 变体/优先级 badge 样式。前端单测 20/20、build 通过，static/review 同步新产物（index-CtZlHlAU.js）。 |> **状态**: 🚧 **主体代码、覆盖率门禁和主要实库验收已收口，尚未达到发布/验收完成**。测试库 MySQL 5.6 已执行 Flyway V1-V13、H1/H2/H3 与 M2 的运行时验证；浏览器已覆盖草稿、列表、概览和报告空态。真实 Gate→开发→完成及报告持久化仍依赖一次获授权的模型网关评审。
+
+| 2026-08-05 | 侧边栏折叠按钮移至顶部栏最左侧（汉堡按钮 ☰，折叠/展开 232px↔64px 图标列），替代原先 Logo 区按钮，位置更显眼且折叠态稳定可见；前端单测 20/20、build 通过，static/review 同步新产物（index-Bn-VW6iQ.js）。 |> **创建日期**: 2026-07-31
+
+| 2026-08-05 | 侧边栏移除“新建需求”菜单项（需求库右上角已有新建入口）；新建需求页按 `platform.html` 对齐：卡片式表单 + 点击上传区（显示文件名/大小）+ 两列字段（仓库/分支、优先级/负责人）+需求描述/备注，评审启动高级字段（提交人/公开计划/计划原因/启动说明）收进“评审启动设置”折叠区，保留保存草稿与提交并启动评审两个动作。前端单测 20/20、build 通过，static/review 同步新产物（index-B4secusi.js）。 |> **目标**: 将重明从"单一评审工作台"扩展为"需求全生命周期管理平台"——需求从新建、待评审、评审中、Gate 决策到开发完成全程可管理、可追踪，评审作为内核嵌入需求流转。
+
+| 2026-08-05 | 修复工作台/需求库/新建需求等页面在宽屏下的宽度：`.platform-page` 去掉 max-width 改为全宽流体布局，`.platform-main` 侧边 padding 固定为 28px（替代随屏宽变化的 clamp），新建需求表单放宽到 840px；右侧不再大面积留白。前端单测 20/20、build 通过，static/review 同步新产物（index-Ciqbb4Tv.js）。 |> **前置**: 评审内核 `AIREVIEW-PLAN-001~020` 已完成（状态机、领域事件、辩论、Judge/Gate、人工审核、SSE、Live 运行流均已落地）
+
+| 2026-08-05 | 新建需求页右侧留白修正：`.create-wrap` 由 840px 居中改为全宽靠左（与其他页面统一），单行输入/下拉最大宽度 760px 防止过度拉伸，textarea 保持全宽；右侧不再大面积留白。前端单测 20/20、build 通过，static/review 同步新产物（index-BQKGZz8J.js）。 |> **设计原型**: `docs/ui-patterns-demo/platform.html`（编辑器风格，8 页面全链路）
+
+| 2026-08-05 | 新建需求表单容器改为 960px 居中（介于 840 偏窄与全宽偏宽之间），单行输入 max-width 760px 保留；前端单测 20/20、build 通过，static/review 同步新产物（index-D6mtqLrw.js）。 |
+
+| 2026-08-05 | 评审列表与评审报告页按 `platform.html` 对齐：`ReviewListView` 改为评审卡片列表（短 ID 标题 + 阶段中文标签 + 最后事实/尝试 + 进度条按阶段配色 + 报告状态，保留阶段/报告过滤与分页）；`ReportListView` 改为报告卡片列表（版本标题 + Gate 版本 + 时间，保留分页）。`review.css` 新增 rv-card 系列样式。前端单测 20/20、build 通过，static/review 同步新产物（index-sfAiidf8.js）。 |## 实施快照（2026-08-04）
 
 | 分段 | 状态 | 已交付 / 待验收 |
 |------|------|----------------|
@@ -491,3 +500,10 @@ flowchart LR
 | 2026-08-01 | 运行时入口检查：`http://127.0.0.1:8080/review/` 返回 `ERR_CONNECTION_REFUSED`，未启动或重启服务；将其记录为浏览器验收的环境前置条件。 |
 | 2026-08-01 | 验收审计发现 JaCoCo 全项目指令覆盖率为 68.00%、分支覆盖率为 50.19%，且未固化 PLAN-021 新增生产类的独立统计。新增 REQLIFE-V2 覆盖率门禁，必须在外部环境验收前闭环。 |
 | 2026-08-04 | 补齐需求可维护性（#2/#6/#7）：新增带版本校验的 `DELETE /api/requirements/{requirementId}`，任意生命周期状态均可从列表或详情删除；删除仅移除需求并解除需求—评审关联，评审历史保留。详情页补充 DRAFT/RETURNED 编辑入口。创建页收到 Markdown 快照 `reused=true` 时自动删除本次临时需求并链接既有评审，清理失败时保留入口供人工处理。服务、HTTP、MyBatis、API 客户端和浏览器路径已覆盖；真实模型网关验收状态不因此改变。 |
+
+| 2026-08-05 | 将 `docs/ui-patterns-demo/platform.html` 的门户壳落地到真实前端：`App.vue` 升级为 platform.html 风格的浅色门户壳（Logo/分组导航：概览·需求管理·评审·报告/计数徽章对接 `getDashboard`/用户区/顶部面包屑），中间 `RouterView` 渲染现有 8 个真实页面，保留各页自带标题栏与全部现有联动（需求过滤、工作台阶段/轮次、人工决策等）。`review.css` 门户壳样式同步替换为浅色编辑器风格，前端单测 20/20、`npm run build` 通过，`static/review` 同步新产物；新增 `tests/platform-shell.e2e.js` 壳冒烟用例（mock API，无需后端）。 |
+| 2026-08-06 | 门户壳体验收口与页面对齐：工作台 KPI 卡对齐 platform.html 概览（需求总数/评审中/已通过/已驳回）；顶部栏左侧新增 ☰ 侧边栏折叠按钮；移除"新建需求"侧边栏菜单（需求库右上角保留入口）；新建需求页改为卡片表单（960px 居中，含上传区/双列字段/折叠评审设置）；评审列表、报告列表改为 platform 风格卡片（阶段/报告筛选 + 分页 + 进度条）；报告详情页（ReviewReportView）按 `pg-review-report` 重构——评审概览 4 KPI（Claim/冲突/辩论轮次/共识度）、Claim 清单表（角色/严重度/立场/内容/辩论后）、立场收敛（按辩论主题的轮次轨道）、最终 Gate 框（结果标签+决策者+条件清单），并保留版本化公开输出（版本切换/JSON·Markdown 原文/生成新版本）。前端单测 20/20、`npm run build` 通过，`static/review` 产物更新为 `index-CL7L5l6T.js`。 |
+
+| 2026-08-06 | 需求详情页（RequirementDetailView）按 `pg-req-detail` 重构：顶部标题 + meta（短 ID/状态 tag/优先级 badge/负责人/仓库/更新时间）；生命周期轨道（草稿→待评审→评审中→Gate 决策→开发→完成，done/active/pending 三态胶囊）；左右分栏——左侧需求文档与评审记录（可进入工作台，含尝试号/阶段 tag/进度/参与角色/共识度），右侧 Scout 发现（publicSummary + 状态 tag）、参与角色（支持/反对 Claim 数或初审状态）、Gate 决策（gate-box 结果标签 + 决策者/理由，空态可前往工作台）、操作卡（编辑/删除/开始开发/标记完成/取消草稿，编辑表单保留）。前端单测 20/20、`npm run build` 通过，`static/review` 产物更新为 `index-FXveMSmD.js`。 |
+
+| 2026-08-06 | 评审工作台（ReviewWorkbenchView）对齐 `pg-review-wb`：在真实工作台顶部新增平台风格的评审流程阶段条（Scout → Director → 独立审查 → 冲突检测 → 多轮辩论 → Judge → 人工决策，done/on/pend 三态胶囊 + 连接线，由评审 stage 实时驱动；辩论步显示 R1/R2 进行中），下方保留原有实时面板（计划/生命周期/辩论时间线/圆桌/对话/人工评审/通知）与抽屉，不改变任何联动与 SSE 订阅。前端单测 20/20、`npm run build` 通过，`static/review` 产物更新为 `index-2ByolpQg.js`。至此侧边栏 4 个主菜单页（工作台/需求库/评审列表/评审报告）及需求详情、报告详情、评审工作台子页面均已按 platform.html 对齐。 |

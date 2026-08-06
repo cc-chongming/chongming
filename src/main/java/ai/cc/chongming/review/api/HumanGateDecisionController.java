@@ -46,7 +46,7 @@ public class HumanGateDecisionController {
 
     @GetMapping
     public List<HumanGateDecision> versions(@PathVariable UUID reviewId) {
-        return decisionService.findVersions(requireReview(reviewId));
+        return decisionService.findVersions(new ReviewId(reviewId));
     }
 
     private Review requireReview(UUID reviewId) {

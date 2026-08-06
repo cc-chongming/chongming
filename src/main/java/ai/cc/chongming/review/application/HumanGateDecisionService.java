@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DecisionActor;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DecisionStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.GateResult;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
@@ -119,6 +120,11 @@ public class HumanGateDecisionService {
 
     public List<HumanGateDecision> findVersions(Review review) {
         return decisionStore.findVersions(review.id());
+    }
+
+    /** Read-only: does not require the review aggregate to be registered (e.g. after a restart). */
+    public List<HumanGateDecision> findVersions(ReviewId reviewId) {
+        return decisionStore.findVersions(Objects.requireNonNull(reviewId, "reviewId must not be null"));
     }
 
     private ReviewerIdentity requireReviewer(GateResult result) {

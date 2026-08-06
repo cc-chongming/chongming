@@ -1,11 +1,49 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
 
 const result = ref({ items: [], page: 1, size: 20, total: 0 });
 const loading = ref(false);
 const error = ref('');
 const filter = reactive({ status: '', keyword: '' });
+const counts = ref(null);
+
+const statusFilters = [
+    { key: '', label: '全部' },
+    { key: 'DRAFT', label: '草稿' },
+    { key: 'PENDING_REVIEW', label: '待评审' },
+    { key: 'REVIEWING', label: '评审中' },
+    { key: 'APPROVED', label: '已通过' },
+    { key: 'REJECTED', label: '已驳回' },
+    { key: 'DEVELOPING', label: '开发中' }
+];
+
+const statusTag = {
+    DRAFT: 'tag-draft', PENDING_REVIEW: 'tag-pending', REVIEWING: 'tag-review',
+    APPROVED: 'tag-approved', REJECTED: 'tag-blocked', RETURNED: 'tag-blocked',
+    DEVELOPING: 'tag-dev', DONE: 'tag-done', CANCELLED: 'tag-draft'
+};
+const statusLabel = {
+    DRAFT: '草稿', PENDING_REVIEW: '待评审', REVIEWING: '评审中',
+    APPROVED: '已通过', REJECTED: '已驳回', RETURNED: '已退回',
+    DEVELOPING: '开发中', DONE: '已完成', CANCELLED: '已取消'
+};
+const priorityBadge = { P0: 'b-p0', P1: 'b-p1', P2: 'b-p2', P3: 'b-p2' };
+
+const totalCount = computed(() => {
+    const byStatus = counts.value?.requirementStatusCounts ?? {};
+    return Object.values(byStatus).reduce((sum, n) => sum + (Number(n) || 0), 0);
+});
+function filterCount(key) {
+    return key ? (counts.value?.requirementStatusCounts?.[key] ?? 0) : totalCount.value;
+}
+function selectFilter(key) {
+    filter.status = key;
+    load(1);
+}
+function shortId(id) {
+    return id ? `#${String(id).slice(0, 8)}` : '—';
+}
 
 async function load(page = 1) {
     loading.value = true;
@@ -34,22 +72,43 @@ async function remove(item) {
     }
 }
 
-onMounted(() => load());
+onMounted(async () => {
+    try {
+        counts.value = await reviewApi.getDashboard();
+    } catch {
+        counts.value = null;
+    }
+    load();
+});
 </script>
 
 <template>
     <section class="platform-page">
-        <header class="platform-page-header"><div><p class="eyebrow">Requirement</p><h1>需求列表</h1></div><RouterLink class="button" to="/requirements/create">新建需求</RouterLink></header>
-        <form class="filters platform-filters" @submit.prevent="load()">
-            <label>状态<select v-model="filter.status"><option value="">全部</option><option v-for="status in ['DRAFT','PENDING_REVIEW','REVIEWING','APPROVED','REJECTED','RETURNED','DEVELOPING','DONE','CANCELLED']" :key="status" :value="status">{{ status }}</option></select></label>
-            <label>关键词<input v-model="filter.keyword" placeholder="标题或描述" /></label>
-            <button class="button secondary" type="submit" :disabled="loading">筛选</button>
-        </form>
+        <header class="platform-page-header"><div><p class="eyebrow">Requirement</p><h1>需求库</h1></div><RouterLink class="button" to="/requirements/create">＋ 新建需求</RouterLink></header>
+
+        <div class="req-filter-bar">
+            <button v-for="f in statusFilters" :key="f.key" type="button" class="req-filter" :class="{ active: filter.status === f.key }" @click="selectFilter(f.key)">
+                {{ f.label }} <span class="req-filter-count">{{ filterCount(f.key) }}</span>
+            </button>
+            <div class="req-search"><span class="req-search-icon">⌕</span><input v-model="filter.keyword" type="text" placeholder="搜索需求…" @keyup.enter="load(1)" /></div>
+        </div>
+
         <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
         <p v-if="loading" class="empty-note">正在读取需求…</p>
         <div v-else class="platform-table-wrap">
-            <table class="platform-table"><thead><tr><th>需求</th><th>状态</th><th>优先级</th><th>仓库</th><th>更新时间</th><th>操作</th></tr></thead>
-                <tbody><tr v-for="item in result.items" :key="item.id"><td><RouterLink :to="`/requirements/${item.id}`">{{ item.title }}</RouterLink></td><td><span class="status-pill">{{ item.status }}</span></td><td>{{ item.priority || '—' }}</td><td>{{ item.repositoryPath || '—' }}</td><td>{{ item.updatedAt }}</td><td><button class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td></tr></tbody>
+            <table class="platform-table req-table">
+                <thead><tr><th>编号</th><th>需求名称</th><th>状态</th><th>优先级</th><th>负责人</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>
+                    <tr v-for="item in result.items" :key="item.id">
+                        <td class="req-id">{{ shortId(item.id) }}</td>
+                        <td class="req-title"><RouterLink :to="`/requirements/${item.id}`">{{ item.title }}</RouterLink></td>
+                        <td><span class="tag" :class="statusTag[item.status] ?? 'tag-draft'">{{ statusLabel[item.status] ?? item.status }}</span></td>
+                        <td><span v-if="item.priority" class="badge" :class="priorityBadge[item.priority] ?? 'b-p2'">{{ item.priority }}</span><span v-else>—</span></td>
+                        <td class="req-assignee">{{ item.assigneeId || '—' }}</td>
+                        <td class="req-date">{{ item.updatedAt }}</td>
+                        <td><button class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td>
+                    </tr>
+                </tbody>
             </table>
             <p v-if="!result.items.length" class="empty-note">没有符合条件的需求。</p>
             <div v-if="result.total > result.size" class="page-actions"><button class="button secondary" :disabled="loading || result.page <= 1" @click="load(result.page - 1)">上一页</button><span>第 {{ result.page }} 页，共 {{ Math.ceil(result.total / result.size) }} 页</span><button class="button secondary" :disabled="loading || result.page * result.size >= result.total" @click="load(result.page + 1)">下一页</button></div>

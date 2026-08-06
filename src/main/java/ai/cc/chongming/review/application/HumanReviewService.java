@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.HumanReviewItem.DraftContent;
 import ai.cc.chongming.review.domain.model.HumanReviewItem.ItemStatus;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.repository.HumanReviewItemStore;
@@ -93,6 +94,12 @@ public class HumanReviewService {
     public List<HumanReviewItem> findDrafts(Review review, ClaimSeverity severity) {
         Objects.requireNonNull(review, "review must not be null");
         return itemStore.findByReview(review.id(), ItemStatus.DRAFT, severity);
+    }
+
+    /** Read-only: does not require the review aggregate to be registered (e.g. after a restart). */
+    public List<HumanReviewItem> findDrafts(ReviewId reviewId, ClaimSeverity severity) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        return itemStore.findByReview(reviewId, ItemStatus.DRAFT, severity);
     }
 
     public List<HumanReviewAuditEvent> auditTrail(Review review) {

@@ -90,13 +90,13 @@ class HumanReviewControllerTests {
     }
 
     @Test
-    void returnsStableErrorsForUnknownReviewAndVersionConflict() throws Exception {
+    void returnsStableErrorsForVersionConflictAndEmptyReadsForUnknownReview() throws Exception {
         UUID unknownReviewId = UUID.randomUUID();
         when(reviewRegistry.find(new ReviewId(unknownReviewId))).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/reviews/{reviewId}/human-review-items", unknownReviewId))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("HUMAN_REVIEW_NOT_FOUND"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
 
         when(service.update(eq(review), any(), eq(0L), any()))
                 .thenThrow(new IllegalStateException("expectedVersion does not match human review item version"));
