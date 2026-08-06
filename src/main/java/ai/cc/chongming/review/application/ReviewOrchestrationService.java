@@ -75,6 +75,9 @@ public class ReviewOrchestrationService {
 
     /**
      * Starts an already snapshotted review from PLANNING, persists the public total plan and launches all core roles.
+     * [AIREVIEW-PLAN-020#0.5.1] Registration/application of every mandatory role happens strictly
+     * in order first; only then are role rounds fanned out concurrently, bounded by
+     * {@code review.orchestration.parallel-role-rounds}.
      */
     public Mono<StartResult> start(StartRequest request) {
         Objects.requireNonNull(request, "request must not be null");
@@ -92,7 +95,7 @@ public class ReviewOrchestrationService {
         return runtimeAdapter.start(runtimeRequest).flatMap(session -> {
             review.transitionTo(stateMachine, ReviewStage.INITIAL_REVIEW);
             return Flux.fromIterable(CORE_ROLES)
-                    .concatMap(roleType -> activateRole(
+                    .concatMap(roleType -> registerAndActivate(
                             review,
                             context,
                             new RoleActivationService.ActivationRequest(
@@ -100,7 +103,7 @@ public class ReviewOrchestrationService {
                                     RoleActivationService.ActivationSource.PLAN,
                                     "Core first-round review required by protocol",
                                     List.of())))
-                    .concatWith(activateRole(
+                    .concatWith(registerAndActivate(
                             review,
                             context,
                             new RoleActivationService.ActivationRequest(
@@ -109,14 +112,30 @@ public class ReviewOrchestrationService {
                                     "Judge is pre-registered and remains idle until all debate topics are terminal",
                                     List.of())))
                     .collectList()
+                    .flatMapMany(activated -> Flux.fromIterable(activated)
+                            .flatMapSequential(receipt -> runRoleRound(context, receipt),
+                                    properties.parallelRoleRounds()))
+                    .collectList()
                     .map(activations -> new StartResult(session, initialPlan, activations));
         });
     }
 
     /**
      * Requests one additional role through Guard validation and runtime creation before mutating the aggregate.
+     * Additional roles keep serial semantics: register/apply then wait for the full role round.
+     * [AIREVIEW-PLAN-020#0.5.1]
      */
     public Mono<RoleActivationService.ActivationReceipt> activateRole(
+            Review review, ReviewRuntimeContext context, RoleActivationService.ActivationRequest request) {
+        return registerAndActivate(review, context, request).flatMap(receipt -> runRoleRound(context, receipt));
+    }
+
+    /**
+     * Approves, registers and applies one role activation without dispatching any model round.
+     * Registration is strictly ordered so aggregate mutations remain safe before role rounds are
+     * fanned out concurrently. [AIREVIEW-PLAN-020#0.5.1]
+     */
+    private Mono<RoleActivationService.ActivationReceipt> registerAndActivate(
             Review review, ReviewRuntimeContext context, RoleActivationService.ActivationRequest request) {
         RoleActivationService.ActivationReceipt receipt = roleActivationService.approve(review, context, request);
         AgentRuntimeRoleRequest runtimeRequest = new AgentRuntimeRoleRequest(
@@ -131,12 +150,21 @@ public class ReviewOrchestrationService {
                     emit(context, OrchestrationEventType.ROLE_ACTIVATED, review.stage(),
                             receipt.activation().roleType().name(), review.version());
                     return receipt;
-                }))
-                .flatMap(approved -> runtimeAdapter.send(
-                        context.runtimeId(),
-                        approved.activation().agentLabel(),
-                        "Perform the assigned review role. Activation reason: " + approved.reason())
-                        .thenReturn(approved));
+                }));
+    }
+
+    /**
+     * Dispatches one role round over an already registered runtime. Rounds may overlap after all
+     * mandatory roles are registered; concurrency is bounded by {@code parallelRoleRounds}.
+     * [AIREVIEW-PLAN-020#0.5.1]
+     */
+    private Mono<RoleActivationService.ActivationReceipt> runRoleRound(
+            ReviewRuntimeContext context, RoleActivationService.ActivationReceipt receipt) {
+        return runtimeAdapter.send(
+                context.runtimeId(),
+                receipt.activation().agentLabel(),
+                "Perform the assigned review role. Activation reason: " + receipt.reason())
+                .thenReturn(receipt);
     }
 
     /**

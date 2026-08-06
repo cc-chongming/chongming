@@ -31,6 +31,8 @@ review:
   orchestration:
     # Bounds director stage-plan rewrites; deployment may override this environment placeholder.
     max-plan-revisions: ${REVIEW_MAX_PLAN_REVISIONS:3}
+    # Bounds concurrent role rounds when first-round reviews are dispatched in parallel (PLAN-020#0.5.1).
+    parallel-role-rounds: ${REVIEW_PARALLEL_ROLE_ROUNDS:4}
   diagnostics:
     # Only enables a redacted startup-failure summary in server logs; keep disabled outside a controlled local debugging session.
     log-startup-failure-stack: false

@@ -164,4 +164,70 @@ describe('review store', () => {
             { role: 'FRONTEND', agentLabel: 'frontend-reviewer', initialReviewCompleted: true }
         ]);
     });
+
+    it('keeps the header stage live from the domain event stream', async () => {
+        const store = createReviewStore({ api: createApi(), EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+        expect(store.state.summary.stage).toBe('DEBATE_ROUND_1');
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'ROLE_STARTED', category: 'ROLE',
+            stage: 'INITIAL_REVIEW', progress: 40, actorRole: 'PRODUCT',
+            occurredAt: '2026-08-05 11:00:00', payload: {}
+        });
+
+        expect(store.state.summary.stage).toBe('INITIAL_REVIEW');
+        expect(store.state.summary.progress).toBe(40);
+    });
+
+    it('refreshes debates and plans when projection-relevant events arrive', async () => {
+        let debatesReads = 0;
+        let plansReads = 0;
+        const topic = { topicId: '50000000-0000-0000-0000-000000000001', subjectKey: '主题', currentRound: 1, claims: [], turns: [] };
+        const api = {
+            ...createApi(),
+            getDebates: async () => {
+                debatesReads += 1;
+                return debatesReads === 1 ? [] : [topic];
+            },
+            getPlans: async () => {
+                plansReads += 1;
+                return plansReads === 1 ? [fixture.events[0]] : [fixture.events[0], fixture.events[1]];
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'DEBATE_TOPIC_OPENED', category: 'DEBATE',
+            occurredAt: '2026-08-05 11:00:00', payload: {}
+        });
+        await vi.waitFor(() => expect(store.state.debates).toEqual([topic]));
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 5, attemptNo: 1, type: 'PLAN_REVISED', category: 'PLAN',
+            occurredAt: '2026-08-05 11:05:00', payload: {}
+        });
+        await vi.waitFor(() => expect(store.state.plans).toHaveLength(2));
+    });
+
+    it('ignores replayed stage events from an earlier attempt', async () => {
+        const api = {
+            ...createApi(),
+            getSummary: async () => ({
+                reviewId: fixture.reviewId, attempt: 2, reviewVersion: 5, lastSequence: 8,
+                stage: 'PLANNING', progress: 20
+            })
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 9, attemptNo: 1, type: 'ROLE_COMPLETED', category: 'ROLE',
+            stage: 'CONFLICT_DETECTION', progress: 50, actorRole: 'PRODUCT',
+            occurredAt: '2026-08-05 10:00:00', payload: {}
+        });
+
+        expect(store.state.summary.stage).toBe('PLANNING');
+    });
 });

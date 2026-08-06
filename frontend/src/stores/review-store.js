@@ -11,6 +11,15 @@ import { createReviewSseSubscription } from '../services/review-sse';
 
 const STORAGE_PREFIX = 'chongming.review.last-sequence.';
 
+const DEBATE_AFFECTING_EVENTS = new Set([
+    'CLAIM_SUBMITTED', 'POSITION_CHANGED', 'DEBATE_TOPIC_OPENED', 'DEBATE_TOPIC_CLOSED',
+    'CHALLENGE_SUBMITTED', 'REBUTTAL_SUBMITTED', 'EVIDENCE_CAPTURED', 'JUDGEMENT_SUBMITTED'
+]);
+const SUMMARY_AFFECTING_EVENTS = new Set([
+    'GATE_DRAFTED', 'HUMAN_GATE_FINALIZED', 'REVIEW_FAILED', 'REVIEW_CANCELLED',
+    'REVIEW_RETRIED', 'REVIEW_RECOVERED'
+]);
+
 function optional(promise, fallback) {
     return promise.catch((error) => {
         if (error instanceof ReviewApiError && error.status === 404) return fallback;
@@ -135,7 +144,17 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
                     };
                 }
             }
-            if (['CLAIM_SUBMITTED', 'POSITION_CHANGED'].includes(domainEvent.type)) {
+            applyStageFromEvent(domainEvent);
+            if (DEBATE_AFFECTING_EVENTS.has(domainEvent.type)) {
+                refreshDebates().catch(() => {});
+            }
+            if (domainEvent.type === 'PLAN_CREATED' || domainEvent.type === 'PLAN_REVISED') {
+                refreshPlans().catch(() => {});
+            }
+            if (SUMMARY_AFFECTING_EVENTS.has(domainEvent.type)) {
+                refreshSummary().catch(() => {});
+            }
+            if (domainEvent.type === 'CLAIM_SUBMITTED' || domainEvent.type === 'POSITION_CHANGED') {
                 refreshClaims().catch(() => {});
             }
             return true;
@@ -177,6 +196,29 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         const summary = await optional(api.getSummary(state.reviewId), null);
         if (summary) state.summary = summary;
         return summary;
+    }
+
+    async function refreshDebates() {
+        state.debates = await optional(api.getDebates(state.reviewId), []);
+    }
+
+    async function refreshPlans() {
+        state.plans = await optional(api.getPlans(state.reviewId), []);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-020#4.2] Keeps the header stage/progress live from the domain event stream
+     * instead of only the initial summary snapshot, and ignores replayed events from an earlier
+     * attempt so a retried review cannot paint stale phase state.
+     */
+    function applyStageFromEvent(domainEvent) {
+        if (!state.summary || typeof domainEvent.stage !== 'string') return;
+        const eventAttempt = Number(domainEvent.attemptNo ?? domainEvent.attempt ?? state.summary.attempt);
+        const currentAttempt = Number(state.summary.attempt);
+        if (Number.isFinite(eventAttempt) && Number.isFinite(currentAttempt) && eventAttempt !== currentAttempt) return;
+        const progress = domainEvent.progress ?? state.summary.progress;
+        if (domainEvent.stage === state.summary.stage && progress === state.summary.progress) return;
+        state.summary = { ...state.summary, stage: domainEvent.stage, progress };
     }
 
     function applyLifecycleResult(result, stage) {

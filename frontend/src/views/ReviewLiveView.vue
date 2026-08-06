@@ -143,9 +143,9 @@ const reviewCards = computed(() => coreRoles.map((role) => {
         role,
         label: roleTitle(role),
         initials: roleInitial(role),
-        badge: running ? '⏳ 进行中' : completed ? '✅ 初审完成'
+        badge: completed ? '✅ 初审完成' : running ? '⏳ 进行中'
             : stance === 'oppose' ? '❌ 反对' : stance === 'support' ? '✅ 支持' : '等待分配',
-        tone: running ? 'running' : completed || stance === 'support' ? 'done' : stance === 'oppose' ? 'opposed' : 'pending',
+        tone: completed || stance === 'support' ? 'done' : running ? 'running' : stance === 'oppose' ? 'opposed' : 'pending',
         summary: claims.length
             ? `提交 ${claims.length} 个 Claim · ${claims.map((claim) => `${claim.severity}: ${claim.subjectKey}`).join(' · ')}`
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'

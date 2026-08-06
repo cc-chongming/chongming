@@ -65,19 +65,15 @@ DIRECTOR
 
 ## 0.5 待办事项
 
-### 0.5.1 独立审查四角色并行执行 ⏳（待额度充足后实施）
+### 0.5.1 独立审查四角色并行执行 ✅（已实施并验证；真实模型并行验收待额度充足后执行）
 
 **现状结论**（已核实代码与真实运行时间线）：产品/项目/前端/后端四角色的初审目前是**严格串行**——`ReviewOrchestrationService.start()` 用 `concatMap(activateRole)` 逐个激活，而 `activateRole` 结尾的 `runtimeAdapter.send(...)` 会等该角色整个初审回合（多轮工具调用直至提交 Claim/完成初审）跑完才返回，下一个角色才开始。真实评审时间线印证：各角色完成时刻间隔约 4 分钟，初审阶段总耗时 ≈ 四角色耗时之和。
 
 **可行性结论**：协议层面四角色独立审查无先后依赖，可以并行。安全性依据：各角色有独立 Agent 实例/会话/快照授权范围；Claim 提交（`ClaimService.submitClaim`）与完成初审（`InitialReviewProgressService.completeWithoutClaim`）均在 `synchronized(review)` 聚合锁内，并发提交安全；`INITIAL_REVIEW_COMPLETED` 聚合事件由最后一个完成的角色触发，与完成顺序无关。
 
-**实施方案**（已在本机实施并用 `ReviewOrchestrationServiceTests` + `ReviewCommandServiceTests` 验证通过后按用户要求回退，可随时恢复）：
+**实施结果**（2026-08-05 已落地并验证）：`ReviewOrchestrationService.start()` 已将“注册激活”与“回合执行”拆开——先 `concatMap` 串行完成全部角色（含 JUDGE 预注册）的 `registerRole + apply + ROLE_ACTIVATED`（无模型调用，保证聚合变更顺序安全），再用 `flatMapSequential` 以 `review.orchestration.parallel-role-rounds`（默认 4）为并发上限向各角色下发 `"Perform the assigned review role..."` 指令并等待全部回合完成；`StartResult.coreActivations` 保持 PRODUCT/PROJECT/FRONTEND/BACKEND/JUDGE 顺序。既有 `activateRole` 保留串行语义（追加角色路径仍逐个注册后跑完整回合）。
 
-1. 在 `ReviewOrchestrationService.start()` 中把“注册激活”与“回合执行”拆开：先 `concatMap` 串行完成全部角色（含 JUDGE 预注册）的 `registerRole + apply + ROLE_ACTIVATED`（无模型调用，保证聚合变更顺序安全）；
-2. 再用 `flatMapSequential` 并发向各角色下发 `"Perform the assigned review role..."` 指令并等待全部回合完成，保持 `StartResult.coreActivations` 的激活顺序；
-3. 保留既有 `activateRole`（追加角色路径仍用串行语义）。
-
-**注意事项**：并行后模型网关瞬时并发 ≈ 4-5 路，需关注模型端限流与超时（现有 retry 配置可兜底）；真实验收时对比各角色工作区落盘时间戳确认并行生效，并确认 `INITIAL_REVIEW_COMPLETED` 后冲突检测正常衔接。
+**注意事项**：并行后模型网关瞬时并发 ≈ 4-5 路，需关注模型端限流与超时（现有 retry 配置可兜底）；真实验收时对比各角色工作区落盘时间戳确认并行生效，并确认 `INITIAL_REVIEW_COMPLETED` 后冲突检测正常衔接。`flatMapSequential` 的并发上限由 `parallel-role-rounds` 控制，部署方可用环境变量 `REVIEW_PARALLEL_ROLE_ROUNDS` 覆盖；模型侧限流较紧时可降为 1 恢复串行等价行为。
 
 ## 1. 后端事件契约收口
 
@@ -282,7 +278,13 @@ DIRECTOR
 | `src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java` | #4.2/PLAN-010#1.7 | ✅（重试快照复制接线） |
 | `src/main/java/ai/cc/chongming/review/application/ReviewCommandService.java` | #4.2/PLAN-010#1.7 | ✅（retry 调用快照复制） |
 | `src/test/java/ai/cc/chongming/review/application/ReviewIntakeServiceTests.java` | #4.2/PLAN-010#1.7 | ✅（重试工作区回归） |
-| `src/test/java/ai/cc/chongming/review/application/ReviewCommandServiceTests.java` | #4.2/PLAN-010#1.7 | ✅（retry 接线回归） |
+| `src/test/java/ai/cc/chongming/review/application/ReviewCommandServiceTests.java` | #4.2/PLAN-010#1.7 | ✅（retry 接线回归） ||
+| `src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java` | #0.5.1 | ✅（注册/回合拆分，flatMapSequential 并发下发） |
+| `src/main/java/ai/cc/chongming/review/config/ReviewOrchestrationProperties.java` | #0.5.1 | ✅（新增 parallelRoleRounds，默认 4） |
+| `src/main/resources/application.yml` | #0.5.1 | ✅（review.orchestration.parallel-role-rounds） |
+| `src/test/java/ai/cc/chongming/review/agentscope/ReviewOrchestrationServiceTests.java` | #0.5.1 | ✅（注册先于下发/并发>1/激活顺序 3 用例） |
+| `frontend/src/stores/review-store.js` | #4.2 | ✅（事件流实时更新 stage/progress，辩论/计划/门禁事件触发投影刷新） |
+| `frontend/src/stores/review-store.test.js` | #4.2 | ✅（新增 3 用例） |
 
 ## 6. 实施顺序
 
@@ -337,3 +339,6 @@ DIRECTOR
 | 2026-07-31 | `cx-ai` 可移植定位规则及本次验收记录回写后，IDEA 项目构建通过（无问题）；`git diff --check` 通过。 |
 | 2026-08-04 | 按用户确认，将 `/reviews/:reviewId/live` 从原始运行 trace 整页迁移为 `full-flow.html` 对应的流程工作区：阶段轨道、当前阶段公开运行流、角色席位和领域事实/调试侧栏复用同一 SSE 与持久化领域事件数据，不新增模型调用或后端协议。 |
 | 2026-08-05 | 确认四角色初审当前为串行执行（concatMap + send 等待整回合），协议上可并行；并行方案已实施并验证测试通过后按用户要求回退，方案完整记入 §0.5.1，待额度充足后实施。 |
+| 2026-08-05 | 四角色并行执行改造已重新实施并落地：`start()` 拆分注册/回合，`flatMapSequential` 并发下发受 `review.orchestration.parallel-role-rounds`（默认 4）约束；`ReviewOrchestrationProperties` 新增 `parallelRoleRounds`（canonical 构造器，未提供时默认 4）。`ReviewOrchestrationServiceTests` 新增 3 用例（注册先于下发、并发>1、激活顺序保持），4/4 通过，且并发=1 时并行用例失败证明测试敏感；ReviewCommandServiceTests 14/14、agentscope 包 34/34、Spring 上下文加载与 api/domain/application 相关测试均通过。真实模型多角色并行验收仍待额度充足后执行。 |
+
+| 2026-08-05 | 修复 live 观察台实时性：review-store 从领域事件流实时更新 summary.stage/progress（右上角状态不再停留在页面加载快照），并对辩论/计划/门禁相关事件触发 getDebates/getPlans/getSummary 刷新，使左侧 7 栏目（独立审查 N/4、冲突检测组数、辩论轮次、Director 计划卡、人工决策 Gate）随事件自动更新；忽略旧 attempt 的重放 stage 事件。新增 3 个 review-store 用例，前端单测 20/20、npm run build 通过，static/review 同步新 hash（index-BhH-XvJy.js）。同一轮将角色卡徽标口径统一：以 `initialReviewCompleted`（后端已确认初审完成）为最高优先级，不再被 streaming 状态覆盖，与左侧 `N/4 角色初审完成` 统计一致；最终产物 hash=index-D-ougl18.js。 |
