@@ -41,7 +41,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 queue.tryEmitComplete();
             }
         } else if (event.type() == ReviewEventType.INITIAL_REVIEW_COMPLETED) {
-            send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims. Open a topic only for persisted Claims with conflicting positions; otherwise call skip_debate_when_no_conflicts. Do not search the workspace for Claim files or create facts in text.");
+            send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims. If any persisted Claim has an OPPOSE position, open debate topic(s) for those conflicting Claims; only when no persisted Claim has an OPPOSE position call skip_debate_when_no_conflicts. Do not search the workspace for Claim files or create facts in text.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_OPENED) {
             dispatchRound(event, 1);
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {

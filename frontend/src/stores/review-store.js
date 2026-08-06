@@ -107,6 +107,12 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         const domainEvent = reviewEventFromAgUiEvent(event) ?? event;
         if (domainEvent?.reviewId && Number.isInteger(domainEvent.sequence)) {
             if (!mergeDomainEvent(domainEvent)) return false;
+            if (state.summary == null) {
+                // The initial snapshot can 404 when the review just started before its first
+                // domain event was persisted. Hydrate the summary from the live event stream so
+                // the header stage and activated roles stay live without a manual refresh.
+                refreshSummary().catch(() => {});
+            }
             reviewEventToAgUiEvents(domainEvent).forEach((agUiEvent) => applyAgUiEvent(state.agUi, agUiEvent));
             if (domainEvent.type === 'REVIEW_FAILED') {
                 applyAgUiEvent(state.agUi, {

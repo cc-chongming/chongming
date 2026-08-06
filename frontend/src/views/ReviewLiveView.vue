@@ -419,6 +419,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                                     <strong>{{ consensusPercent }}%</strong>
                                 </div>
                                 <small>共识度（支持 Claim 占比）</small>
+                                <p v-if="!proClaims.length && allClaims.length" class="flow-debate-empty">议题当前仅含反对方论点，暂无支持方。</p>
                                 <p class="flow-round-display"><strong>R{{ selectedRound }}</strong> / {{ maxDebateRound }}</p>
                             </div>
                             <div class="flow-debate-side con">

@@ -152,3 +152,9 @@ submitJudgement(command) -> JudgeDecisionResult
 |------------|---------------------------------------|
 | 2026-07-14 | 创建 Claim、冲突检测、两轮辩论、Judge 和 Gate 草案计划。 |
 | 2026-07-16 | 完成强类型 Claim/辩论/Judge/Gate 协议、配置化 P1 Gate、工具契约和全量回归；标注生产持久化与运行时注册边界。 |
+
+| 2026-08-06 | 修复"存在反对意见却总跳过辩论"的流程缺陷：`DebateService.hasConflictingClaimPositions` 原判定要求**同一 subjectKey 完全一致**下存在立场对立才算冲突，而真实评审中各角色反对意见通常挂在各自主题键下，导致守卫把有反对意见误判为"无冲突"，Director 走 `skip_debate_when_no_conflicts` 直接进入 JUDGING（事件时间线出现 DEBATE_SKIPPED / NO_CONFLICTING_CLAIM_POSITIONS）。现放宽为**存在任一未撤回的 OPPOSE Claim 即视为冲突**，同步调整 Director 系统提示与 `ReviewWorkflowDispatcher` 唤醒消息（存在 OPPOSE 即开议题，否则才 skip），并新增"有 OPPOSE 时 skip 被拒"测试、修正"无冲突跳过"测试用全 SUPPORT 输入。debate 包 13/13、application/agentscope 相关 25/25 通过。 |
+
+| 2026-08-06 | 通过运行日志（REVIEW_WORKFLOW_DISPATCH_FAILED / DIRECTOR_INCOMPLETE）确认"存在反对却走不了冲突检测"的第二个根因：`open_debate_topic` 原强制要求所选 Claim 的 subjectKey 与传入值完全一致，而真实评审中 15 条 OPPOSE Claim 的主题键各不相同 → Director 反复穷举参数仍被拒（异常被吞成 "review workflow tool rejected"，模型无法诊断）→ 3 分钟兜底后 `REVIEW_FAILED`（failureType=DIRECTOR_CONFLICT_INCOMPLETE）。修复：①`DebateService.openTopic` 允许聚合跨 subjectKey 的反对 Claim（所选全部同主题时用 Claim 主题键，跨主题时用 Director 提供的主题键命名议题）；②`ReviewDebateToolFactory.BoundTool` 将具体拒绝原因（errorCode + message）返回给模型并记日志 `REVIEW_WORKFLOW_TOOL_REJECTED`，不再吞成通用提示。debate 包 14/14、相关回归通过；需重启后端并以新评审验证。 |
+
+| 2026-08-06 | 修复辩论共识度恒为 0% 的引导问题：Director 开辩论议题时只纳入反对方（OPPOSE）Claim、未纳入支持方（SUPPORT）Claim，议题内支持方为空，而 live 共识度=支持 Claim 占比，故恒为 0%。修复：①Director 系统提示明确"每个议题必须同时包含支持方与反对方 Claim，禁止只放单方"；②`open_debate_topic` 工具描述同步要求双方向对阵；③live 辩论区在议题仅含反对方时给出"暂无支持方"提示，避免 0% 造成误解。debate 包 14/14、前端 21/21、build 通过，static/review 同步 index-Cx7yt8YI.js；需重启后端并以新评审验证。 |

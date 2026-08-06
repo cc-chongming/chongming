@@ -76,11 +76,13 @@ public class DebateService {
         List<Claim> claims = command.claimIds().stream().map(claimId -> debateStore.findClaim(review.id(), claimId)
                 .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
                         "topic claim does not belong to this review"))).toList();
-        if (claims.stream().map(Claim::subjectKey).anyMatch(subject -> !subject.equalsIgnoreCase(command.subjectKey()))) {
-            throw new ReviewDomainException(ReviewErrorCode.DUPLICATE_SUBMISSION,
-                    "all topic claims must use the requested subjectKey");
-        }
-        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), command.subjectKey(), command.claimIds());
+        // A debate topic may aggregate opposing Claims that do not share one subjectKey. When
+        // every selected Claim shares a key, that key names the topic; otherwise the Director's
+        // subjectKey names the aggregate topic so cross-subject opposing Claims can still be debated.
+        String topicSubject = claims.stream().map(Claim::subjectKey).distinct().count() == 1
+                ? claims.get(0).subjectKey()
+                : command.subjectKey();
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), topicSubject, command.claimIds());
         debateStore.saveTopic(topic);
 review.recordCommand(command.metadata(), topic.id().value().toString());
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_1);
@@ -329,13 +331,11 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
     }
 
     private boolean hasConflictingClaimPositions(Review review) {
+        // Any non-withdrawn OPPOSE position means an opposing voice exists that must be
+        // debated; conflicts are not restricted to Claims that share an identical subjectKey.
         return debateStore.findClaims(review.id()).stream()
-                .filter(claim -> claim.status() != ClaimStatus.WITHDRAWN)
-                .collect(java.util.stream.Collectors.groupingBy(
-                        claim -> claim.subjectKey().trim().toLowerCase(java.util.Locale.ROOT),
-                        java.util.stream.Collectors.mapping(Claim::position, java.util.stream.Collectors.toSet())))
-                .values().stream()
-                .anyMatch(positions -> positions.size() > 1);
+                .anyMatch(claim -> claim.position() == ClaimPosition.OPPOSE
+                        && claim.status() != ClaimStatus.WITHDRAWN);
     }
 
     private Claim requireClaimInTopic(ReviewId reviewId, DebateTopic topic, ClaimId claimId) {

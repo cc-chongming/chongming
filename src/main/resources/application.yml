@@ -155,3 +155,9 @@ review:
       credential-environment-variable: ${REVIEW_QQ_MAIL_AUTH_CODE_ENV:REVIEW_QQ_MAIL_AUTH_CODE}
       subject-prefix: ${REVIEW_QQ_MAIL_SUBJECT_PREFIX:【重明需求评审】}
       auth-code: ${REVIEW_QQ_MAIL_AUTH_CODE:}
+
+logging:
+  file:
+    name: ${REVIEW_LOG_FILE:logs/chongming.log}
+  level:
+    root: ${REVIEW_LOG_LEVEL:INFO}

@@ -12,6 +12,8 @@ import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateTools;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolCallParam;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,8 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
  */
 @Component
 public class ReviewDebateToolFactory {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ReviewDebateToolFactory.class);
 
     private final ReviewRegistry reviewRegistry;
     private final DebateTools debateTools;
@@ -90,10 +94,24 @@ public class ReviewDebateToolFactory {
                 synchronized (review) {
                     return invoke(review, metadata(review, actorRole, param), param.getInput());
                 }
-            }).onErrorResume(exception -> Mono.just(ToolResultBlock.error("review workflow tool rejected")));
+            }).onErrorResume(exception -> {
+                String reason = rejectionReason(exception);
+                LOGGER.warn("REVIEW_WORKFLOW_TOOL_REJECTED tool={} reviewId={} attempt={} reason={}",
+                        getName(), context.reviewId().value(), context.attemptNo(), reason);
+                return Mono.just(ToolResultBlock.error("review workflow tool rejected: " + reason));
+            });
         }
 
         abstract ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input);
+
+        private static String rejectionReason(Throwable exception) {
+            if (exception instanceof ai.cc.chongming.review.domain.exception.ReviewDomainException domain) {
+                return domain.errorCode() + ": " + domain.getMessage();
+            }
+            String message = exception.getMessage();
+            return message == null || message.isBlank()
+                    ? exception.getClass().getSimpleName() : message;
+        }
 
         final RoleType actor() {
             return actorRole;
@@ -154,7 +172,7 @@ public class ReviewDebateToolFactory {
     private final class OpenTopicTool extends BoundTool {
         private OpenTopicTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "open_debate_topic"; }
-        @Override public String getDescription() { return "Open one conflict topic from at least two persisted Claims during conflict detection."; }
+        @Override public String getDescription() { return "Open one conflict topic from persisted Claims during conflict detection. Include both supporting (SUPPORT) and opposing (OPPOSE) Claims for the subject so both sides are represented in the debate."; }
         @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
                 "subjectKey", stringSchema("Conflicting public subject key"),
                 "claimIds", idArraySchema("Persisted Claim UUIDs")), List.of("subjectKey", "claimIds")); }

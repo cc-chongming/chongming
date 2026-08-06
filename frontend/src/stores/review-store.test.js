@@ -211,6 +211,35 @@ describe('review store', () => {
         await vi.waitFor(() => expect(store.state.plans).toHaveLength(2));
     });
 
+    it('hydrates a missing summary from the live event stream', async () => {
+        let summaryReads = 0;
+        const api = {
+            ...createApi(),
+            getSummary: async () => {
+                summaryReads += 1;
+                if (summaryReads === 1) return null; // initial snapshot 404 (review just started)
+                return {
+                    reviewId: fixture.reviewId, attempt: 1, reviewVersion: 4, lastSequence: 3,
+                    stage: 'INITIAL_REVIEW', progress: 40,
+                    activatedRoles: [{ role: 'PRODUCT', agentLabel: 'product-reviewer', initialReviewCompleted: false }]
+                };
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+        expect(store.state.summary).toBeNull();
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 1, attemptNo: 1, type: 'ROLE_ACTIVATED', category: 'ROLE',
+            stage: 'INITIAL_REVIEW', progress: 40, actorRole: 'PRODUCT',
+            occurredAt: '2026-08-05 10:00:00', payload: {}
+        });
+
+        await vi.waitFor(() => expect(store.state.summary).not.toBeNull());
+        expect(store.state.summary.stage).toBe('INITIAL_REVIEW');
+        expect(store.state.summary.activatedRoles).toHaveLength(1);
+    });
+
     it('ignores replayed stage events from an earlier attempt', async () => {
         const api = {
             ...createApi(),

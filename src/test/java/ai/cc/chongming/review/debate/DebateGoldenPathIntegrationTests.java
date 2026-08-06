@@ -3,6 +3,7 @@ package ai.cc.chongming.review.debate;
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.EvidenceLedgerService;
 import ai.cc.chongming.review.application.JudgeService;
+import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.GateDecision;
 import ai.cc.chongming.review.domain.model.Review;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Exercises two directed rounds, a terminal topic, Judge conclusion and non-final Gate draft.
@@ -76,13 +78,26 @@ class DebateGoldenPathIntegrationTests {
         InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
         DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
         Review review = conflictDetectionReview();
-        store.saveClaim(claim(review.id(), RoleType.PRODUCT, ClaimPosition.OPPOSE));
-        store.saveClaim(claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE));
+        store.saveClaim(claim(review.id(), RoleType.PRODUCT, ClaimPosition.SUPPORT));
+        store.saveClaim(claim(review.id(), RoleType.BACKEND, ClaimPosition.SUPPORT));
 
         debateService.skipDebateWhenNoConflicts(review);
 
         assertThat(review.stage()).isEqualTo(ReviewStage.JUDGING);
         assertThat(store.findTopics(review.id())).isEmpty();
+    }
+
+    @Test
+    void rejectsSkippingDebateWhenOpposingPositionExists() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        Review review = conflictDetectionReview();
+        store.saveClaim(claim(review.id(), RoleType.PRODUCT, ClaimPosition.SUPPORT));
+        store.saveClaim(claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE));
+
+        assertThatThrownBy(() -> debateService.skipDebateWhenNoConflicts(review))
+                .isInstanceOf(ReviewDomainException.class)
+                .hasMessageContaining("conflicting Claim positions");
     }
 
     private Review conflictDetectionReview() {

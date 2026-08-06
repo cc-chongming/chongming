@@ -68,6 +68,30 @@ class DebateToolsContractTests {
                 .isEqualTo(ai.cc.chongming.review.domain.exception.ReviewErrorCode.DUPLICATE_SUBMISSION);
     }
 
+    @Test
+    void opensTopicAcrossDistinctSubjectKeys() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        DebateTools tools = new DebateTools(
+                new ClaimService(evidenceLedgerFor(store), store, new ReviewProtocolGuard()), debateService, new JudgeService(store));
+        Review review = conflictDetectionReview();
+        Claim productClaim = claim(review.id(), RoleType.PRODUCT, ClaimPosition.SUPPORT, "auth.policy");
+        Claim backendClaim = claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE, "mcp.security");
+        store.saveClaim(productClaim);
+        store.saveClaim(backendClaim);
+
+        DebateService.TopicResult opened = tools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
+                metadata(review, "open-cross"), RoleType.DIRECTOR, "security-baseline",
+                List.of(productClaim.claimId(), backendClaim.claimId())));
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(opened.topic().claimIds()).containsExactlyInAnyOrder(productClaim.claimId(), backendClaim.claimId());
+    }
+
+    private EvidenceLedgerService evidenceLedgerFor(InMemoryReviewDebateStore store) {
+        return new EvidenceLedgerService();
+    }
+
     private Review conflictDetectionReview() {
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         Review review = Review.pending(new ReviewId(UUID.randomUUID()));
@@ -83,7 +107,11 @@ class DebateToolsContractTests {
     }
 
     private Claim claim(ReviewId reviewId, RoleType roleType, ClaimPosition position) {
-        return new Claim(new ClaimId(UUID.randomUUID()), reviewId, roleType, "authentication", ClaimSeverity.P1, position,
+        return claim(reviewId, roleType, position, "authentication");
+    }
+
+    private Claim claim(ReviewId reviewId, RoleType roleType, ClaimPosition position, String subjectKey) {
+        return new Claim(new ClaimId(UUID.randomUUID()), reviewId, roleType, subjectKey, ClaimSeverity.P1, position,
                 "Refresh token policy", "Requirement statement", List.of());
     }
 
