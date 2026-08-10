@@ -51,6 +51,13 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 || event.type() == ReviewEventType.POSITION_CHANGED
                 || event.type() == ReviewEventType.EVIDENCE_REQUESTED) {
             send(runtimeId(event), directorLabel(event), "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+        } else if (event.type() == ReviewEventType.JUDGING_STARTED) {
+            // The debate is over; stop any role subagent still grinding through its dispatched run
+            // so it stops producing output (and rejected turns) during judging / human decision.
+            AgentRuntimeAdapter adapter = runtimeAdapterProvider.getIfAvailable();
+            if (adapter != null) {
+                adapter.stopRoleRuns(runtimeId(event)).subscribe();
+            }
         }
     }
 
@@ -67,7 +74,10 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         Flux.fromIterable(roles)
                 .filter(role -> role != RoleType.JUDGE && role != RoleType.DIRECTOR)
                 .concatMap(role -> sendAsync(runtimeId, roleLabel(runtimeId, role),
-                        "Debate round " + round + " is active. Use only the registered debate tools against persisted topics and Claims."))
+                        "Debate round " + round + " is active. First call list_persisted_debate_topics to inspect the persisted topics and their turns. "
+                        + "Then match the tool to each topic's status: if a topic is OPEN, use submit_challenge against a Claim held by another role; "
+                        + "if a topic already has a CHALLENGED turn, reply with submit_rebuttal and pass that turn's turnId from the listing as targetTurnId. "
+                        + "Never submit a new challenge on a topic that is already CHALLENGED, and never challenge or rebut your own Claim or turn."))
                 .subscribe();
     }
 
@@ -78,7 +88,12 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     }
 
     private void send(String runtimeId, String recipient, String message) {
-        queue(runtimeId).tryEmitNext(new Dispatch(recipient, message));
+        reactor.core.publisher.Sinks.EmitResult result = queue(runtimeId).tryEmitNext(new Dispatch(recipient, message));
+        if (result.isFailure()) {
+            // A dropped dispatch would silently miss a Director wake and stall the review.
+            LOGGER.warn("REVIEW_WORKFLOW_DISPATCH_DROPPED runtimeId={} recipient={} result={}",
+                    runtimeId, recipient, result);
+        }
     }
 
     private reactor.core.publisher.Sinks.Many<Dispatch> queue(String runtimeId) {

@@ -82,7 +82,16 @@ const roleClaims = computed(() => {
     return [...byId.values()];
 });
 const completedRoles = computed(() => (store.state.summary?.activatedRoles ?? []).filter((entry) => entry.initialReviewCompleted).length);
+const scoutHasActivity = computed(() => runtimeTrace.state.events.some((event) =>
+    String(event?.runId ?? '').includes(':context-scout')));
+const scoutRunFinished = computed(() => runtimeTrace.state.events.some((event) =>
+    event?.type === 'RUN_FINISHED' && String(event?.runId ?? '').includes(':context-scout')));
+const scoutComplete = computed(() =>
+    activePhaseIndex.value >= 2
+    || store.state.summary?.contextScout?.status === 'DEGRADED'
+    || scoutRunFinished.value);
 const maxDebateRound = computed(() => Math.max(1,
+    store.state.summary?.stage === 'DEBATE_ROUND_2' ? 2 : 1,
     ...debateTopics.value.map((topic) => topic.currentRound ?? 1),
     ...debateTopics.value.flatMap((topic) => (topic.turns ?? []).map((turn) => turn.round ?? 1))));
 const conflicts = computed(() => debateTopics.value.flatMap((topic, index) => {
@@ -171,7 +180,17 @@ const streamEmpty = computed(() => {
 const factTimeline = computed(() => store.events.value.slice(-14).reverse());
 const debugItems = computed(() => runtimeItems.value.slice(-24).reverse());
 
+function isTopicTerminal(topic) {
+    return ['RESOLVED', 'ESCALATED'].includes(topic?.status ?? '');
+}
+
 function phaseState(index) {
+    if (index === 0 && activePhaseIndex.value === 1) {
+        // Context Scout runs inside the PLANNING window. It must stay "running" (not "done") while
+        // its runtime stream is still active, instead of flipping the moment the stage leaves
+        // SNAPSHOTTING.
+        return scoutComplete.value ? 'done' : 'running';
+    }
     if (index === activePhaseIndex.value && stage.value === 'FAILED') return 'failed';
     if (index < activePhaseIndex.value) return 'done';
     if (index === activePhaseIndex.value) return 'running';
@@ -267,6 +286,12 @@ async function load(reviewId) {
 }
 
 watch(() => props.reviewId, load, { immediate: true });
+// Keep the live debate view on the latest round: entering the debate phase, or the round counter
+// advancing to round two (via DEBATE_ROUND_2_STARTED), moves the selected round forward without
+// overwriting a manual R1 selection once the counter is stable.
+watch([() => activePhase.value, maxDebateRound], ([phase, round]) => {
+    if (phase === 'debate' && round > selectedRound.value) selectedRound.value = round;
+}, { immediate: true });
 onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
 </script>
 
@@ -397,7 +422,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                     <template v-if="debateTopics.length">
                         <div class="flow-round-tabs" role="tablist" aria-label="辩论回合">
                             <button v-for="round in maxDebateRound" :key="round" type="button" role="tab" :aria-selected="selectedRound === round" :class="['flow-round-tab', { active: selectedRound === round }]" @click="switchRound(round)">
-                                R{{ round }} <span>{{ round === maxDebateRound && !['CLOSED', 'RESOLVED'].includes(debateTopics[0]?.status ?? '') ? '进行中' : '已完成' }}</span>
+                                R{{ round }} <span>{{ round === maxDebateRound && !isTopicTerminal(debateTopics[0]) ? '进行中' : '已完成' }}</span>
                             </button>
                         </div>
 

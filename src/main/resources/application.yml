@@ -69,7 +69,7 @@ review:
         provider: openai-compatible
         model-name: ${review.model-gateway.model-name:chongming-director-placeholder}
         temperature: 0.2
-        timeout: PT45S
+        timeout: PT300S
         max-tokens: 65536
         retry:
           max-retries: 2
@@ -118,7 +118,7 @@ review:
           initial-backoff: PT0.2S
   persistence:
     # Disabled by default. Override these placeholders in the deployment environment.
-    enabled: ${REVIEW_PERSISTENCE_ENABLED:false}
+    enabled: ${REVIEW_PERSISTENCE_ENABLED:true}
     jdbc-url: ${REVIEW_DB_URL:jdbc:mysql://127.0.0.1:3306/chongming_placeholder?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
     username: ${REVIEW_DB_USERNAME:chongming_placeholder}
     password: ${REVIEW_DB_PASSWORD:}
@@ -130,6 +130,12 @@ review:
       snapshot-table-name: ${REVIEW_AGENTSCOPE_SNAPSHOT_TABLE:chongming_agentscope_snapshot}
       lock-key-prefix: ${REVIEW_AGENTSCOPE_LOCK_KEY_PREFIX:chongming:agentscope:lock:}
       initialize-schema: ${REVIEW_AGENTSCOPE_INITIALIZE_SCHEMA:false}
+  runtime-trace:
+    # [AIREVIEW-PLAN-022] Durable AG-UI runtime trace for restart replay. Writes are best-effort:
+    # a failure is logged and never blocks the review run or the real-time SSE stream.
+    persistence:
+      enabled: ${RUNTIME_TRACE_PERSISTENCE:true}
+      max-events: ${RUNTIME_TRACE_MAX_EVENTS:1000}
   sse:
     # Transport controls only; event business sequence is always assigned by the event store.
     timeout: ${REVIEW_SSE_TIMEOUT:PT30M}
@@ -159,5 +165,10 @@ review:
 logging:
   file:
     name: ${REVIEW_LOG_FILE:logs/chongming.log}
+  logback:
+    rollingpolicy:
+      # Default 10MB was too small for long live-review debugging sessions; keep 20MB per file.
+      max-file-size: ${REVIEW_LOG_MAX_FILE_SIZE:20MB}
+      max-history: ${REVIEW_LOG_MAX_HISTORY:7}
   level:
     root: ${REVIEW_LOG_LEVEL:INFO}

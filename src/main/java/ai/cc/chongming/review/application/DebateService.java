@@ -56,7 +56,7 @@ public class DebateService {
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
     }
 
-    /** Opens a topic from at least two existing Claims in the conflict-detection stage. */
+    /** Opens a topic from at least one existing Claim in the conflict-detection stage. */
     public TopicResult openTopic(Review review, DebateToolCommands.OpenTopic command) {
         requireReview(review, command.metadata());
         if (command.actorRole() != RoleType.DIRECTOR) {
@@ -119,6 +119,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
                 command.targetRole(), DebateTurnType.CHALLENGE, command.targetClaimId(), null, command.publicContent(),
                 validateEvidence(review.id(), command.evidenceIds()), null, null, Instant.now());
         topic.addChallenge(debateStateMachine, turn);
+        debateStore.saveTopic(topic);
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
         publishTurn(review, turn);
@@ -146,6 +147,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
                 command.targetRole(), DebateTurnType.REBUTTAL, null, command.targetTurnId(), command.publicContent(),
                 validateEvidence(review.id(), command.evidenceIds()), null, null, Instant.now());
         topic.addRebuttal(debateStateMachine, turn);
+        debateStore.saveTopic(topic);
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
         publishTurn(review, turn);
@@ -209,6 +211,19 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         Objects.requireNonNull(review, "review must not be null");
         validateBeginSecondRound(review);
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_2);
+        // The round transition is itself a public fact: without it the live page keeps painting
+        // round one until the first round-two turn is committed (AIREVIEW-PLAN-022 follow-up).
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_ROUND_2_STARTED,
+                RoleType.DIRECTOR,
+                null,
+                null,
+                null,
+                null,
+                2,
+                65,
+                Map.of()));
     }
 
     /** Validates that the second round can begin without changing aggregate state. */
@@ -225,6 +240,19 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         Objects.requireNonNull(review, "review must not be null");
         validateBeginJudging(review);
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.JUDGING);
+        // Public transition fact so the live page leaves the debate phase immediately instead of
+        // staying on "round two in progress" until the first judging event arrives.
+        eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                review,
+                ai.cc.chongming.review.domain.event.ReviewEventType.JUDGING_STARTED,
+                RoleType.DIRECTOR,
+                null,
+                null,
+                null,
+                null,
+                null,
+                75,
+                Map.of()));
     }
 
     /** Validates that judging can begin without changing aggregate state. */
@@ -288,6 +316,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         }
         requireVersion(review, command.metadata());
 topic.close(debateStateMachine, command.status(), command.publicResolution(), Instant.now());
+        debateStore.saveTopic(topic);
         review.recordCommand(command.metadata(), topic.id().value().toString());
         eventPublisher.publish(ReviewEventDrafts.completedCommand(
                 review,

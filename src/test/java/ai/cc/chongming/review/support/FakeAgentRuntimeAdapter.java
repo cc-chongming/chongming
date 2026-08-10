@@ -117,7 +117,7 @@ public final class FakeAgentRuntimeAdapter implements AgentRuntimeAdapter {
             return events;
         }
 
-        private void emit(AgentRuntimeEventType type, String source, String payload) {
+        private synchronized void emit(AgentRuntimeEventType type, String source, String payload) {
             Sinks.EmitResult result = events.tryEmitNext(
                     new AgentRuntimeEvent(session.runtimeId(), sequence.incrementAndGet(), type, source, payload));
             if (result.isFailure()) {

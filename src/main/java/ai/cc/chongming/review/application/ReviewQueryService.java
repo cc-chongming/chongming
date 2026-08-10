@@ -8,6 +8,7 @@ import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.EvidenceBlock;
 import ai.cc.chongming.review.domain.model.GateDecision;
 import ai.cc.chongming.review.domain.model.HumanGateDecision;
+import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
 import ai.cc.chongming.review.domain.model.ReviewTypes.EvidenceId;
@@ -18,6 +19,9 @@ import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import ai.cc.chongming.review.domain.repository.ReviewRepositories;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,18 +56,43 @@ public class ReviewQueryService {
     private final EvidenceLedgerService evidenceLedgerService;
     private final HumanGateDecisionStore humanGateDecisionStore;
     private final ReviewRegistry reviewRegistry;
+    private final ReviewRepositories reviewRepositories;
 
-    public ReviewQueryService(
+    ReviewQueryService(
             ReviewEventStore eventStore,
             ReviewDebateStore debateStore,
             EvidenceLedgerService evidenceLedgerService,
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry) {
+        this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
+                (ReviewRepositories) null);
+    }
+
+    @Autowired
+    public ReviewQueryService(
+            ReviewEventStore eventStore,
+            ReviewDebateStore debateStore,
+            EvidenceLedgerService evidenceLedgerService,
+            HumanGateDecisionStore humanGateDecisionStore,
+            ReviewRegistry reviewRegistry,
+            ObjectProvider<ReviewRepositories> reviewRepositoriesProvider) {
+        this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
+                reviewRepositoriesProvider.getIfAvailable());
+    }
+
+    private ReviewQueryService(
+            ReviewEventStore eventStore,
+            ReviewDebateStore debateStore,
+            EvidenceLedgerService evidenceLedgerService,
+            HumanGateDecisionStore humanGateDecisionStore,
+            ReviewRegistry reviewRegistry,
+            ReviewRepositories reviewRepositories) {
         this.eventStore = eventStore;
         this.debateStore = debateStore;
         this.evidenceLedgerService = evidenceLedgerService;
         this.humanGateDecisionStore = humanGateDecisionStore;
         this.reviewRegistry = reviewRegistry;
+        this.reviewRepositories = reviewRepositories;
     }
 
     @Transactional(readOnly = true)
@@ -75,7 +104,13 @@ public class ReviewQueryService {
             return Optional.empty();
         }
         ReviewEvent event = latestEvent.orElse(null);
-        var review = reviewRegistry.find(reviewId).orElse(null);
+        // [AIREVIEW-PLAN-012#1.8] After a restart the process-local registry is empty. Fall back to the
+        // durable review projection (role_activation persists INITIAL_REVIEW_COMPLETED) so the
+        // independent-review N/4 counter and review version survive without the aggregate in memory.
+        Review review = reviewRegistry.find(reviewId)
+                .orElseGet(() -> reviewRepositories == null
+                        ? null
+                        : reviewRepositories.findReview(reviewId).orElse(null));
         Long reviewVersion = review == null ? null : review.version();
         int currentAttempt = review == null ? (event == null ? 0 : event.attemptNo()) : review.attemptNo();
         GateView gateView = humanGate.map(this::toGateView)

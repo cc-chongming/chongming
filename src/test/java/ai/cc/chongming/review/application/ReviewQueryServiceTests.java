@@ -11,16 +11,19 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import ai.cc.chongming.review.domain.repository.ReviewRepositories;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -121,6 +124,44 @@ class ReviewQueryServiceTests {
         assertThat(views.get(0).role()).isEqualTo("FRONTEND");
         assertThat(views.get(0).position()).isEqualTo("SUPPORT");
         assertThat(views.get(0).statement()).isEqualTo("前端已有 DiffViewer，增量数据展示无技术障碍。");
+    }
+
+    @Test
+    void restoresActivatedRolesFromDurableProjectionWhenRegistryIsEmptyAfterRestart() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewEventStore eventStore = mock(ReviewEventStore.class);
+        ReviewDebateStore debateStore = mock(ReviewDebateStore.class);
+        HumanGateDecisionStore humanGateStore = mock(HumanGateDecisionStore.class);
+        ReviewRegistry reviewRegistry = mock(ReviewRegistry.class);
+        ReviewRepositories reviewRepositories = mock(ReviewRepositories.class);
+        Review restored = Review.restore(
+                reviewId,
+                ReviewStage.DEBATE_ROUND_1,
+                1,
+                4,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product-reviewer", true)),
+                Map.of());
+        when(eventStore.findLatest(reviewId)).thenReturn(Optional.of(event(
+                reviewId, 12, 1, ReviewEventType.CHALLENGE_SUBMITTED, Map.of())));
+        when(debateStore.findGateDraft(reviewId)).thenReturn(Optional.empty());
+        when(humanGateStore.findLatest(reviewId)).thenReturn(Optional.empty());
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.empty());
+        when(reviewRepositories.findReview(reviewId)).thenReturn(Optional.of(restored));
+        ObjectProvider<ReviewRepositories> reviewRepositoriesProvider = mock(ObjectProvider.class);
+        when(reviewRepositoriesProvider.getIfAvailable()).thenReturn(reviewRepositories);
+        ReviewQueryService service = new ReviewQueryService(
+                eventStore,
+                debateStore,
+                mock(EvidenceLedgerService.class),
+                humanGateStore,
+                reviewRegistry,
+                reviewRepositoriesProvider);
+
+        ReviewQueryService.ReviewSummary summary = service.findSummary(reviewId).orElseThrow();
+
+        assertThat(summary.reviewVersion()).isEqualTo(4L);
+        assertThat(summary.activatedRoles()).containsExactly(
+                new ReviewQueryService.RoleActivationView("PRODUCT", "product-reviewer", true));
     }
 
     private ReviewEvent event(

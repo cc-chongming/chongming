@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.mysql.cj.jdbc.MysqlDataSource;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewReportMapper;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPlatformProjectionMapper;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.RuntimeTracePersistenceMapper;
 import java.time.LocalDateTime;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -70,7 +71,8 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "review_report",
                     "requirement",
                     "chongming_agentscope_state",
-                    "chongming_agentscope_workspace");
+                    "chongming_agentscope_workspace",
+                    "runtime_trace_event");
             Map<String, String> expectedLongTextColumns = Map.of(
                     "review_plan.plan_json", "LONGTEXT",
                     "repository_snapshot.manifest_json", "LONGTEXT",
@@ -199,6 +201,75 @@ class ReviewPersistenceMigrationIntegrationTests {
         }
     }
 
+    @Test
+    void persistsAndReplaysRuntimeTraceThroughTheActualMybatisMapperOnMysql56() throws SQLException {
+        MysqlDataSource dataSource = dataSource(MYSQL);
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        String reviewId = java.util.UUID.randomUUID().toString();
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO review_request "
+                    + "(review_id, request_id, submitter_id, stage, input_idempotency_key, current_attempt_no, version) VALUES ('"
+                    + reviewId + "', 'request-" + reviewId + "', 'reviewer', 'COMPLETED', 'idempotency-" + reviewId
+                    + "', 1, 0)");
+        }
+        String runtimeId = "review-" + reviewId + "-attempt-1";
+        SqlSessionFactory sessionFactory = runtimeTraceSessionFactory(dataSource);
+        try (SqlSession session = sessionFactory.openSession(true)) {
+            RuntimeTracePersistenceMapper mapper = session.getMapper(RuntimeTracePersistenceMapper.class);
+            mapper.append(new RuntimeTracePersistenceMapper.RuntimeTraceRow(
+                    runtimeId, 1, "RUN_STARTED:run-1", "RUN_STARTED", "{\"type\":\"RUN_STARTED\",\"runId\":\"run-1\"}",
+                    reviewId, 1));
+            mapper.append(new RuntimeTracePersistenceMapper.RuntimeTraceRow(
+                    runtimeId, 2, "TEXT_MESSAGE_START:m-1", "TEXT_MESSAGE_START",
+                    "{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m-1\"}", reviewId, 1));
+
+            assertThat(mapper.maxSequence(runtimeId)).isEqualTo(2L);
+            assertThat(mapper.findAfter(runtimeId, 0, 10)).hasSize(2)
+                    .extracting(RuntimeTracePersistenceMapper.RuntimeTraceRow::sequence)
+                    .containsExactly(1L, 2L);
+            assertThat(mapper.findAfter(runtimeId, 1, 10)).singleElement()
+                    .extracting(RuntimeTracePersistenceMapper.RuntimeTraceRow::sequence).isEqualTo(2L);
+
+            // Re-inserting the same (runtime_id, event_sequence) is idempotent via ON DUPLICATE KEY.
+            mapper.append(new RuntimeTracePersistenceMapper.RuntimeTraceRow(
+                    runtimeId, 2, "TEXT_MESSAGE_START:m-1", "TEXT_MESSAGE_START",
+                    "{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m-1\"}", reviewId, 1));
+            assertThat(mapper.maxSequence(runtimeId)).isEqualTo(2L);
+            assertThat(mapper.findAfter(runtimeId, 0, 10)).hasSize(2);
+
+            mapper.trim(runtimeId, 1);
+            assertThat(mapper.findAfter(runtimeId, 0, 10)).singleElement()
+                    .extracting(RuntimeTracePersistenceMapper.RuntimeTraceRow::sequence).isEqualTo(2L);
+        }
+    }
+
+    @Test
+    void runtimeTraceEventSchemaIsMysql56CompositeKeySafe() throws SQLException {
+        MysqlDataSource dataSource = dataSource(MYSQL);
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        try (Connection connection = dataSource.getConnection()) {
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "runtime_trace_event", "payload_json"))
+                    .isEqualTo("LONGTEXT");
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "runtime_trace_event", "runtime_id"))
+                    .isEqualTo("VARCHAR");
+            // The ascii runtime_id keeps the (runtime_id, event_sequence) composite key inside the
+            // 767-byte InnoDB limit even on MySQL 5.6.
+            assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "runtime_trace_event"))
+                    .containsExactly("RUNTIME_ID", "EVENT_SEQUENCE");
+        }
+    }
+
+    private Set<String> readPrimaryKeyColumns(DatabaseMetaData metadata, String catalog, String tableName)
+            throws SQLException {
+        Set<String> columns = new java.util.LinkedHashSet<>();
+        try (ResultSet resultSet = metadata.getPrimaryKeys(catalog, null, tableName)) {
+            while (resultSet.next()) {
+                columns.add(resultSet.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
+            }
+        }
+        return columns;
+    }
+
     private Set<String> readIndexColumns(DatabaseMetaData metadata, String catalog, String tableName, String indexName)
             throws SQLException {
         Set<String> columns = new java.util.TreeSet<>();
@@ -231,6 +302,13 @@ class ReviewPersistenceMigrationIntegrationTests {
         Environment environment = new Environment("platform-projection", new JdbcTransactionFactory(), dataSource);
         Configuration configuration = new Configuration(environment);
         configuration.addMapper(ReviewPlatformProjectionMapper.class);
+        return new SqlSessionFactoryBuilder().build(configuration);
+    }
+
+    private SqlSessionFactory runtimeTraceSessionFactory(MysqlDataSource dataSource) {
+        Environment environment = new Environment("runtime-trace", new JdbcTransactionFactory(), dataSource);
+        Configuration configuration = new Configuration(environment);
+        configuration.addMapper(RuntimeTracePersistenceMapper.class);
         return new SqlSessionFactoryBuilder().build(configuration);
     }
 

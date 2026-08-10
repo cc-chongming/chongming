@@ -1,6 +1,6 @@
 # 运行时 Trace 持久化与重启回放计划`
 
-> **状态**: ⏳ 计划待实施（2026-08-06 创建，经用户确认需要持久化回放已完成的评审运行过程后立项）
+> **状态**: 🚧 实施中（2026-08-06 创建，经用户确认需要持久化回放已完成的评审运行过程后立项；段 1~3 已落地并通过回归，段 4 浏览器验收待用户在本机执行）
 > **创建日期**: 2026-08-06
 > **目标**: 将当前仅存于进程内存的 AG-UI 运行时 trace 持久化，使 Spring Boot 重启后，已完成评审在 `/live` 观察台仍可完整回放 Scout / Director / 独立审查 / 辩论 / Judge 各阶段的思考、回答、工具入参与结果，不再"只能看到结果、看不到过程"。
 > **关联计划**: AIREVIEW-PLAN-017（AG-UI 运行时 trace 与 `/live`）、AIREVIEW-PLAN-020（`/live` 连续对话流收口）、AIREVIEW-PLAN-010（进程重启恢复）
@@ -155,12 +155,12 @@ review:
 
 ## 6. 分段实施
 
-| 段 | 内容 | 完成标准 |
-|---|---|---|
-| 段 1 | V14 迁移 + `RuntimeTraceRow` + `RuntimeTraceStore` 接口 + `MyBatisRuntimeTraceStore` + mapper XML + 集成测试 | `append / findAfter / maxSequence / trim` 通过 MySQL 5.6 兼容断言（参照 V9/V12 先例），JaCoCo 覆盖该 mapper 的 PLAN-022 标记源文件 |
-| 段 2 | Registry 接入持久化（构造注入 + publish 异步写 + subscribe 懒加载恢复 + sequence 续接 + trim），`ReviewRuntimeTraceProperties` | 单元测试：发布 → 新 Registry 实例（模拟重启）→ 完整重放；sequence 从 MAX 续接；截断生效；实时 SSE 不中断 |
-| 段 3 | 失败降级（写库异常仅记日志、评审/实时流不受影响）+ 辅助 runtime 不持久化的守卫测试 + 全量回归 | api / agentscope / application 相关测试全绿；`ChongmingApplicationTests` 上下文加载通过 |
-| 段 4 | 浏览器验收：完成一次评审 → 重启服务 → `/live` 完整回放运行过程（阶段流、角色卡运行事件、"运行调试" tab） | 验收记录写入 PLAN-022 §9 与 `docs/验证记录/` |
+| 段 | 内容 | 完成标准 | 状态 |
+|---|---|---|---|---|
+| 段 1 | V14 迁移 + `RuntimeTraceRow` + `RuntimeTraceStore` 接口 + `MyBatisRuntimeTraceStore` + mapper XML + 集成测试 | `append / findAfter / maxSequence / trim` 通过 MySQL 5.6 兼容断言（参照 V9/V12 先例），JaCoCo 覆盖该 mapper 的 PLAN-022 标记源文件 | ✅ 2026-08-06（mapper 为注解式，无 XML；集成断言已写入 `ReviewPersistenceMigrationIntegrationTests`，需本机 Docker 运行 MySQL 5.6/8.4 验证） |
+| 段 2 | Registry 接入持久化（构造注入 + publish 异步写 + subscribe 懒加载恢复 + sequence 续接 + trim），`ReviewRuntimeTraceProperties` | 单元测试：发布 → 新 Registry 实例（模拟重启）→ 完整重放；sequence 从 MAX 续接；截断生效；实时 SSE 不中断 | ✅ 2026-08-06（`ReviewRuntimeTraceRegistryTests` 6 例全绿；额外修正：`publish` 也走 `resolveTrace` 以在重启后续写时从 DB MAX 续接 sequence） |
+| 段 3 | 失败降级（写库异常仅记日志、评审/实时流不受影响）+ 辅助 runtime 不持久化的守卫测试 + 全量回归 | api / agentscope / application 相关测试全绿；`ChongmingApplicationTests` 上下文加载通过 | ✅ 2026-08-06（`ReviewAgUiEventJacksonRoundTripTests` 验证 R1 round-trip 成立；写失败不阻塞、辅助 runtime 守卫测试通过；上下文加载通过；agentscope 包 `dispatchesRoleRoundsInParallel` 为 PLAN-020 已知并行 flaky，重跑通过） |
+| 段 4 | 浏览器验收：完成一次评审 → 重启服务 → `/live` 完整回放运行过程（阶段流、角色卡运行事件、"运行调试" tab） | 验收记录写入 PLAN-022 §9 与 `docs/验证记录/` | ⏳ 待本机执行 |
 
 ## 7. 测试与验收
 
@@ -183,7 +183,7 @@ review:
 
 | # | 风险 | 缓解 |
 |---|---|---|
-| R1 | `AguiEvent` 是 sealed/record，Jackson 反序列化可能无法自动重建 | 段 1 先行写 round-trip 验证测试；若失败改为按 `event.type` 分发的手工反序列化（参照 `ag-ui-review-adapter` 的解析逻辑） |
+| R1 | `AguiEvent` 是 sealed/record，Jackson 反序列化可能无法自动重建 | ✅ 已消除：`AguiEvent` 接口带 `@JsonTypeInfo(NAME, property="type")` + `@JsonSubTypes`，Jackson 可多态重建；`ReviewAgUiEventJacksonRoundTripTests` 对 mapper 产出的全部事件类型验证 round-trip 相等 |
 | R2 | 数据增长无限 | D6 截断 + 配置上限；后续可按 review 生命周期清理 |
 | R3 | 异步写导致重启瞬间丢尾（最后几笔未落库） | 可接受（观测性 best-effort）；如需更强一致，可在 `@PreDestroy` 同步 flush |
 | R4 | 写库加重评审运行延迟 | 异步 fire-and-forget + 独立 executor；写失败不阻塞 |
@@ -194,3 +194,4 @@ review:
 | 日期 | 变更 |
 |---|---|
 | 2026-08-06 | 创建计划：基于"重启后已完成评审 `/live` 只能看到结果、看不到过程"的验收结论立项，完成现状数据流、设计决策（新表 + Store 接口 + Registry 接入 + 懒加载恢复 + 截断）、分段实施与验收标准。 |
+| 2026-08-06 | 落地段 1~3：新增 `V14__create_runtime_trace_event_table.sql`、`RuntimeTraceStore`（domain/repository）、`RuntimeTracePersistenceMapper`（注解式）、`MyBatisRuntimeTraceStore`（条件注入）、`ReviewRuntimeTraceProperties`；`ReviewRuntimeTraceRegistry` 改造——`publish` 异步持久化（写失败仅记日志）、`subscribe`/`publish` 懒加载从 DB 恢复且 sequence 从 `MAX(sequence)` 续接、按 `max-events` 内存与落库双截断；主 runtime 正则 `review-{uuid}-attempt-{n}` 守卫，排除 `:scout-preview:` 辅助 runtime；application.yml 增加 `review.runtime-trace.persistence.{enabled,max-events}`。测试：`ReviewRuntimeTraceRegistryTests`（模拟重启重放/续接/截断/辅助守卫/写失败不阻塞/deriveEventId）6 例、`ReviewAgUiEventJacksonRoundTripTests` 2 例、`ReviewPersistenceMigrationIntegrationTests` 增加表结构 + mapper CRUD 的 MySQL 5.6 断言（本机 Docker 运行）。回归：application/api/config 全绿，`ChongmingApplicationTests` 上下文加载通过，agentscope 包仅 PLAN-020 已知并行 flaky（重跑通过）；evidence/repository 包 4 例失败均为 VM 无 `dos:` 视图的环境问题。待办：段 4 浏览器验收。 |

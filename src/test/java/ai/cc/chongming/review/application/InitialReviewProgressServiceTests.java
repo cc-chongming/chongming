@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Verifies first-review completion advances only after all mandatory roles have explicitly finished.
@@ -106,6 +107,47 @@ class InitialReviewProgressServiceTests {
         assertThat(failed).isFalse();
         assertThat(review.stage()).isEqualTo(ReviewStage.INITIAL_REVIEW);
         assertThat(events).isEmpty();
+    }
+
+    @Test
+    void treatsLateCompletionFromAlreadyCompletedRoleAsIdempotentSuccessOutsideInitialReview() {
+        // PRODUCT finished initial review earlier (e.g. via a Claim submission); the review has moved
+        // on to CONFLICT_DETECTION. A late complete_initial_review with a fresh idempotency key must
+        // succeed without throwing, or the role agent loops on rejections for tens of minutes.
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.CONFLICT_DETECTION, 1, 0,
+                List.of(
+                        new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.PROJECT, "project", true),
+                        new RoleActivation(RoleType.FRONTEND, "frontend", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                java.util.Map.of());
+        List<ReviewEventDraft> events = new ArrayList<>();
+        InitialReviewProgressService service = new InitialReviewProgressService(
+                new ReviewProtocolGuard(), new ReviewStateMachine(), events::add);
+
+        InitialReviewProgressService.CompletionResult result = service.completeWithoutClaim(review,
+                new ReviewCommandMetadata(review.id(), review.version(), new IdempotencyKey("late-call")),
+                RoleType.PRODUCT, "late completion");
+
+        assertThat(result.replayed()).isTrue();
+        assertThat(result.stage()).isEqualTo(ReviewStage.CONFLICT_DETECTION);
+        assertThat(review.stage()).isEqualTo(ReviewStage.CONFLICT_DETECTION);
+        assertThat(review.roleActivations()).filteredOn(activation -> activation.roleType() == RoleType.PRODUCT)
+                .singleElement().satisfies(activation -> assertThat(activation.initialReviewCompleted()).isTrue());
+        assertThat(events).isEmpty();
+    }
+
+    @Test
+    void stillRejectsCompletionFromIncompleteRoleOutsideInitialReview() {
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.CONFLICT_DETECTION, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", false)), java.util.Map.of());
+        InitialReviewProgressService service = new InitialReviewProgressService(
+                new ReviewProtocolGuard(), new ReviewStateMachine(), ignored -> {});
+
+        assertThatThrownBy(() -> service.completeWithoutClaim(review,
+                new ReviewCommandMetadata(review.id(), review.version(), new IdempotencyKey("late-call")),
+                RoleType.PRODUCT, "late"))
+                .isInstanceOf(ai.cc.chongming.review.domain.exception.ReviewDomainException.class);
     }
 
     private void complete(InitialReviewProgressService service, Review review, RoleType roleType, String key) {

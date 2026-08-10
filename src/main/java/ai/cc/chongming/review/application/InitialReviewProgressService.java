@@ -52,6 +52,15 @@ public class InitialReviewProgressService {
             if (existing != null) {
                 return new CompletionResult(true, review.stage());
             }
+            // A role that already finished its initial review (for example by submitting a Claim)
+            // must not be forced to loop on a rejected complete_initial_review after the review left
+            // INITIAL_REVIEW. Treat the late call as an idempotent success without changing any state.
+            boolean alreadyCompleted = review.roleActivations().stream()
+                    .anyMatch(activation -> activation.roleType() == actorRole
+                            && activation.initialReviewCompleted());
+            if (alreadyCompleted) {
+                return new CompletionResult(true, review.stage());
+            }
             requireActiveInitialReviewer(review, actorRole);
             review.recordCommand(metadata, "initial-review-complete:" + actorRole.name());
             boolean newlyCompleted = !isCompleted(review, actorRole);

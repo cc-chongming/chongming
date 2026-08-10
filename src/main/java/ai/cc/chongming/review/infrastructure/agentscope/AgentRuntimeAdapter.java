@@ -21,6 +21,16 @@ public interface AgentRuntimeAdapter {
     Mono<Void> cancel(String runtimeId);
 
     /**
+     * Interrupts every role subagent still running for a runtime without cancelling the runtime
+     * itself. Used when the review leaves the debate stages (for example on JUDGING_STARTED) so a
+     * slow role loop stops producing output instead of continuing to attempt rejected turns.
+     * Implementations must treat an unknown runtime as a no-op.
+     */
+    default Mono<Void> stopRoleRuns(String runtimeId) {
+        return Mono.empty();
+    }
+
+    /**
      * Releases runtime-owned resources after a terminal review transition.
      * Implementations must treat an unknown or already released runtime as a no-op.
      */

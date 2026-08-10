@@ -146,7 +146,15 @@ public class ReviewRoleToolFactory {
                             requiredText(param.getInput(), "publicSummary"));
                     return ToolResultBlock.text("initialReviewCompleted=true; stage=" + result.stage() + "; replayed=" + result.replayed());
                 }
-            }).onErrorResume(exception -> Mono.just(ToolResultBlock.error("initial review completion rejected")));
+            }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
+                    "initialReviewCompletionRejected: " + rejectionReason(exception))));
+        }
+
+        private String rejectionReason(Throwable failure) {
+            if (failure instanceof ai.cc.chongming.review.domain.exception.ReviewDomainException domain) {
+                return domain.errorCode().name() + ": " + domain.getMessage();
+            }
+            return failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
         }
     }
 

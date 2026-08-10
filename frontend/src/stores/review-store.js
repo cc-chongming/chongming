@@ -12,7 +12,8 @@ import { createReviewSseSubscription } from '../services/review-sse';
 const STORAGE_PREFIX = 'chongming.review.last-sequence.';
 
 const DEBATE_AFFECTING_EVENTS = new Set([
-    'CLAIM_SUBMITTED', 'POSITION_CHANGED', 'DEBATE_TOPIC_OPENED', 'DEBATE_TOPIC_CLOSED',
+    'CLAIM_SUBMITTED', 'POSITION_CHANGED', 'DEBATE_TOPIC_OPENED', 'DEBATE_ROUND_2_STARTED',
+    'DEBATE_TOPIC_CLOSED', 'DEBATE_SKIPPED', 'JUDGING_STARTED',
     'CHALLENGE_SUBMITTED', 'REBUTTAL_SUBMITTED', 'EVIDENCE_CAPTURED', 'JUDGEMENT_SUBMITTED'
 ]);
 const SUMMARY_AFFECTING_EVENTS = new Set([
@@ -55,7 +56,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         lastSequence: 0,
         agUi: createAgUiConversation(null)
     });
-    const eventsBySequence = new Map();
+    const eventsBySequence = reactive(new Map());
     let subscription;
 
     const events = computed(() => [...eventsBySequence.values()].sort((left, right) => left.sequence - right.sequence));
@@ -141,7 +142,16 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             }
             if (domainEvent.type === 'ROLE_COMPLETED' && domainEvent.actorRole && state.summary) {
                 const entries = state.summary.activatedRoles ?? [];
-                if (entries.some((entry) => entry.role === domainEvent.actorRole && !entry.initialReviewCompleted)) {
+                const roleEntry = entries.find((entry) => entry.role === domainEvent.actorRole);
+                if (!roleEntry) {
+                    // The summary snapshot can predate this role's activation; record the completion
+                    // directly so the N/4 role counter stays live without a manual refresh.
+                    state.summary = {
+                        ...state.summary,
+                        activatedRoles: [...entries,
+                            { role: domainEvent.actorRole, agentLabel: null, initialReviewCompleted: true }]
+                    };
+                } else if (!roleEntry.initialReviewCompleted) {
                     state.summary = {
                         ...state.summary,
                         activatedRoles: entries.map((entry) => entry.role === domainEvent.actorRole

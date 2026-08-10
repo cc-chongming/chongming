@@ -172,7 +172,7 @@ public class ReviewDebateToolFactory {
     private final class OpenTopicTool extends BoundTool {
         private OpenTopicTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "open_debate_topic"; }
-        @Override public String getDescription() { return "Open one conflict topic from persisted Claims during conflict detection. Include both supporting (SUPPORT) and opposing (OPPOSE) Claims for the subject so both sides are represented in the debate."; }
+        @Override public String getDescription() { return "Open one conflict topic from persisted Claims during conflict detection. Prefer grouping related OPPOSE Claims into one topic and include a SUPPORT Claim when one exists for the subject; when no SUPPORT Claim exists, open the topic with the OPPOSE Claim(s) alone so the debate can still proceed."; }
         @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
                 "subjectKey", stringSchema("Conflicting public subject key"),
                 "claimIds", idArraySchema("Persisted Claim UUIDs")), List.of("subjectKey", "claimIds")); }

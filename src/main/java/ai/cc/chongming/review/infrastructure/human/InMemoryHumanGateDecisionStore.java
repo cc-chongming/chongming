@@ -3,6 +3,7 @@ package ai.cc.chongming.review.infrastructure.human;
 import ai.cc.chongming.review.domain.model.HumanGateDecision;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author wangli
  */
 @Repository
+@ConditionalOnProperty(prefix = "review.persistence", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class InMemoryHumanGateDecisionStore implements HumanGateDecisionStore {
 
     private final Map<ReviewId, List<HumanGateDecision>> decisions = new ConcurrentHashMap<>();

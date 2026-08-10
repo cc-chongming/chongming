@@ -281,6 +281,14 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         if (state.cancelled()) {
             return true;
         }
+        return isControlledStop(failure);
+    }
+
+    /**
+     * A cooperative interruption (CancellationException or a model-cancelled signal) marks a
+     * controlled stop rather than an agent failure.
+     */
+    private static boolean isControlledStop(Throwable failure) {
         Throwable current = failure;
         while (current != null) {
             if (current instanceof CancellationException) {
@@ -368,6 +376,25 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     }
 
     @Override
+    public Mono<Void> stopRoleRuns(String runtimeId) {
+        return Mono.fromRunnable(() -> {
+            RuntimeState state = runtimes.get(runtimeId);
+            if (state == null) {
+                return;
+            }
+            state.roles().values().forEach(role -> {
+                try {
+                    role.agent().interrupt();
+                    LOGGER.info("ROLE_RUN_STOPPED runtimeId={} role={}", runtimeId, role.label());
+                } catch (RuntimeException exception) {
+                    LOGGER.warn("ROLE_RUN_STOP_FAILED runtimeId={} role={} error={}",
+                            runtimeId, role.label(), exception.getMessage());
+                }
+            });
+        });
+    }
+
+    @Override
     public Mono<Void> cancel(String runtimeId) {
         return Mono.fromRunnable(() -> {
             RuntimeState state = runtimes.get(runtimeId);
@@ -441,6 +468,11 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                     emitRawObservation(state, event, roleType, agentId, sessionId, stage, toolTraceCollector);
                 })
                 .doOnError(exception -> {
+                    // A cooperative interrupt (review left the debate stages, or the runtime was
+                    // cancelled) is a controlled stop, not a role failure.
+                    if (isControlledStop(exception)) {
+                        return;
+                    }
                     publishLifecycle(state, roleType, agentId, "FAILED");
                     state.emit(AgentRuntimeEventType.FAILED, agentId, "agent-run-failed");
                 })
@@ -774,7 +806,20 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             return events;
         }
 
-        private void emit(AgentRuntimeEventType type, String source, String payload) {
+        /**
+         * Emits one runtime event. The underlying replay sink is not internally thread-safe: with
+         * parallel role rounds (PLAN-020) several role threads call this concurrently, and a bare
+         * tryEmitNext would fail with FAIL_NON_SERIALIZED and abort the whole review. Serializing
+         * the emit plus retrying busy-loop-style keeps the observability stream live and the
+         * review alive.
+         */
+        /**
+         * Emits one runtime event. The replay sink is not internally thread-safe: parallel role
+         * rounds (PLAN-020) make several role threads call this concurrently, and unsynchronized
+         * emissions fail with FAIL_NON_SERIALIZED and abort the whole review. Serializing here
+         * keeps the observability stream live and the review alive.
+         */
+        private synchronized void emit(AgentRuntimeEventType type, String source, String payload) {
             Sinks.EmitResult result = events.tryEmitNext(new AgentRuntimeEvent(
                     context.runtimeId(), sequence.incrementAndGet(), type, source, payload));
             if (result.isFailure()) {

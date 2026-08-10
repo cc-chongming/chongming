@@ -39,6 +39,29 @@ public final class DebateTopic {
         this.status = DebateTopicStatus.OPEN;
     }
 
+    /**
+     * Rebuilds an immutable-snapshot topic from durable storage, bypassing the live state machine.
+     * Used by the persistence layer to restore topics after a restart.
+     */
+    public static DebateTopic restore(
+            TopicId id,
+            ReviewId reviewId,
+            String subjectKey,
+            List<ClaimId> claimIds,
+            DebateTopicStatus status,
+            int currentRound,
+            List<DebateTurn> turns,
+            String resolution,
+            Instant closedAt) {
+        DebateTopic topic = new DebateTopic(id, reviewId, subjectKey, claimIds);
+        topic.status = Objects.requireNonNull(status, "status must not be null");
+        topic.currentRound = currentRound;
+        topic.turns.addAll(List.copyOf(turns));
+        topic.resolution = resolution;
+        topic.closedAt = closedAt;
+        return topic;
+    }
+
     public TopicId id() {
         return id;
     }

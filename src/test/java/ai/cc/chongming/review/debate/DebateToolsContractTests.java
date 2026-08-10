@@ -88,6 +88,24 @@ class DebateToolsContractTests {
         assertThat(opened.topic().claimIds()).containsExactlyInAnyOrder(productClaim.claimId(), backendClaim.claimId());
     }
 
+    @Test
+    void opensTopicWithSingleOpposingClaim() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        DebateTools tools = new DebateTools(
+                new ClaimService(evidenceLedgerFor(store), store, new ReviewProtocolGuard()), debateService, new JudgeService(store));
+        Review review = conflictDetectionReview();
+        Claim backendClaim = claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE, "mcp.security");
+        store.saveClaim(backendClaim);
+
+        DebateService.TopicResult opened = tools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
+                metadata(review, "open-single-oppose"), RoleType.DIRECTOR, "mcp.security",
+                List.of(backendClaim.claimId())));
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(opened.topic().claimIds()).containsExactly(backendClaim.claimId());
+    }
+
     private EvidenceLedgerService evidenceLedgerFor(InMemoryReviewDebateStore store) {
         return new EvidenceLedgerService();
     }

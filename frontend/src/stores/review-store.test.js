@@ -132,6 +132,23 @@ describe('review store', () => {
         expect(store.state.summary).not.toHaveProperty('contextScout');
     });
 
+    it('updates the facts timeline reactively as live events arrive', async () => {
+        const store = createReviewStore({ api: createApi(), EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+
+        // Read once before any event, exactly as the live page's sidebar does on first render, so
+        // the computed must invalidate when the plain events map mutates (reactive Map regression).
+        expect(store.events.value).toEqual([]);
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'ROLE_ACTIVATED', category: 'ROLE',
+            stage: 'INITIAL_REVIEW', progress: 40, actorRole: 'PRODUCT',
+            occurredAt: '2026-08-05 11:00:00', payload: {}
+        });
+
+        await vi.waitFor(() => expect(store.events.value.map((event) => event.sequence)).toEqual([4]));
+    });
+
     it('marks the role complete and refreshes persisted claims as live review facts arrive', async () => {
         let claimsReads = 0;
         const claim = { claimId: '30000000-0000-0000-0000-000000000001', role: 'FRONTEND', subjectKey: '增量展示可行', severity: 'P2', position: 'SUPPORT', statement: '前端已有 DiffViewer。', reasonSummary: '组件成熟。', status: 'SUBMITTED', evidenceIds: [] };

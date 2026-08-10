@@ -22,8 +22,8 @@ public final class DebateToolCommands {
             Objects.requireNonNull(actorRole, "actorRole must not be null");
             requireText(subjectKey, "subjectKey");
             claimIds = copyNonEmpty(claimIds, "claimIds");
-            if (claimIds.size() < 2) {
-                throw new IllegalArgumentException("a topic requires at least two claims");
+            if (claimIds.size() < 1) {
+                throw new IllegalArgumentException("a topic requires at least one claim");
             }
         }
     }

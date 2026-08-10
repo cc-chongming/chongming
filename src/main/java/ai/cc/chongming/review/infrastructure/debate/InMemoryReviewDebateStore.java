@@ -16,14 +16,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 
 /**
- * [AIREVIEW-PLAN-010#1.3] Deterministic process-local implementation used until the MyBatis command writer is enabled.
+ * [AIREVIEW-PLAN-010#1.3] Deterministic process-local implementation used only when review
+ * persistence is disabled; the MyBatis store takes over when it is enabled.
  *
  * @author wangli
  */
 @Repository
+@ConditionalOnProperty(prefix = "review.persistence", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class InMemoryReviewDebateStore implements ReviewDebateStore {
 
     private final Map<ReviewId, Map<ClaimId, Claim>> claims = new ConcurrentHashMap<>();

@@ -180,13 +180,16 @@ onMounted(() => load(selectedVersion.value));
 
                 <div class="rpt-section"><h3>立场收敛</h3>
                     <div class="card"><div class="card-bd">
-                        <div v-for="debate in debates" :key="debate.topicId ?? debate.subjectKey" class="wcv-row">
-                            <div class="wcv-lb">{{ debate.subjectKey }}</div>
-                            <div class="wcv-tr">
-                                <span v-for="round in maxRound" :key="round" class="wcv-dot" :class="{ done: round <= (Number(debate.currentRound) || 0) }"></span>
-                                <span class="wcv-topic">{{ debateClaimCount(debate) }} 个论点</span>
+                        <div v-for="debate in debates" :key="debate.topicId ?? debate.subjectKey" class="wcv-item">
+                            <div class="wcv-row">
+                                <div class="wcv-lb">{{ debate.subjectKey }}</div>
+                                <div class="wcv-tr">
+                                    <span v-for="round in maxRound" :key="round" class="wcv-dot" :class="{ done: round <= (Number(debate.currentRound) || 0) }"></span>
+                                    <span class="wcv-topic">{{ debateClaimCount(debate) }} 个论点</span>
+                                    <span class="wcv-st">{{ debateStatus(debate) }}</span>
+                                </div>
                             </div>
-                            <div class="wcv-st">{{ debateStatus(debate) }}<span v-if="debate.resolution" class="wcv-res">· {{ debate.resolution }}</span></div>
+                            <p v-if="debate.resolution" class="wcv-res-line">{{ debate.resolution }}</p>
                         </div>
                         <p v-if="!debates.length" class="dash-empty">本次评审未产生公开辩论。</p>
                     </div></div>

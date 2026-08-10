@@ -1,6 +1,9 @@
 package ai.cc.chongming.review.application;
 
+import ai.cc.chongming.review.config.ReviewRuntimeTraceProperties;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.repository.RuntimeTraceStore;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.agui.event.AguiEvent;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -9,28 +12,72 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * [AIREVIEW-PLAN-017#4.2] Bounded in-memory AG-UI runtime trace per review attempt.
+ * [AIREVIEW-PLAN-017#4.2][AIREVIEW-PLAN-022#5.3] Bounded AG-UI runtime trace per review attempt.
+ *
+ * <p>Since PLAN-022 the registry can durably persist the main review runtime
+ * ({@code review-{reviewId}-attempt-{attemptNo}}) and lazily rehydrate it after a restart.
+ * Persistence is best-effort observability: a failed write is logged and never blocks the
+ * review run or the real-time SSE stream. When no {@link RuntimeTraceStore} is configured the
+ * registry degrades to the original pure in-memory behavior.
  *
  * @author wangli
  */
 @Component
 public class ReviewRuntimeTraceRegistry {
 
-    private static final int MAX_EVENTS_PER_RUNTIME = 500;
+    private static final int DEFAULT_MAX_EVENTS_PER_RUNTIME = 1000;
+
+    /**
+     * Matches exactly the main attempt runtime {@code review-{uuid}-attempt-{n}}. Auxiliary
+     * runtimes such as the Context Scout preview ({@code ...-attempt-{n}:scout-preview:{id}})
+     * share the {@code review-} prefix but carry a suffix and therefore never match.
+     */
+    private static final Pattern REVIEW_RUNTIME_PATTERN =
+            Pattern.compile("^review-([0-9a-fA-F-]+)-attempt-(\\d+)$");
+
     private final Map<String, RuntimeTrace> traces = new ConcurrentHashMap<>();
     private final ExecutorService emitterExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ExecutorService persistExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ObjectMapper objectMapper;
+    private final RuntimeTraceStore persistenceStore;
+    private final int maxEvents;
+    private final boolean persistenceEnabled;
+
+    public ReviewRuntimeTraceRegistry() {
+        this(new ObjectMapper(), null, new ReviewRuntimeTraceProperties(false, DEFAULT_MAX_EVENTS_PER_RUNTIME));
+    }
+
+    @Autowired
+    public ReviewRuntimeTraceRegistry(
+            ObjectMapper objectMapper,
+            @Autowired(required = false) RuntimeTraceStore persistenceStore,
+            ReviewRuntimeTraceProperties properties) {
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.persistenceStore = persistenceStore;
+        Objects.requireNonNull(properties, "properties must not be null");
+        this.maxEvents = properties.maxEvents();
+        this.persistenceEnabled = properties.enabled() && persistenceStore != null;
+    }
 
     public void publish(String runtimeId, AguiEvent event) {
-        traces.computeIfAbsent(runtimeId, RuntimeTrace::new).publish(event);
+        // resolveTrace keeps the durable sequence cursor monotonic across restarts: a persisted
+        // main runtime without an in-memory trace is rehydrated first, so new publishes continue
+        // from MAX(sequence) instead of reusing sequences already stored in the database.
+        resolveTrace(runtimeId).publish(event);
     }
 
     /**
@@ -54,7 +101,7 @@ public class ReviewRuntimeTraceRegistry {
         if (afterSequence < 0) {
             throw new IllegalArgumentException("afterSequence must not be negative");
         }
-        return traces.computeIfAbsent(runtimeId, RuntimeTrace::new).subscribe(afterSequence);
+        return resolveTrace(runtimeId).subscribe(afterSequence);
     }
 
     /** Activates delivery only after the HTTP layer has completed registration. */
@@ -77,9 +124,101 @@ public class ReviewRuntimeTraceRegistry {
         }
     }
 
+    /**
+     * Replays the in-memory event history of a runtime strictly after the cursor, hydrating a
+     * persisted main runtime on demand. Exposed for observability and tests; the SSE path uses
+     * the equivalent {@link #subscribe} contract.
+     */
+    List<AguiEvent> replayHistory(String runtimeId, long afterSequence) {
+        return resolveTrace(runtimeId).eventsAfter(afterSequence);
+    }
+
+    /**
+     * Resolves the trace for a runtime, lazily rehydrating a persisted main runtime when the
+     * process no longer holds it in memory (for example after a restart).
+     */
+    private RuntimeTrace resolveTrace(String runtimeId) {
+        RuntimeTrace trace = traces.get(runtimeId);
+        if (trace == null && persistable(runtimeId)) {
+            trace = hydrate(runtimeId);
+            RuntimeTrace existing = traces.putIfAbsent(runtimeId, trace);
+            trace = existing == null ? trace : existing;
+        }
+        return trace == null
+                ? traces.computeIfAbsent(runtimeId, id -> new RuntimeTrace(id, 0L, List.of()))
+                : trace;
+    }
+
+    private boolean persistable(String runtimeId) {
+        return persistenceEnabled && REVIEW_RUNTIME_PATTERN.matcher(runtimeId).matches();
+    }
+
+    private RuntimeTrace hydrate(String runtimeId) {
+        try {
+            long persistedMax = persistenceStore.maxSequence(runtimeId);
+            List<StampedEvent> persisted = persistenceStore
+                    .findAfter(runtimeId, 0L, Integer.MAX_VALUE)
+                    .stream()
+                    .map(row -> new StampedEvent(row.sequence(), deserialize(row.payloadJson())))
+                    .toList();
+            List<StampedEvent> kept = persisted.size() > maxEvents
+                    ? List.copyOf(persisted.subList(persisted.size() - maxEvents, persisted.size()))
+                    : persisted;
+            return new RuntimeTrace(runtimeId, persistedMax, kept);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("RUNTIME_TRACE_HYDRATE_FAILED runtimeId={} error={}",
+                    runtimeId, exception.getMessage());
+            return new RuntimeTrace(runtimeId, 0L, List.of());
+        }
+    }
+
+    private AguiEvent deserialize(String payloadJson) {
+        try {
+            return objectMapper.readValue(payloadJson, AguiEvent.class);
+        } catch (IOException exception) {
+            throw new IllegalStateException("runtime trace payload could not be deserialized", exception);
+        }
+    }
+
+    /**
+     * Derives a stable dedupe key for events that carry a natural id (message/tool call/run);
+     * returns {@code null} for events without one so the nullable unique index stays unconstrained.
+     */
+    static String deriveEventId(AguiEvent event) {
+        String type = event.getType() == null ? null : event.getType().name();
+        String discriminator = switch (event) {
+            case AguiEvent.TextMessageStart e -> e.messageId();
+            case AguiEvent.TextMessageContent e -> e.messageId();
+            case AguiEvent.TextMessageEnd e -> e.messageId();
+            case AguiEvent.ReasoningMessageStart e -> e.messageId();
+            case AguiEvent.ReasoningMessageContent e -> e.messageId();
+            case AguiEvent.ReasoningMessageEnd e -> e.messageId();
+            case AguiEvent.ToolCallStart e -> e.toolCallId();
+            case AguiEvent.ToolCallEnd e -> e.toolCallId();
+            case AguiEvent.ToolCallResult e -> e.toolCallId();
+            case AguiEvent.RunStarted e -> e.runId();
+            case AguiEvent.RunFinished e -> e.runId();
+            default -> null;
+        };
+        return discriminator == null || type == null ? null : type + ":" + discriminator;
+    }
+
+    private Optional<ReviewRuntimeRef> parseReviewRuntime(String runtimeId) {
+        Matcher matcher = REVIEW_RUNTIME_PATTERN.matcher(runtimeId);
+        if (!matcher.matches()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(new ReviewRuntimeRef(UUID.fromString(matcher.group(1)), Integer.parseInt(matcher.group(2))));
+        } catch (IllegalArgumentException invalid) {
+            return Optional.empty();
+        }
+    }
+
     @PreDestroy
     void close() {
         emitterExecutor.close();
+        persistExecutor.close();
     }
 
     public static final class Subscription {
@@ -112,11 +251,15 @@ public class ReviewRuntimeTraceRegistry {
     }
 
     private final class RuntimeTrace {
+        private final String runtimeId;
         private final AtomicLong sequence = new AtomicLong();
         private final List<StampedEvent> events = new ArrayList<>();
         private final Map<UUID, Subscription> subscriptions = new ConcurrentHashMap<>();
 
-        private RuntimeTrace(String runtimeId) {
+        private RuntimeTrace(String runtimeId, long initialSequence, List<StampedEvent> initialEvents) {
+            this.runtimeId = runtimeId;
+            this.sequence.set(initialSequence);
+            this.events.addAll(initialEvents);
         }
 
         private void publish(AguiEvent event) {
@@ -125,10 +268,58 @@ public class ReviewRuntimeTraceRegistry {
                 // Allocation, buffer append, and subscription enqueue are one critical section so every subscriber sees 1, 2, 3.
                 stamped = new StampedEvent(sequence.incrementAndGet(), event);
                 events.add(stamped);
-                if (events.size() > MAX_EVENTS_PER_RUNTIME) {
+                if (events.size() > maxEvents) {
                     events.removeFirst();
                 }
                 subscriptions.values().forEach(subscription -> enqueue(subscription, stamped));
+            }
+            persist(stamped);
+        }
+
+        /**
+         * Best-effort durable append outside the critical section. A failed write is logged and
+         * never propagates to the publisher, keeping the review run and real-time SSE unaffected.
+         */
+        private void persist(StampedEvent stamped) {
+            if (persistenceStore == null || !persistenceEnabled) {
+                return;
+            }
+            parseReviewRuntime(runtimeId).ifPresent(ref -> {
+                try {
+                    persistExecutor.execute(() -> {
+                        try {
+                            String payloadJson = objectMapper.writeValueAsString(stamped.event());
+                            String eventType = stamped.event().getType() == null
+                                    ? "CUSTOM"
+                                    : stamped.event().getType().name();
+                            persistenceStore.append(
+                                    runtimeId,
+                                    stamped.sequence(),
+                                    deriveEventId(stamped.event()),
+                                    eventType,
+                                    payloadJson,
+                                    new ReviewId(ref.reviewId()),
+                                    ref.attemptNo());
+                            persistenceStore.trim(runtimeId, maxEvents);
+                        } catch (Exception exception) {
+                            LOGGER.warn("RUNTIME_TRACE_PERSIST_FAILED runtimeId={} sequence={} error={}",
+                                    runtimeId, stamped.sequence(), exception.getMessage());
+                        }
+                    });
+                } catch (RuntimeException rejected) {
+                    // Registry is shutting down; the tail write is intentionally dropped (R3).
+                    LOGGER.warn("RUNTIME_TRACE_PERSIST_SKIPPED runtimeId={} sequence={} error={}",
+                            runtimeId, stamped.sequence(), rejected.getMessage());
+                }
+            });
+        }
+
+        private List<AguiEvent> eventsAfter(long afterSequence) {
+            synchronized (this) {
+                return events.stream()
+                        .filter(event -> event.sequence() > afterSequence)
+                        .map(StampedEvent::event)
+                        .toList();
             }
         }
 
@@ -232,4 +423,10 @@ public class ReviewRuntimeTraceRegistry {
 
     private record StampedEvent(long sequence, AguiEvent event) {
     }
+
+    private record ReviewRuntimeRef(UUID reviewId, int attemptNo) {
+    }
+
+    private static final org.slf4j.Logger LOGGER =
+            org.slf4j.LoggerFactory.getLogger(ReviewRuntimeTraceRegistry.class);
 }
