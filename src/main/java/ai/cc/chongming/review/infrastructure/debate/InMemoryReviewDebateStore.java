@@ -35,6 +35,15 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
     private final Map<ReviewId, Map<TopicId, JudgeDecision>> judgeDecisions = new ConcurrentHashMap<>();
     private final Map<ReviewId, GateDecision> gateDrafts = new ConcurrentHashMap<>();
 
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Turn order must follow the real chronology (round, then creation
+     * time); sorting by random turn UUIDs would make the evidence-request answer check depend on
+     * UUID luck instead of the actual submission sequence.
+     */
+    private static final Comparator<DebateTurn> TURN_ORDER = Comparator.comparingInt(DebateTurn::round)
+            .thenComparing(DebateTurn::createdAt)
+            .thenComparing(turn -> turn.turnId().value());
+
     @Override
     public void saveClaim(Claim claim) {
         claims.computeIfAbsent(claim.reviewId(), ignored -> new ConcurrentHashMap<>()).putIfAbsent(claim.claimId(), claim);
@@ -87,7 +96,7 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
                 values.add(turn);
             }
         }
-        values.sort(Comparator.comparingInt(DebateTurn::round).thenComparing(turn -> turn.turnId().value()));
+        values.sort(TURN_ORDER);
         return List.copyOf(values);
     }
 
@@ -95,8 +104,7 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
     public List<DebateTurn> findTurns(ReviewId reviewId) {
         return turns.getOrDefault(reviewId, Map.of()).values().stream()
                 .sorted(Comparator.comparing(DebateTurn::topicId, Comparator.comparing(TopicId::value))
-                        .thenComparingInt(DebateTurn::round)
-                        .thenComparing(turn -> turn.turnId().value()))
+                        .thenComparing(TURN_ORDER))
                 .toList();
     }
     @Override

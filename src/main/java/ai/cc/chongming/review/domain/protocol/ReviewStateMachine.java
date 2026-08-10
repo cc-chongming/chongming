@@ -27,7 +27,10 @@ public final class ReviewStateMachine {
         allow(ReviewStage.PLANNING, ReviewStage.INITIAL_REVIEW, ReviewStage.FAILED, ReviewStage.CANCELLING);
         allow(ReviewStage.INITIAL_REVIEW, ReviewStage.CONFLICT_DETECTION, ReviewStage.FAILED, ReviewStage.CANCELLING);
         allow(ReviewStage.CONFLICT_DETECTION, ReviewStage.DEBATE_ROUND_1, ReviewStage.FAILED, ReviewStage.CANCELLING);
-        allow(ReviewStage.DEBATE_ROUND_1, ReviewStage.DEBATE_ROUND_2, ReviewStage.FAILED, ReviewStage.CANCELLING);
+        // [AIREVIEW-PLAN-024#方案4] DEBATE_ROUND_1 may converge directly to JUDGING when every topic
+        // is terminal and no valid second-round action remains; empty rounds are never fabricated.
+        allow(ReviewStage.DEBATE_ROUND_1, ReviewStage.DEBATE_ROUND_2, ReviewStage.JUDGING,
+                ReviewStage.FAILED, ReviewStage.CANCELLING);
         allow(ReviewStage.DEBATE_ROUND_2, ReviewStage.JUDGING, ReviewStage.FAILED, ReviewStage.CANCELLING);
         allow(ReviewStage.JUDGING, ReviewStage.WAITING_HUMAN, ReviewStage.FAILED, ReviewStage.CANCELLING);
         allow(ReviewStage.WAITING_HUMAN, ReviewStage.NOTIFYING, ReviewStage.FAILED, ReviewStage.CANCELLING);

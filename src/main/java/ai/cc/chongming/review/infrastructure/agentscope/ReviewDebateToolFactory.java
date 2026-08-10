@@ -1,5 +1,6 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.application.ConflictDetectionService;
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewDispatchService;
@@ -31,11 +32,12 @@ import reactor.core.publisher.Mono;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案3] Binds debate and Judge operations to the
+ * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案3/方案4] Binds debate and Judge operations to the
  * active review attempt. The model never supplies review identity, actor identity, optimistic
  * version, or idempotency; every debate write action must additionally reference a valid
  * server-issued dispatch commandId, and the Director steers roles through the dispatch tool
- * instead of broadcast text.
+ * instead of broadcast text. Topic registration is batch ({@code register_topics}) and fed by the
+ * deterministic {@code list_conflict_candidates} recall.
  *
  * @author wangli
  */
@@ -54,6 +56,7 @@ public class ReviewDebateToolFactory {
     private final ReviewWorkflowDispatcher workflowDispatcher;
     private final ReviewDebateStore debateStore;
     private final ReviewDispatchService dispatchService;
+    private final ConflictDetectionService conflictDetectionService;
 
     public ReviewDebateToolFactory(
             ReviewRegistry reviewRegistry,
@@ -61,7 +64,17 @@ public class ReviewDebateToolFactory {
             DebateService debateService,
             ReviewWorkflowDispatcher workflowDispatcher,
             ReviewDebateStore debateStore) {
-        this(reviewRegistry, debateTools, debateService, workflowDispatcher, debateStore, null);
+        this(reviewRegistry, debateTools, debateService, workflowDispatcher, debateStore, null, null);
+    }
+
+    public ReviewDebateToolFactory(
+            ReviewRegistry reviewRegistry,
+            DebateTools debateTools,
+            DebateService debateService,
+            ReviewWorkflowDispatcher workflowDispatcher,
+            ReviewDebateStore debateStore,
+            ReviewDispatchService dispatchService) {
+        this(reviewRegistry, debateTools, debateService, workflowDispatcher, debateStore, dispatchService, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -71,18 +84,21 @@ public class ReviewDebateToolFactory {
             DebateService debateService,
             ReviewWorkflowDispatcher workflowDispatcher,
             ReviewDebateStore debateStore,
-            ReviewDispatchService dispatchService) {
+            ReviewDispatchService dispatchService,
+            ConflictDetectionService conflictDetectionService) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.debateTools = Objects.requireNonNull(debateTools, "debateTools must not be null");
         this.debateService = Objects.requireNonNull(debateService, "debateService must not be null");
         this.workflowDispatcher = Objects.requireNonNull(workflowDispatcher, "workflowDispatcher must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.dispatchService = dispatchService;
+        this.conflictDetectionService = conflictDetectionService;
     }
 
     public List<AgentTool> directorTools(ReviewRuntimeContext context) {
-        return List.of(new ListPersistedClaimsTool(context), new ListPersistedDebateTopicsTool(context, RoleType.DIRECTOR),
-                new OpenTopicTool(context), new DispatchDebateActionTool(context), new CloseTopicTool(context),
+        return List.of(new ListPersistedClaimsTool(context), new ListConflictCandidatesTool(context),
+                new ListPersistedDebateTopicsTool(context, RoleType.DIRECTOR),
+                new RegisterTopicsTool(context), new DispatchDebateActionTool(context), new CloseTopicTool(context),
                 new BeginSecondRoundTool(context), new BeginJudgingTool(context), new SkipDebateWhenNoConflictsTool(context));
     }
 
@@ -232,17 +248,101 @@ public class ReviewDebateToolFactory {
         }
     }
 
-    private final class OpenTopicTool extends BoundTool {
-        private OpenTopicTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
-        @Override public String getName() { return "open_debate_topic"; }
-        @Override public String getDescription() { return "Open one conflict topic from persisted Claims during conflict detection. Prefer grouping related OPPOSE Claims into one topic and include a SUPPORT Claim when one exists for the subject; when no SUPPORT Claim exists, open the topic with the OPPOSE Claim(s) alone so the debate can still proceed."; }
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Read-only recall of the deterministic conflict candidates; the
+     * Director must register its chosen topics from this list instead of inventing subjects.
+     *
+     * @author wangli
+     */
+    private final class ListConflictCandidatesTool extends BoundTool {
+
+        private ListConflictCandidatesTool(ReviewRuntimeContext context) {
+            super(context, RoleType.DIRECTOR);
+        }
+
+        @Override
+        public String getName() {
+            return "list_conflict_candidates";
+        }
+
+        @Override
+        public String getDescription() {
+            return "List deterministic conflict candidates (subjects with contradictory conclusions) plus Gate risk counts, computed from persisted Assessments and Claims; this never changes review state.";
+        }
+
+        @Override
+        public Map<String, Object> getParameters() {
+            return objectSchema(Map.of(), List.of());
+        }
+
+        @Override
+        ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            requireNoInput(input);
+            if (conflictDetectionService == null) {
+                throw new IllegalStateException("conflict detection service is not wired");
+            }
+            ConflictDetectionService.Outcome outcome = conflictDetectionService.detect(review);
+            if (outcome.result().candidates().isEmpty()) {
+                return ToolResultBlock.text("candidates=[]; gateRisks=" + outcome.gateRiskAssessments().size()
+                        + "; use skip_debate_when_no_conflicts when no candidate remains");
+            }
+            String payload = outcome.result().candidates().stream()
+                    .map(candidate -> "subjectKey=" + sanitize(candidate.subjectKey())
+                            + "; claimIds=[" + candidate.claimIds().stream()
+                                    .map(claimId -> claimId.value().toString())
+                                    .collect(java.util.stream.Collectors.joining(", "))
+                            + "]; explanation=" + sanitize(candidate.explanation()))
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            return ToolResultBlock.text(payload + "\ngateRisks=" + outcome.gateRiskAssessments().size()
+                    + "; register every candidate with register_topics or justify a skip");
+        }
+
+        private String sanitize(String value) {
+            return value.replaceAll("\\s+", " ").trim();
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Director batch-submits all chosen topic candidates in one command;
+     * the server validates everything first, then atomically registers and advances the stage once.
+     *
+     * @author wangli
+     */
+    private final class RegisterTopicsTool extends BoundTool {
+        private RegisterTopicsTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
+        @Override public String getName() { return "register_topics"; }
+        @Override public String getDescription() { return "Register ALL chosen conflict topics in one batch from list_conflict_candidates subjects; the server validates and deduplicates every proposal first, then atomically saves all topics and moves the stage to debate round one exactly once. claimIds may be empty for assessment-only contradiction subjects."; }
         @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
-                "subjectKey", stringSchema("Conflicting public subject key"),
-                "claimIds", idArraySchema("Persisted Claim UUIDs")), List.of("subjectKey", "claimIds")); }
+                "topics", Map.of("type", "array", "description", "Every candidate subject to register",
+                        "items", objectSchema(Map.of(
+                                "subjectKey", stringSchema("Conflict candidate subject key"),
+                                "claimIds", idArraySchema("Persisted Claim UUIDs of the subject")), List.of("subjectKey")))),
+                List.of("topics")); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
-            DebateService.TopicResult result = debateTools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
-                    metadata, RoleType.DIRECTOR, text(input, "subjectKey"), claimIds(input.get("claimIds"))));
-            return ToolResultBlock.text("topicId=" + result.topic().id().value() + "; replayed=" + result.replayed());
+            Object value = input.get("topics");
+            if (!(value instanceof Collection<?> collection) || collection.isEmpty()) {
+                throw new IllegalArgumentException("topics must be a non-empty array");
+            }
+            List<DebateToolCommands.TopicProposal> proposals = collection.stream()
+                    .map(element -> {
+                        if (!(element instanceof Map<?, ?> entry)) {
+                            throw new IllegalArgumentException("each topic must be an object");
+                        }
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> topic = (Map<String, Object>) entry;
+                        Object subject = topic.get("subjectKey");
+                        if (subject == null || subject.toString().isBlank()) {
+                            throw new IllegalArgumentException("subjectKey is required");
+                        }
+                        return new DebateToolCommands.TopicProposal(subject.toString(), claimIds(topic.get("claimIds")));
+                    })
+                    .toList();
+            DebateService.RegisterTopicsResult result = debateTools.registerDebateTopics(review,
+                    new DebateToolCommands.RegisterTopics(metadata, RoleType.DIRECTOR, proposals));
+            String payload = result.topics().stream()
+                    .map(topicResult -> "topicId=" + topicResult.topic().id().value())
+                    .collect(java.util.stream.Collectors.joining("; "));
+            return ToolResultBlock.text(payload + "; replayed=" + result.replayed());
         }
     }
 
@@ -406,7 +506,8 @@ public class ReviewDebateToolFactory {
             if (!review.commandResults().containsKey(metadata.idempotencyKey())) {
                 debateService.validateBeginJudging(review);
             }
-            boolean replayed = advanceStage(review, metadata, ReviewStage.DEBATE_ROUND_2, "begin-judging", () -> debateService.beginJudging(review));
+            boolean replayed = advanceStage(review, metadata, List.of(ReviewStage.DEBATE_ROUND_2, ReviewStage.DEBATE_ROUND_1),
+                    "begin-judging", () -> debateService.beginJudging(review));
             if (!replayed) workflowDispatcher.dispatchJudge(review);
             return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
         }
@@ -527,9 +628,18 @@ public class ReviewDebateToolFactory {
 
     private boolean advanceStage(
             Review review, ReviewCommandMetadata metadata, ReviewStage expectedStage, String reference, Runnable operation) {
+        return advanceStage(review, metadata, List.of(expectedStage), reference, operation);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Stage transitions may permit several source stages (early
+     * convergence from DEBATE_ROUND_1 straight to JUDGING).
+     */
+    private boolean advanceStage(
+            Review review, ReviewCommandMetadata metadata, List<ReviewStage> expectedStages, String reference, Runnable operation) {
         if (!review.id().equals(metadata.reviewId())) throw new IllegalArgumentException("review identity does not match tool runtime");
         if (review.commandResults().containsKey(metadata.idempotencyKey())) return true;
-        if (review.stage() != expectedStage || review.version() != metadata.expectedVersion()) {
+        if (!expectedStages.contains(review.stage()) || review.version() != metadata.expectedVersion()) {
             throw new IllegalStateException("review stage or version does not permit this transition");
         }
         review.recordCommand(metadata, reference);

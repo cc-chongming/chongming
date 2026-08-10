@@ -2,6 +2,10 @@ package ai.cc.chongming.review.domain.protocol;
 
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.exception.ReviewErrorCode;
+import ai.cc.chongming.review.domain.model.DebateTopic;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurnType;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
@@ -61,6 +65,53 @@ public final class DebateStateMachine {
             throw new ReviewDomainException(ReviewErrorCode.TARGET_TURN_REQUIRED,
                     "a rebuttal requires targetTurnId");
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] The second round may begin only while at least one valid open action
+     * remains: a challenge awaiting its answer before the Judge, an unanswered evidence request, or a
+     * non-terminal topic whose conflicting positions are not yet clarified. Without any open action the
+     * Director must converge straight to judging instead of running an empty round.
+     */
+    public boolean hasOpenSecondRoundActions(Collection<DebateTopic> topics) {
+        Objects.requireNonNull(topics, "topics must not be null");
+        return topics.stream().anyMatch(this::requiresSecondRoundAction);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] One topic's second-round requirement: challenged topics must receive
+     * the rebuttal, open topics still hold unclarified conflicting positions, and any topic with an
+     * unanswered evidence request owes its target role one answer.
+     */
+    public boolean requiresSecondRoundAction(DebateTopic topic) {
+        Objects.requireNonNull(topic, "topic must not be null");
+        if (topic.status().isTerminal()) {
+            return false;
+        }
+        if (topic.status() == DebateTopicStatus.OPEN || topic.status() == DebateTopicStatus.CHALLENGED) {
+            return true;
+        }
+        return hasUnansweredEvidenceRequest(topic.turns());
+    }
+
+    private boolean hasUnansweredEvidenceRequest(List<DebateTurn> turns) {
+        for (int index = 0; index < turns.size(); index++) {
+            DebateTurn turn = turns.get(index);
+            if (turn.turnType() != DebateTurnType.EVIDENCE_REQUEST || turn.targetRole() == null) {
+                continue;
+            }
+            boolean answered = false;
+            for (int later = index + 1; later < turns.size(); later++) {
+                if (turns.get(later).actorRole() == turn.targetRole()) {
+                    answered = true;
+                    break;
+                }
+            }
+            if (!answered) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void allow(DebateTopicStatus from, DebateTopicStatus... nextStatuses) {

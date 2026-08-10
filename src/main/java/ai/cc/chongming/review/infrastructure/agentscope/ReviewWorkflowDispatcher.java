@@ -74,7 +74,9 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             }
             rejectPendingCommands(event, "REVIEW_TERMINATED");
         } else if (event.type() == ReviewEventType.INITIAL_REVIEW_COMPLETED) {
-            send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims. If any persisted Claim has an OPPOSE position, open debate topic(s) for those conflicting Claims; only when no persisted Claim has an OPPOSE position call skip_debate_when_no_conflicts. Do not search the workspace for Claim files or create facts in text.");
+            // [AIREVIEW-PLAN-024#方案4] Conflict detection is deterministic: recall candidates,
+            // batch-register every chosen subject in one command, or skip when none remains.
+            send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims, then list_conflict_candidates. If at least one conflict candidate remains, register ALL chosen candidates in one register_topics batch command; only when no conflict candidate remains call skip_debate_when_no_conflicts. A single GAP or UNKNOWN assessment alone is never a debate topic. Do not search the workspace for Claim files or create facts in text.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_OPENED) {
             send(runtimeId(event), directorLabel(event), "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command.");
         } else if (event.type() == ReviewEventType.DEBATE_ROUND_2_STARTED) {

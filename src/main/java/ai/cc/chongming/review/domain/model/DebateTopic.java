@@ -32,10 +32,9 @@ public final class DebateTopic {
             throw new IllegalArgumentException("subjectKey must not be blank");
         }
         this.subjectKey = subjectKey;
+        // [AIREVIEW-PLAN-024#方案4] claimIds may be empty when the topic is opened from a purely
+        // Assessment-borne contradiction; Claim-backed topics keep their previous contract.
         this.claimIds = List.copyOf(claimIds);
-        if (this.claimIds.isEmpty()) {
-            throw new IllegalArgumentException("claimIds must not be empty");
-        }
         this.status = DebateTopicStatus.OPEN;
     }
 

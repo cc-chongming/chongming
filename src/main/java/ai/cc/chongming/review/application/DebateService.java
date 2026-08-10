@@ -10,19 +10,28 @@ import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
+import ai.cc.chongming.review.infrastructure.assessment.InMemoryReviewAssessmentStore;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-010#1.5] Applies bounded, reference-safe debate turns while the review aggregate owns idempotency and versions.
+ * [AIREVIEW-PLAN-010#1.5][AIREVIEW-PLAN-024#方案4] Applies bounded, reference-safe debate turns
+ * while the review aggregate owns idempotency and versions. Conflict candidates come from the
+ * deterministic {@link ConflictDetectionService}; topic registration is batch, idempotent and
+ * atomic, and rebuttals are bound to the challenged role by identity.
  *
  * @author wangli
  */
@@ -34,6 +43,21 @@ public class DebateService {
     private final DebateStateMachine debateStateMachine;
     private final ReviewProtocolGuard protocolGuard;
     private final ReviewEventPublisher eventPublisher;
+    private final ConflictDetectionService conflictDetectionService;
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Monotonic turn clock: wall-clock instants may repeat within one
+     * test/jiffy, and equal createdAt values would shuffle turn order by random turn id, breaking
+     * "answered after the evidence request" reasoning. Later turns always carry a later instant.
+     */
+    private static final AtomicReference<Instant> LAST_TURN_INSTANT = new AtomicReference<>(Instant.EPOCH);
+
+    private static Instant nextTurnInstant() {
+        return LAST_TURN_INSTANT.updateAndGet(previous -> {
+            Instant now = Instant.now();
+            return now.isAfter(previous) ? now : previous.plusNanos(1);
+        });
+    }
 
     public DebateService(
             ReviewDebateStore debateStore,
@@ -42,62 +66,102 @@ public class DebateService {
         this(debateStore, evidenceLedgerService, debateStateMachine, new ReviewProtocolGuard(), ReviewEventPublisher.noop());
     }
 
-    @Autowired
     public DebateService(
             ReviewDebateStore debateStore,
             EvidenceLedgerService evidenceLedgerService,
             DebateStateMachine debateStateMachine,
             ReviewProtocolGuard protocolGuard,
             ReviewEventPublisher eventPublisher) {
+        this(debateStore, evidenceLedgerService, debateStateMachine, protocolGuard, eventPublisher,
+                new ConflictDetectionService(new InMemoryReviewAssessmentStore(), debateStore));
+    }
+
+    @Autowired
+    public DebateService(
+            ReviewDebateStore debateStore,
+            EvidenceLedgerService evidenceLedgerService,
+            DebateStateMachine debateStateMachine,
+            ReviewProtocolGuard protocolGuard,
+            ReviewEventPublisher eventPublisher,
+            ConflictDetectionService conflictDetectionService) {
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.evidenceLedgerService = Objects.requireNonNull(evidenceLedgerService, "evidenceLedgerService must not be null");
         this.debateStateMachine = Objects.requireNonNull(debateStateMachine, "debateStateMachine must not be null");
         this.protocolGuard = Objects.requireNonNull(protocolGuard, "protocolGuard must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.conflictDetectionService = Objects.requireNonNull(conflictDetectionService, "conflictDetectionService must not be null");
     }
 
-    /** Opens a topic from at least one existing Claim in the conflict-detection stage. */
-    public TopicResult openTopic(Review review, DebateToolCommands.OpenTopic command) {
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Registers every Director-chosen conflict candidate in one batch.
+     * All proposals are fully validated and deduplicated before anything is persisted, all topics
+     * are then saved atomically inside this one operation, and only afterwards does the review
+     * migrate from CONFLICT_DETECTION to DEBATE_ROUND_1 exactly once. Replaying the same
+     * idempotency key returns the already registered topics without touching the stage again.
+     */
+    public RegisterTopicsResult registerTopics(Review review, DebateToolCommands.RegisterTopics command) {
         requireReview(review, command.metadata());
         if (command.actorRole() != RoleType.DIRECTOR) {
-            throw new ReviewDomainException(ReviewErrorCode.UNAUTHORIZED_ROLE, "only director may open a debate topic");
+            throw new ReviewDomainException(ReviewErrorCode.UNAUTHORIZED_ROLE,
+                    "only director may register debate topics");
         }
         String existing = review.commandResults().get(command.metadata().idempotencyKey());
         if (existing != null) {
-            DebateTopic topic = debateStore.findTopic(review.id(), new TopicId(UUID.fromString(existing)))
-                    .orElseThrow(() -> new IllegalStateException("topic idempotency reference cannot be resolved"));
-            return new TopicResult(topic, true);
+            List<TopicResult> replayed = Arrays.stream(existing.split(","))
+                    .filter(id -> !id.isBlank())
+                    .map(id -> debateStore.findTopic(review.id(), new TopicId(UUID.fromString(id)))
+                            .orElseThrow(() -> new IllegalStateException("topic idempotency reference cannot be resolved")))
+                    .map(topic -> new TopicResult(topic, true))
+                    .toList();
+            return new RegisterTopicsResult(replayed, true);
         }
         requireVersionAndStage(review, command.metadata(), ReviewStage.CONFLICT_DETECTION);
         if (!protocolGuard.validateDebateStart(review.roleActivations()).isValid()) {
             throw new ReviewDomainException(ReviewErrorCode.CORE_ROLE_INITIAL_REVIEW_REQUIRED,
-                    "all core roles must complete independent initial review before a debate topic opens");
+                    "all core roles must complete independent initial review before debate topics register");
         }
-        List<Claim> claims = command.claimIds().stream().map(claimId -> debateStore.findClaim(review.id(), claimId)
-                .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
-                        "topic claim does not belong to this review"))).toList();
-        // A debate topic may aggregate opposing Claims that do not share one subjectKey. When
-        // every selected Claim shares a key, that key names the topic; otherwise the Director's
-        // subjectKey names the aggregate topic so cross-subject opposing Claims can still be debated.
-        String topicSubject = claims.stream().map(Claim::subjectKey).distinct().count() == 1
-                ? claims.get(0).subjectKey()
-                : command.subjectKey();
-        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), topicSubject, command.claimIds());
-        debateStore.saveTopic(topic);
-review.recordCommand(command.metadata(), topic.id().value().toString());
+        // Complete validation and idempotency-key dedup BEFORE any persistence: a single invalid
+        // proposal must reject the whole batch, and duplicate subjects register once.
+        LinkedHashMap<String, DebateToolCommands.TopicProposal> deduplicated = new LinkedHashMap<>();
+        for (DebateToolCommands.TopicProposal proposal : command.proposals()) {
+            String normalized = proposal.subjectKey().trim().toLowerCase(Locale.ROOT);
+            if (deduplicated.putIfAbsent(normalized, proposal) != null) {
+                continue;
+            }
+            for (ClaimId claimId : proposal.claimIds()) {
+                debateStore.findClaim(review.id(), claimId)
+                        .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
+                                "topic claim does not belong to this review"));
+            }
+        }
+        List<TopicResult> registered = new ArrayList<>();
+        List<String> persistedIds = new ArrayList<>();
+        for (DebateToolCommands.TopicProposal proposal : deduplicated.values()) {
+            DebateTopic topic = new DebateTopic(
+                    new TopicId(UUID.randomUUID()), review.id(), proposal.subjectKey(), proposal.claimIds());
+            debateStore.saveTopic(topic);
+            registered.add(new TopicResult(topic, false));
+            persistedIds.add(topic.id().value().toString());
+        }
+        review.recordCommand(command.metadata(), String.join(",", persistedIds));
+        // The stage migrates exactly once, after every topic of the batch is persisted.
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_1);
-        eventPublisher.publish(ReviewEventDrafts.completedCommand(
-                review,
-                ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_TOPIC_OPENED,
-                RoleType.DIRECTOR,
-                null,
-                topic.id(),
-                null,
-                null,
-                1,
-                60,
-                Map.of("subjectKey", topic.subjectKey())));
-        return new TopicResult(topic, false);
+        for (TopicResult result : registered) {
+            eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                    review,
+                    ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_TOPIC_OPENED,
+                    RoleType.DIRECTOR,
+                    null,
+                    result.topic().id(),
+                    null,
+                    null,
+                    1,
+                    60,
+                    Map.of("subjectKey", result.topic().subjectKey())));
+        }
+        conflictDetectionService.recordTopicRegistration(review.id(),
+                deduplicated.values().stream().map(DebateToolCommands.TopicProposal::subjectKey).toList());
+        return new RegisterTopicsResult(registered, false);
     }
 
     /** Stores a directed challenge against a Claim that is part of the selected topic. */
@@ -117,7 +181,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         rejectRepeatedRoundOneChallenge(topic, command);
         DebateTurn turn = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), command.round(), command.actorRole(),
                 command.targetRole(), DebateTurnType.CHALLENGE, command.targetClaimId(), null, command.publicContent(),
-                validateEvidence(review.id(), command.evidenceIds()), null, null, Instant.now());
+                validateEvidence(review.id(), command.evidenceIds()), null, null, nextTurnInstant());
         topic.addChallenge(debateStateMachine, turn);
         debateStore.saveTopic(topic);
         debateStore.saveTurn(review.id(), turn);
@@ -126,7 +190,11 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         return new TurnResult(turn, false);
     }
 
-    /** Stores a rebuttal that references an existing challenge/rebuttal in the same topic and round. */
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Stores a rebuttal bound to the challenged role by identity. The
+     * target turn keeps its original round, so a round-two answer to a round-one challenge carries
+     * the true target turn id instead of being rewritten to the current round.
+     */
     public TurnResult submitRebuttal(Review review, DebateToolCommands.Rebuttal command) {
         DebateTopic topic = requireTopic(review, command.metadata(), command.topicId());
         String existing = review.commandResults().get(command.metadata().idempotencyKey());
@@ -134,18 +202,25 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
             return new TurnResult(requireTurn(review.id(), existing), true);
         }
         requireVersionAndRound(review, command.metadata(), command.round());
+        // The target turn must belong to this topic (any of its rounds); the action must match a
+        // challenge, and only the challenged role itself may answer it.
         DebateTurn target = debateStore.findTurn(review.id(), command.targetTurnId())
-                .filter(turn -> turn.topicId().equals(topic.id()) && turn.round() == command.round())
+                .filter(turn -> turn.topicId().equals(topic.id()))
                 .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.TARGET_TURN_REQUIRED,
-                        "rebuttal target turn must belong to this topic and round"));
+                        "rebuttal target turn must belong to this topic"));
         requireActiveRole(review, command.actorRole());
-        if (target.actorRole() != command.targetRole() || command.actorRole() == command.targetRole()) {
-            throw new ReviewDomainException(ReviewErrorCode.UNAUTHORIZED_ROLE,
-                    "rebuttal target role must own target turn and differ from actor");
+        if (target.turnType() != DebateTurnType.CHALLENGE
+                || target.targetRole() == null
+                || command.actorRole() != target.targetRole()
+                || command.targetRole() != target.actorRole()) {
+            throw new ReviewDomainException(ReviewErrorCode.DISPATCH_ACTOR_MISMATCH,
+                    "only " + (target.targetRole() == null ? "the challenged role" : target.targetRole())
+                            + " may rebut challenge " + target.turnId().value()
+                            + "; rebuttal actor/target roles and topic, review, attempt identity must match the challenge");
         }
         DebateTurn turn = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), command.round(), command.actorRole(),
                 command.targetRole(), DebateTurnType.REBUTTAL, null, command.targetTurnId(), command.publicContent(),
-                validateEvidence(review.id(), command.evidenceIds()), null, null, Instant.now());
+                validateEvidence(review.id(), command.evidenceIds()), null, null, nextTurnInstant());
         topic.addRebuttal(debateStateMachine, turn);
         debateStore.saveTopic(topic);
         debateStore.saveTurn(review.id(), turn);
@@ -174,7 +249,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         }
         DebateTurn turn = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), command.round(), command.actorRole(),
                 null, DebateTurnType.POSITION_CHANGE, command.targetClaimId(), null, command.publicContent(),
-                validateEvidence(review.id(), command.evidenceIds()), claim.position(), command.stanceAfter(), Instant.now());
+                validateEvidence(review.id(), command.evidenceIds()), claim.position(), command.stanceAfter(), nextTurnInstant());
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
         publishTurn(review, turn);
@@ -199,7 +274,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
         }
         DebateTurn turn = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), command.round(), command.actorRole(),
                 command.targetRole(), DebateTurnType.EVIDENCE_REQUEST, command.targetClaimId(), null,
-                command.publicContent(), List.of(), null, null, Instant.now());
+                command.publicContent(), List.of(), null, null, nextTurnInstant());
         debateStore.saveTurn(review.id(), turn);
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
         publishTurn(review, turn);
@@ -233,6 +308,25 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "second debate round can begin only after round one");
         }
+        // [AIREVIEW-PLAN-024#方案4] No empty rounds: without a valid open action (evidence owed, an
+        // unanswered challenge, or unclarified positions) the Director converges to judging instead.
+        // Evidence requests persist only in the store, so topics are rehydrated with their store turns.
+        if (!debateStateMachine.hasOpenSecondRoundActions(topicsWithStoreTurns(review))) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "no valid open debate action remains; converge to judging instead of running an empty second round");
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Rebuilds every topic snapshot with the authoritative store turns so
+     * convergence checks see evidence requests, which never mutate the topic aggregate itself.
+     */
+    private List<DebateTopic> topicsWithStoreTurns(Review review) {
+        return debateStore.findTopics(review.id()).stream()
+                .map(topic -> DebateTopic.restore(topic.id(), topic.reviewId(), topic.subjectKey(),
+                        topic.claimIds(), topic.status(), topic.currentRound(),
+                        debateStore.findTurns(review.id(), topic.id()), topic.resolution(), topic.closedAt()))
+                .toList();
     }
 
     /** Enters judging only when every opened topic reached a terminal resolution or escalation. */
@@ -258,9 +352,11 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
     /** Validates that judging can begin without changing aggregate state. */
     public void validateBeginJudging(Review review) {
         Objects.requireNonNull(review, "review must not be null");
-        if (review.stage() != ReviewStage.DEBATE_ROUND_2) {
+        // [AIREVIEW-PLAN-024#方案4] Early convergence: judging may start directly from round one when
+        // every topic is already terminal, skipping a would-be empty second round.
+        if (review.stage() != ReviewStage.DEBATE_ROUND_2 && review.stage() != ReviewStage.DEBATE_ROUND_1) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "judging can begin only after the second debate round");
+                    "judging can begin only during an active debate round");
         }
         if (debateStore.findTopics(review.id()).stream().anyMatch(topic -> !topic.status().isTerminal())) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
@@ -269,8 +365,8 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
     }
 
     /**
-     * Preserves the two-round state-machine audit trail when the completed initial review has no
-     * conflicting Claim positions, then hands the review to the Judge for an AI Gate draft.
+     * Preserves the two-round state-machine audit trail when the deterministic conflict detection
+     * finds no candidate, then hands the review to the Judge for an AI Gate draft.
      */
     public void skipDebateWhenNoConflicts(Review review) {
         Objects.requireNonNull(review, "review must not be null");
@@ -282,10 +378,14 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
             throw new ReviewDomainException(ReviewErrorCode.CORE_ROLE_INITIAL_REVIEW_REQUIRED,
                     "all core roles must complete independent initial review before debate can be skipped");
         }
-        if (!debateStore.findTopics(review.id()).isEmpty() || hasConflictingClaimPositions(review)) {
+        // [AIREVIEW-PLAN-024#方案4] The production flow consumes the deterministic detector; a single
+        // GAP/UNKNOWN risk never blocks skipping, only a real contradictory candidate does.
+        ConflictDetectionService.Outcome detection = conflictDetectionService.detect(review);
+        if (!debateStore.findTopics(review.id()).isEmpty() || !detection.result().candidates().isEmpty()) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "debate can be skipped only when no conflicting Claim positions remain");
+                    "debate can be skipped only when no deterministic conflict candidate remains");
         }
+        conflictDetectionService.recordTopicRegistration(review.id(), List.of());
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
         review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_2);
@@ -300,7 +400,7 @@ review.recordCommand(command.metadata(), topic.id().value().toString());
                 null,
                 null,
                 80,
-                Map.of("reason", "NO_CONFLICTING_CLAIM_POSITIONS")));
+                Map.of("reason", "NO_CONFLICT_CANDIDATES")));
     }
 
     /** Closes a topic with a public resolution or escalation reason. */
@@ -326,7 +426,9 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
                 topic.id(),
                 null,
                 null,
-                topic.currentRound(),
+                // A never-challenged topic keeps currentRound 0; the event round must reflect the
+                // active review stage instead so the draft stays valid.
+                review.stage() == ReviewStage.DEBATE_ROUND_2 ? 2 : 1,
                 review.stage() == ReviewStage.DEBATE_ROUND_1 ? 60 : 70,
                 Map.of("status", topic.status().name())));
         return new TopicResult(topic, false);
@@ -357,14 +459,6 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
         return debateStore.findTopic(review.id(), topicId)
                 .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
                         "topic does not belong to this review"));
-    }
-
-    private boolean hasConflictingClaimPositions(Review review) {
-        // Any non-withdrawn OPPOSE position means an opposing voice exists that must be
-        // debated; conflicts are not restricted to Claims that share an identical subjectKey.
-        return debateStore.findClaims(review.id()).stream()
-                .anyMatch(claim -> claim.position() == ClaimPosition.OPPOSE
-                        && claim.status() != ClaimStatus.WITHDRAWN);
     }
 
     private Claim requireClaimInTopic(ReviewId reviewId, DebateTopic topic, ClaimId claimId) {
@@ -454,6 +548,18 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
 
     /** @author wangli */
     public record TopicResult(DebateTopic topic, boolean replayed) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Batch registration output: every registered topic in input order and
+     * the idempotent-replay flag.
+     *
+     * @author wangli
+     */
+    public record RegisterTopicsResult(List<TopicResult> topics, boolean replayed) {
+        public RegisterTopicsResult {
+            topics = List.copyOf(topics);
+        }
     }
 
     /** @author wangli */

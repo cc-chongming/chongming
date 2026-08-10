@@ -79,10 +79,18 @@ class ReviewStateMachineTests {
                 .isEqualTo(ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
     }
 
+    @Test
+    void permitsEarlyConvergenceFromRoundOneToJudging() {
+        // [AIREVIEW-PLAN-024#方案4] When no valid open action survives round one the debate may
+        // converge straight to judging instead of running an empty second round.
+        assertThat(stateMachine.transition(ReviewStage.DEBATE_ROUND_1, ReviewStage.JUDGING))
+                .isEqualTo(ReviewStage.JUDGING);
+    }
+
     private static Stream<Arguments> illegalTransitions() {
         return Stream.of(
                 Arguments.of(ReviewStage.PENDING, ReviewStage.PLANNING),
-                Arguments.of(ReviewStage.DEBATE_ROUND_1, ReviewStage.JUDGING),
+                Arguments.of(ReviewStage.INITIAL_REVIEW, ReviewStage.DEBATE_ROUND_1),
                 Arguments.of(ReviewStage.WAITING_HUMAN, ReviewStage.COMPLETED),
                 Arguments.of(ReviewStage.CANCELLED, ReviewStage.SNAPSHOTTING));
     }

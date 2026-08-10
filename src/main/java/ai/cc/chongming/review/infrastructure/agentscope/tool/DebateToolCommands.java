@@ -15,16 +15,34 @@ public final class DebateToolCommands {
     private DebateToolCommands() {
     }
 
-    /** @author wangli */
-    public record OpenTopic(ReviewCommandMetadata metadata, RoleType actorRole, String subjectKey, List<ClaimId> claimIds) {
-        public OpenTopic {
+    /**
+     * [AIREVIEW-PLAN-024#方案4] One candidate topic selection submitted by the Director inside a
+     * batch registration; claimIds may be empty for a purely Assessment-borne contradiction.
+     *
+     * @author wangli
+     */
+    public record TopicProposal(String subjectKey, List<ClaimId> claimIds) {
+        public TopicProposal {
+            requireText(subjectKey, "subjectKey");
+            claimIds = claimIds == null ? List.of() : List.copyOf(claimIds);
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Batch topic registration: the Director submits every chosen conflict
+     * candidate in one call; the server validates and deduplicates all proposals before persisting
+     * them atomically and migrating the stage exactly once.
+     *
+     * @author wangli
+     */
+    public record RegisterTopics(ReviewCommandMetadata metadata, RoleType actorRole, List<TopicProposal> proposals) {
+        public RegisterTopics {
             Objects.requireNonNull(metadata, "metadata must not be null");
             Objects.requireNonNull(actorRole, "actorRole must not be null");
-            requireText(subjectKey, "subjectKey");
-            claimIds = copyNonEmpty(claimIds, "claimIds");
-            if (claimIds.size() < 1) {
-                throw new IllegalArgumentException("a topic requires at least one claim");
+            if (proposals == null || proposals.isEmpty()) {
+                throw new IllegalArgumentException("register_topics requires at least one topic proposal");
             }
+            proposals = List.copyOf(proposals);
         }
     }
 
@@ -139,13 +157,6 @@ public final class DebateToolCommands {
         if (round < 1 || round > 2) {
             throw new IllegalArgumentException("round must be between 1 and 2");
         }
-    }
-
-    private static <T> List<T> copyNonEmpty(List<T> values, String name) {
-        if (values == null || values.isEmpty()) {
-            throw new IllegalArgumentException(name + " must not be empty");
-        }
-        return List.copyOf(values);
     }
 
     private static void requireText(String value, String name) {

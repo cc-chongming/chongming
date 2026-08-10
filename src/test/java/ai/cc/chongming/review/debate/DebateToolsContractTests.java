@@ -41,9 +41,11 @@ class DebateToolsContractTests {
         store.saveClaim(productClaim);
         store.saveClaim(backendClaim);
 
-        DebateService.TopicResult opened = tools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
-                metadata(review, "open"), RoleType.DIRECTOR, "authentication",
-                List.of(productClaim.claimId(), backendClaim.claimId())));
+        DebateService.RegisterTopicsResult registered = tools.registerDebateTopics(review,
+                new DebateToolCommands.RegisterTopics(metadata(review, "open"), RoleType.DIRECTOR,
+                        List.of(new DebateToolCommands.TopicProposal("authentication",
+                                List.of(productClaim.claimId(), backendClaim.claimId())))));
+        DebateService.TopicResult opened = registered.topics().get(0);
         DebateService.TurnResult challenge = tools.submitChallenge(review, new DebateToolCommands.Challenge(
                 metadata(review, "challenge-round-one"), RoleType.PRODUCT, RoleType.BACKEND, opened.topic().id(), 1,
                 backendClaim.claimId(), "Provide evidence for the refresh-token implementation.", List.of(),
@@ -51,6 +53,12 @@ class DebateToolsContractTests {
         tools.submitRebuttal(review, new DebateToolCommands.Rebuttal(
                 metadata(review, "rebuttal-round-one"), RoleType.BACKEND, RoleType.PRODUCT, opened.topic().id(), 1,
                 challenge.turn().turnId(), "The repository has no approved implementation policy.", List.of()));
+        // An unanswered round-one evidence request keeps a valid open action for round two; it is
+        // issued last so the targeted role has not spoken after it.
+        tools.requestAdditionalEvidence(review, new DebateToolCommands.EvidenceRequest(
+                metadata(review, "open-action-round-one"), RoleType.PRODUCT, RoleType.BACKEND,
+                opened.topic().id(), 1, backendClaim.claimId(),
+                "Provide the backend policy that covers refresh-token renewal."));
         debateService.beginSecondRound(review);
 
         DebateService.TurnResult evidenceRequest = tools.requestAdditionalEvidence(review,
@@ -69,7 +77,7 @@ class DebateToolsContractTests {
     }
 
     @Test
-    void opensTopicAcrossDistinctSubjectKeys() {
+    void registersTopicsAcrossDistinctSubjectKeys() {
         InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
         DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
         DebateTools tools = new DebateTools(
@@ -80,16 +88,18 @@ class DebateToolsContractTests {
         store.saveClaim(productClaim);
         store.saveClaim(backendClaim);
 
-        DebateService.TopicResult opened = tools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
-                metadata(review, "open-cross"), RoleType.DIRECTOR, "security-baseline",
-                List.of(productClaim.claimId(), backendClaim.claimId())));
+        DebateService.RegisterTopicsResult registered = tools.registerDebateTopics(review,
+                new DebateToolCommands.RegisterTopics(metadata(review, "open-cross"), RoleType.DIRECTOR,
+                        List.of(new DebateToolCommands.TopicProposal("security-baseline",
+                                List.of(productClaim.claimId(), backendClaim.claimId())))));
+        DebateService.TopicResult opened = registered.topics().get(0);
 
         assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
         assertThat(opened.topic().claimIds()).containsExactlyInAnyOrder(productClaim.claimId(), backendClaim.claimId());
     }
 
     @Test
-    void opensTopicWithSingleOpposingClaim() {
+    void registersTopicWithSingleOpposingClaim() {
         InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
         DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
         DebateTools tools = new DebateTools(
@@ -98,9 +108,11 @@ class DebateToolsContractTests {
         Claim backendClaim = claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE, "mcp.security");
         store.saveClaim(backendClaim);
 
-        DebateService.TopicResult opened = tools.openDebateTopic(review, new DebateToolCommands.OpenTopic(
-                metadata(review, "open-single-oppose"), RoleType.DIRECTOR, "mcp.security",
-                List.of(backendClaim.claimId())));
+        DebateService.RegisterTopicsResult registered = tools.registerDebateTopics(review,
+                new DebateToolCommands.RegisterTopics(metadata(review, "open-single-oppose"), RoleType.DIRECTOR,
+                        List.of(new DebateToolCommands.TopicProposal("mcp.security",
+                                List.of(backendClaim.claimId())))));
+        DebateService.TopicResult opened = registered.topics().get(0);
 
         assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
         assertThat(opened.topic().claimIds()).containsExactly(backendClaim.claimId());

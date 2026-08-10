@@ -17,8 +17,9 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
- * [AIREVIEW-PLAN-021#10][AIREVIEW-PLAN-024#方案3] Verifies the model receives authoritative
- * persisted debate identifiers and that the Director steers roles through dispatch_debate_action.
+ * [AIREVIEW-PLAN-021#10][AIREVIEW-PLAN-024#方案3/方案4] Verifies the model receives authoritative
+ * persisted debate identifiers, deterministic conflict candidates, and that the Director steers
+ * roles through dispatch_debate_action and registers topics in one batch.
  *
  * @author wangli
  */
@@ -34,7 +35,8 @@ class ReviewDebateToolFactoryTests {
 
         assertThat(factory.directorTools(context))
                 .extracting(tool -> tool.getName())
-                .containsExactly("list_persisted_claims", "list_persisted_debate_topics", "open_debate_topic",
+                .containsExactly("list_persisted_claims", "list_conflict_candidates",
+                        "list_persisted_debate_topics", "register_topics",
                         "dispatch_debate_action", "close_debate_topic", "begin_second_debate_round",
                         "begin_judging", "skip_debate_when_no_conflicts");
         assertThat(factory.roleTools(context, ai.cc.chongming.review.domain.model.ReviewTypes.RoleType.PRODUCT))

@@ -7,12 +7,14 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.EvidenceLedgerService;
 import ai.cc.chongming.review.application.ReviewEventPublisher;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.protocol.DebateStateMachine;
@@ -37,10 +39,15 @@ class DebateStageTransitionEventTests {
     @Test
     void beginSecondRoundPublishesRoundTwoStartedFact() {
         RecordingPublisher publisher = new RecordingPublisher();
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
         DebateService service = new DebateService(
-                new InMemoryReviewDebateStore(), new EvidenceLedgerService(), new DebateStateMachine(),
+                store, new EvidenceLedgerService(), new DebateStateMachine(),
                 new ReviewProtocolGuard(), publisher);
         Review review = debateRoundOneReview();
+        // [AIREVIEW-PLAN-024#方案4] An OPEN topic keeps a valid open action so round two may start.
+        store.saveTopic(new DebateTopic(
+                new ai.cc.chongming.review.domain.model.ReviewTypes.TopicId(UUID.randomUUID()),
+                review.id(), "authentication", List.of(claimId())));
 
         service.beginSecondRound(review);
 
@@ -51,6 +58,27 @@ class DebateStageTransitionEventTests {
         assertThat(draft.progress()).isEqualTo(65);
     }
 
+    /** [AIREVIEW-PLAN-024#方案4 验证矩阵] 无有效开放动作时禁止 0 动作空回合。 */
+    @Test
+    void beginSecondRoundRejectedWhenNoOpenActionRemains() {
+        RecordingPublisher publisher = new RecordingPublisher();
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService service = new DebateService(
+                store, new EvidenceLedgerService(), new DebateStateMachine(),
+                new ReviewProtocolGuard(), publisher);
+        Review review = debateRoundOneReview();
+        DebateTopic terminal = new DebateTopic(
+                new ai.cc.chongming.review.domain.model.ReviewTypes.TopicId(UUID.randomUUID()),
+                review.id(), "authentication", List.of(claimId()));
+        terminal.close(new DebateStateMachine(), DebateTopicStatus.ESCALATED, "已在第一轮收敛", Instant.now());
+        store.saveTopic(terminal);
+
+        assertThatThrownBy(() -> service.beginSecondRound(review))
+                .isInstanceOf(ReviewDomainException.class)
+                .hasMessageContaining("empty second round");
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+    }
+
     @Test
     void beginJudgingPublishesJudgingStartedFact() {
         RecordingPublisher publisher = new RecordingPublisher();
@@ -59,11 +87,12 @@ class DebateStageTransitionEventTests {
                 store, new EvidenceLedgerService(), new DebateStateMachine(),
                 new ReviewProtocolGuard(), publisher);
         Review review = debateRoundOneReview();
-        service.beginSecondRound(review);
         DebateTopic topic = new DebateTopic(
                 new ai.cc.chongming.review.domain.model.ReviewTypes.TopicId(UUID.randomUUID()),
                 review.id(), "security-baseline", List.of(claimId()));
+        // The OPEN topic must exist before round two begins; closing it later makes judging legal.
         store.saveTopic(topic);
+        service.beginSecondRound(review);
         topic.close(new DebateStateMachine(), DebateTopicStatus.ESCALATED, "未收敛，交由 Judge 裁决", Instant.now());
 
         service.beginJudging(review);

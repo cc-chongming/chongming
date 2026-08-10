@@ -31,8 +31,11 @@ public class DebateTools {
         return claimService.submit(review, command);
     }
 
-    public DebateService.TopicResult openDebateTopic(Review review, DebateToolCommands.OpenTopic command) {
-        return debateService.openTopic(review, command);
+    /**
+     * [AIREVIEW-PLAN-024#方案4] Batch topic registration replaces the old single-topic open path.
+     */
+    public DebateService.RegisterTopicsResult registerDebateTopics(Review review, DebateToolCommands.RegisterTopics command) {
+        return debateService.registerTopics(review, command);
     }
 
     public DebateService.TurnResult submitChallenge(Review review, DebateToolCommands.Challenge command) {

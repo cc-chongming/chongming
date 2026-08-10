@@ -113,7 +113,7 @@ public interface DebatePersistenceMapper {
                    stance_after AS stanceAfter, created_at AS createdAt
             FROM review_debate_turn
             WHERE topic_id = #{topicId}
-            ORDER BY round_no, turn_id
+            ORDER BY round_no, created_at, turn_id
             """)
     List<TurnRow> findTurnsByTopic(@Param("topicId") String topicId);
 
@@ -127,7 +127,7 @@ public interface DebatePersistenceMapper {
             FROM review_debate_turn turn
             JOIN review_debate_topic topic ON topic.topic_id = turn.topic_id
             WHERE topic.review_id = #{reviewId}
-            ORDER BY turn.topic_id, turn.round_no, turn.turn_id
+            ORDER BY turn.topic_id, turn.round_no, turn.created_at, turn.turn_id
             """)
     List<TurnRow> findTurnsByReview(@Param("reviewId") String reviewId);
 
