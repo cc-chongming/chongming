@@ -1,5 +1,6 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -17,6 +18,16 @@ public interface AgentRuntimeAdapter {
     Mono<Void> registerRole(AgentRuntimeRoleRequest request);
 
     Mono<Void> send(String runtimeId, String recipientLabel, String message);
+
+    /**
+     * [AIREVIEW-PLAN-024#方案3] Delivers one validated dispatch envelope to exactly the recipient
+     * role's context. Implementations may attach the command identity to the injected message so
+     * the role's write tools can resolve it; the default falls back to a plain send.
+     */
+    default Mono<Void> deliverDispatchCommand(
+            String runtimeId, String recipientLabel, String message, ReviewDispatchCommand command) {
+        return send(runtimeId, recipientLabel, message);
+    }
 
     Mono<Void> cancel(String runtimeId);
 

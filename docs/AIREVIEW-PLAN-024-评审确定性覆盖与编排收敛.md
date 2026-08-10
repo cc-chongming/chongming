@@ -391,10 +391,10 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/application/AssessmentService.java` | 1 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrant.java` | 2 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrantSet.java` | 2 | ✅ 已完成 |
-| `src/main/java/ai/cc/chongming/review/domain/model/ReviewDispatchCommand.java` | 3 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/domain/repository/ReviewDispatchStore.java` | 3 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java` | 3 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/dispatch/InMemoryReviewDispatchStore.java` | 3 | ⏳ 待实施 |
+| `src/main/java/ai/cc/chongming/review/domain/model/ReviewDispatchCommand.java` | 3 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/domain/repository/ReviewDispatchStore.java` | 3 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java` | 3 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/dispatch/InMemoryReviewDispatchStore.java` | 3 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/application/ConflictDetectionService.java` | 4 | ⏳ 待实施 |
 | `src/main/resources/db/migration/V19__create_review_assessment_and_dispatch_tables.sql` | 5 | ⏳ 待实施 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStore.java` | 5 | ⏳ 待实施 |
@@ -404,8 +404,8 @@ readLines(fileRef, startLine, lineCount?)
 | `src/test/java/ai/cc/chongming/review/assessment/ReviewAssessmentContractTests.java` | 0 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/AssessmentServiceTests.java` | 1 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/agentscope/RepositoryFileGrantTests.java` | 2 | ✅ 已完成 |
-| `src/test/java/ai/cc/chongming/review/application/ReviewDispatchServiceTests.java` | 3 | ⏳ 待实施 |
-| `src/test/java/ai/cc/chongming/review/agentscope/ReviewWorkflowDispatcherTests.java` | 3 | ⏳ 待实施 |
+| `src/test/java/ai/cc/chongming/review/application/ReviewDispatchServiceTests.java` | 3 | ✅ 已完成 |
+| `src/test/java/ai/cc/chongming/review/agentscope/ReviewWorkflowDispatcherTests.java` | 3 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/ConflictDetectionServiceTests.java` | 4 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStoreTests.java` | 5 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStoreTests.java` | 5 | ⏳ 待实施 |
@@ -423,8 +423,8 @@ readLines(fileRef, startLine, lineCount?)
 | `InitialReviewProgressService.java` | 1 | ✅ 已完成 |
 | `ReviewContextAssembler.java`、`ReviewRepositoryToolFactory.java` | 2 | ✅ 方案2 已完成 |
 | `RepositoryToolContext.java`、`ReadOnlyRepositoryTools.java`、`RepositorySearchIndex.java` | 2 | ✅ 方案2 已完成 |
-| `ReviewDirectorHarnessFactory.java`、`ReviewWorkflowDispatcher.java` | 3 | ⏳ 待实施 |
-| `ReviewDebateToolFactory.java`、`DebateToolCommands.java` | 3-4 | ⏳ 待实施 |
+| `ReviewDirectorHarnessFactory.java`、`ReviewWorkflowDispatcher.java` | 3 | ✅ 已完成 |
+| `ReviewDebateToolFactory.java`、`DebateToolCommands.java` | 3-4 | ⏳ 方案3 部分已完成（`ReviewDebateToolFactory` 写动作接入 commandId、Director 新增 dispatch_debate_action；`DebateToolCommands.java` 属方案4 未动） |
 | `ConflictDetector.java`、`DebateService.java`、`DebateStateMachine.java` | 4 | ⏳ 待实施 |
 | `GatePolicy.java`、`JudgeService.java` | 5 | ⏳ 待实施 |
 | `ReviewReportService.java`、`ReviewQueryService.java` | 5 | ⏳ 待实施 |
@@ -509,6 +509,7 @@ readLines(fileRef, startLine, lineCount?)
 | 2026-08-10 | 方案2 完成：新增 `RepositoryFileGrant`/`RepositoryFileGrantSet`（SecureRandom 不可猜测 fileRef，服务端绑定 reviewId+attemptNo+roleType+snapshotCommit+normalizedPath，HashMap O(1) 解析）；`ReviewContextAssembler` 一次性计算 `effectiveReadableFiles = snapshotFiles ∩ rolePathPolicy ∩ reviewRelevantFiles` 并按角色构建授权集，Scout 证据路径按角色 scope 过滤后才进入角色上下文；`readLines`/`getFileMetadata` 只接受 fileRef，`listFiles`/`searchText`/`findSymbol` 结果只返回授权 fileRef；校验顺序为参数形状 → fileRef 授权/快照归属 → 预算扣减 → 读取，拒绝/越权/缺失不扣预算；空授权集动态不注册读取工具并提示 UNKNOWN；新增错误码 `FILE_REF_NOT_GRANTED`、`FILE_NOT_IN_SNAPSHOT`、`INVALID_LINE_RANGE`、`READ_BUDGET_EXHAUSTED`（前三者标注不可重试），相同工具+参数+错误码在单角色运行级短路；服务端路径归一化保留为纵深防护。定向测试 RepositoryFileGrantTests/ReviewContextAssemblerTests/ReviewRepositoryToolFactoryTests 及 RepositoryToolFacadeTests/RepositorySearchIndexTests/RepositoryReadBudgetTests/RepositoryBoundaryGuardTests 全部通过。 |
 | 2026-08-10 | 方案1 完成：新增 `AssessmentService`（服务端注入身份+幂等+checklist 归属校验+缺失查询+派生完成摘要）与 `submit_assessment` 工具；`complete_initial_review` 前置 `ASSESSMENT_COVERAGE_INCOMPLETE` 覆盖守卫；publicSummary 由持久化 Assessment/Claim 服务端派生；Finalizer 只补交缺失检查点；定向测试 47/47 通过（AssessmentServiceTests、InitialReviewProgressServiceTests、RoleSubagentIsolationTests、AgentScopeReviewRuntimeAdapterTests、RolePackContractTests、ReviewAssessmentContractTests）。 |
 | 2026-08-10 | 方案1+2 联合验证：放宽 `RoleSubagentFactory.assertToolContract` 为“注册集合 ⊆ 声明集合”，空授权集场景下接受 `readLines`/`getFileMetadata` 缺失并要求授权集为空作为可理解原因；`RoleSubagentIsolationTests` 同步更新断言语义并新增三个联合契约测试。全量后端测试 407 运行 0 失败 10 环境性跳过（8 项 Docker/Testcontainers/MySQL 不可用，2 项 Windows 无符号链接权限）；前端 Vitest 51/51 通过。 |
+| 2026-08-10 | 方案3 完成：新增 `ReviewDispatchCommand`（PENDING→CONSUMED/EXPIRED/REJECTED 状态机、commandId/reviewId/attemptNo/stage/round/recipientRole/allowedAction/topicId?/targetClaimId?/targetTurnId?/expiresAt 契约字段）、`ReviewDispatchStore` 与 `InMemoryReviewDispatchStore`（`@ConditionalOnProperty review.persistence.enabled=false` 条件装配）、`ReviewDispatchService`（签发前服务端校验：角色已激活、主题/Claim/Turn 归属当前 review、动作适用主题状态、round 由服务端从 stage 注入（模型不可指定）、未过期；幂等键重放；`resolveForWrite` 调用时校验返回具体可恢复错误与合法动作列表；错误含 DISPATCH_ACTOR_MISMATCH、COMMAND_EXPIRED、STAGE_ROUND_DRIFT 等）；`ReviewWorkflowDispatcher` 删除 dispatchRound 四角色广播文案，只消费已校验命令并把同一 envelope 注入目标角色上下文，CHALLENGE_SUBMITTED 后服务端以幂等键 `dispatch:rebuttal:<turnId>` 生成仅发给 challenge.targetRole 的 REBUTTAL 命令，命令消费/丢弃均有日志与事件；`ReviewDebateToolFactory` 四个辩论写工具（challenge/rebuttal/concede/withdraw）schema 与调用强制引用有效 commandId，Director 新增 `dispatch_debate_action` 工具；`ReviewEventType` 新增 DISPATCH_COMMAND_ISSUED/CONSUMED/EXPIRED/REJECTED，`ReviewEventDrafts` 新增 dispatchCommand 工厂；`AgentRuntimeAdapter` 新增 `deliverDispatchCommand` 默认方法，`AgentScopeReviewRuntimeAdapter` 最小改动记录 DISPATCH_ENVELOPE_INJECTED 后委托 send。定向测试 ReviewDispatchServiceTests 16、ReviewWorkflowDispatcherTests 7、ReviewDebateToolFactoryTests 2（含新增 commandId schema 断言），DebateGoldenPathIntegrationTests 3、DebateToolsContractTests 3、AgentScopeReviewRuntimeAdapterTests 14 均通过；全量测试 431 运行 0 失败 10 环境性跳过（MySQL/Docker 不可用，已知环境条件）。 |
 
 ## 偏差记录
 
@@ -522,5 +523,9 @@ readLines(fileRef, startLine, lineCount?)
 - 2026-08-10（方案1）：publicSummary 服务端派生实现落在 `AssessmentService.derivedCompletionSummary` + `ReviewRoleToolFactory.CompleteInitialReviewTool`，`AgentScopeReviewRuntimeAdapter` 仅同步 Finalizer 提示文案。原因：任务要求 Adapter 改动保持最小、不重构编排枢纽；影响：派生摘要经 complete_initial_review 命令进入 ROLE_COMPLETED 事件，与计划“由已持久化事实派生”一致；替代方案：在 Adapter 内拦截并改写 publicSummary——拒绝（侵入编排枢纽且产生双事实来源）。
 - 2026-08-10（方案1）：`application-test.yml` 显式设置 `review.persistence.enabled: false`。原因：`AssessmentService` 强依赖 `ReviewAssessmentStore` bean，而 MyBatis 实现属方案5，application.yml 默认 `enabled=true` 会导致全上下文测试缺 bean；影响：测试上下文统一走内存实现，同时免除 Flyway 连接占位数据库；替代方案：`AssessmentService` 可选注入——拒绝（弱化覆盖守卫语义）。
 - 2026-08-10（方案1）：`InitialReviewProgressService`、`RoleSubagentFactory`、`ReviewRoleToolFactory` 采用“新增 `@Autowired` 全参构造器 + 旧构造器委托”扩展注入 `AssessmentService`。原因：保持既有测试夹具与非 Spring 调用点兼容；影响：`AssessmentService` 缺省时守卫与 Finalizer 补缺降级为无操作（生产装配始终注入）；替代方案：直接修改原构造器签名——拒绝（破坏既有调用点）。
+- 2026-08-10（方案3）：契约要求“工具工厂仅注册 envelope 中允许的写动作”，实现采用写动作调用时 `resolveForWrite` 校验有效 commandId 而非注册期动态过滤。原因：角色工具包在注册期固定，无法按 envelope 动态增删注册；影响：安全语义等价——无有效 commandId 的写动作在服务端被拒且返回合法动作列表，模型无法越权执行；替代方案：按 envelope 动态重建工具包——拒绝（破坏角色运行生命周期与 AgentScope 工具注册模型）。
+- 2026-08-10（方案3）：`ReviewDispatchService` 生产构造器以 `ObjectProvider<ReviewEventPublisher>` 懒解析发布器（保留直接注入 publisher 的构造器供测试使用）。原因：`ReviewEventService` 收集全部 `ReviewEventListener`（含 `ReviewWorkflowDispatcher`）→ dispatcher 依赖 `ReviewDispatchService` → 若直接注入 publisher 形成 Spring 循环依赖（BeanCurrentlyInCreationException）；影响：首次发布时解析一次，语义不变；替代方案：`@Lazy` 注入——拒绝（懒代理掩盖依赖关系且不便测试）。
+- 2026-08-10（方案3）：`ReviewDispatchService.issue` 的生命周期事件发布移到 review 同步锁之外。原因：dispatcher 以 listener 同步回调方式在发射线程消费命令并投递 envelope，锁内发布会导致持锁重入与不可预期的投递时序；影响：事件仍在状态持久化成功之后发布，失败路径不发布；替代方案：异步线程池发布——拒绝（破坏现有同步事件模型）。
+- 2026-08-10（方案3）：`AgentRuntimeAdapter` 接口新增 `deliverDispatchCommand` 默认方法（回退 `send`），`AgentScopeReviewRuntimeAdapter` 覆写记录 DISPATCH_ENVELOPE_INJECTED 日志后委托 send。原因：envelope 文本自带 commandId、写工具在服务端按 commandId 解析校验，无需独立注入通道；影响：接口扩展而非重构，编排枢纽语义不变；替代方案：新增独立投递通道——拒绝（超出方案3 范围且增加适配器复杂度）。
 
 实施过程中任何接口、文件、状态机或验收标准调整，都必须先记录原因、影响与替代方案，再修改对应方案状态。

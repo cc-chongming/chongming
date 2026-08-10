@@ -2,9 +2,13 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.JudgeService;
+import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
@@ -14,6 +18,8 @@ import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolCallParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +31,11 @@ import reactor.core.publisher.Mono;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-009#1.4] Binds debate and Judge operations to the active review attempt.
- * The model never supplies review identity, actor identity, optimistic version, or idempotency.
+ * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案3] Binds debate and Judge operations to the
+ * active review attempt. The model never supplies review identity, actor identity, optimistic
+ * version, or idempotency; every debate write action must additionally reference a valid
+ * server-issued dispatch commandId, and the Director steers roles through the dispatch tool
+ * instead of broadcast text.
  *
  * @author wangli
  */
@@ -35,11 +44,16 @@ public class ReviewDebateToolFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ReviewDebateToolFactory.class);
 
+    private static final long DISPATCH_DEFAULT_TTL_SECONDS = 600;
+    private static final long DISPATCH_MIN_TTL_SECONDS = 60;
+    private static final long DISPATCH_MAX_TTL_SECONDS = 3600;
+
     private final ReviewRegistry reviewRegistry;
     private final DebateTools debateTools;
     private final DebateService debateService;
     private final ReviewWorkflowDispatcher workflowDispatcher;
     private final ReviewDebateStore debateStore;
+    private final ReviewDispatchService dispatchService;
 
     public ReviewDebateToolFactory(
             ReviewRegistry reviewRegistry,
@@ -47,19 +61,37 @@ public class ReviewDebateToolFactory {
             DebateService debateService,
             ReviewWorkflowDispatcher workflowDispatcher,
             ReviewDebateStore debateStore) {
+        this(reviewRegistry, debateTools, debateService, workflowDispatcher, debateStore, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewDebateToolFactory(
+            ReviewRegistry reviewRegistry,
+            DebateTools debateTools,
+            DebateService debateService,
+            ReviewWorkflowDispatcher workflowDispatcher,
+            ReviewDebateStore debateStore,
+            ReviewDispatchService dispatchService) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.debateTools = Objects.requireNonNull(debateTools, "debateTools must not be null");
         this.debateService = Objects.requireNonNull(debateService, "debateService must not be null");
         this.workflowDispatcher = Objects.requireNonNull(workflowDispatcher, "workflowDispatcher must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
+        this.dispatchService = dispatchService;
     }
 
     public List<AgentTool> directorTools(ReviewRuntimeContext context) {
         return List.of(new ListPersistedClaimsTool(context), new ListPersistedDebateTopicsTool(context, RoleType.DIRECTOR),
-                new OpenTopicTool(context), new CloseTopicTool(context), new BeginSecondRoundTool(context),
-                new BeginJudgingTool(context), new SkipDebateWhenNoConflictsTool(context));
+                new OpenTopicTool(context), new DispatchDebateActionTool(context), new CloseTopicTool(context),
+                new BeginSecondRoundTool(context), new BeginJudgingTool(context), new SkipDebateWhenNoConflictsTool(context));
     }
 
+    /**
+     * Role debate tools. Write actions stay registered because the role toolkit is fixed at
+     * registration time, but every write invocation is bound to one valid PENDING dispatch
+     * command addressed to the invoking role (see {@link ReviewDispatchService#resolveForWrite});
+     * without a valid commandId no write action can execute.
+     */
     public List<AgentTool> roleTools(ReviewRuntimeContext context, RoleType roleType) {
         if (roleType == RoleType.DIRECTOR || roleType == RoleType.JUDGE) {
             throw new IllegalArgumentException("only review roles may receive debate turn tools");
@@ -115,6 +147,37 @@ public class ReviewDebateToolFactory {
 
         final RoleType actor() {
             return actorRole;
+        }
+
+        /**
+         * [AIREVIEW-PLAN-024#方案3] Resolves the dispatch command a write action must reference.
+         * Returns null only on the legacy path where no dispatch service is wired.
+         */
+        final ReviewDispatchCommand resolveCommand(Review review, Map<String, Object> input, DispatchedAction action) {
+            if (dispatchService == null) {
+                return null;
+            }
+            return dispatchService.resolveForWrite(review, actor(), new CommandId(uuid(input, "commandId")), action);
+        }
+
+        final void consumeCommand(Review review, ReviewDispatchCommand command) {
+            if (dispatchService != null && command != null) {
+                dispatchService.consume(review, command);
+            }
+        }
+
+        /** Write tools require the authorizing commandId unless running on the legacy path. */
+        final List<String> writeRequired(List<String> base) {
+            if (dispatchService == null) {
+                return base;
+            }
+            java.util.ArrayList<String> required = new java.util.ArrayList<>(base);
+            required.add("commandId");
+            return List.copyOf(required);
+        }
+
+        final Map<String, Object> commandIdSchema() {
+            return Map.of("commandId", stringSchema("Dispatch command UUID authorizing exactly this write action"));
         }
     }
 
@@ -254,6 +317,54 @@ public class ReviewDebateToolFactory {
         }
     }
 
+    /**
+     * [AIREVIEW-PLAN-024#方案3] Director issues directed dispatch envelopes instead of relying on
+     * broadcast prompts; the server validates and persists the command before any delivery.
+     *
+     * @author wangli
+     */
+    private final class DispatchDebateActionTool extends BoundTool {
+        private DispatchDebateActionTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
+        @Override public String getName() { return "dispatch_debate_action"; }
+        @Override public String getDescription() { return "Issue one directed dispatch command authorizing exactly one write action "
+                + "(CHALLENGE, REBUTTAL, POSITION_CHANGE or EVIDENCE_REQUEST) for one recipient role on one topic. "
+                + "The server validates the recipient, targets, topic status and round, then delivers the envelope only to the recipient; "
+                + "never instruct roles with free text instead."; }
+        @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
+                "recipientRole", enumSchema(RoleType.PRODUCT.name(), RoleType.PROJECT.name(), RoleType.FRONTEND.name(), RoleType.BACKEND.name()),
+                "allowedAction", enumSchema("CHALLENGE", "REBUTTAL", "POSITION_CHANGE", "EVIDENCE_REQUEST"),
+                "topicId", stringSchema("Debate topic UUID"),
+                "targetClaimId", stringSchema("Target Claim UUID; required for CHALLENGE, POSITION_CHANGE and EVIDENCE_REQUEST"),
+                "targetTurnId", stringSchema("Target Turn UUID; required for REBUTTAL"),
+                "expiresInSeconds", Map.of("type", "integer", "description", "Optional envelope lifetime in seconds, clamped to 60..3600")),
+                List.of("recipientRole", "allowedAction", "topicId")); }
+        @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            if (dispatchService == null) {
+                throw new IllegalStateException("dispatch service is not wired");
+            }
+            long ttlSeconds = input.get("expiresInSeconds") instanceof Number number
+                    ? number.longValue() : DISPATCH_DEFAULT_TTL_SECONDS;
+            ttlSeconds = Math.max(DISPATCH_MIN_TTL_SECONDS, Math.min(DISPATCH_MAX_TTL_SECONDS, ttlSeconds));
+            int round = review.stage() == ReviewStage.DEBATE_ROUND_2 ? 2 : 1;
+            UUID targetClaimUuid = optionalUuid(input, "targetClaimId");
+            UUID targetTurnUuid = optionalUuid(input, "targetTurnId");
+            ReviewDispatchService.DispatchProposal proposal = new ReviewDispatchService.DispatchProposal(
+                    metadata,
+                    role(input, "recipientRole"),
+                    DispatchedAction.valueOf(text(input, "allowedAction")),
+                    round,
+                    topicId(input),
+                    targetClaimUuid == null ? null : new ClaimId(targetClaimUuid),
+                    targetTurnUuid == null ? null : new TurnId(targetTurnUuid),
+                    Instant.now().plus(Duration.ofSeconds(ttlSeconds)),
+                    RoleType.DIRECTOR,
+                    "DIRECTOR");
+            ReviewDispatchService.DispatchIssueResult result = dispatchService.issue(review, proposal);
+            return ToolResultBlock.text("commandId=" + result.command().commandId().value()
+                    + "; status=" + result.command().status() + "; replayed=" + result.replayed());
+        }
+    }
+
     private final class CloseTopicTool extends BoundTool {
         private CloseTopicTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "close_debate_topic"; }
@@ -279,7 +390,8 @@ public class ReviewDebateToolFactory {
                 debateService.validateBeginSecondRound(review);
             }
             boolean replayed = advanceStage(review, metadata, ReviewStage.DEBATE_ROUND_1, "begin-second-round", () -> debateService.beginSecondRound(review));
-            if (!replayed) workflowDispatcher.dispatchRound(review, 2);
+            // [AIREVIEW-PLAN-024#方案3] The broadcast round-two prompt is removed; the committed
+            // DEBATE_ROUND_2_STARTED event wakes the Director to issue directed dispatch commands.
             return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
         }
     }
@@ -319,12 +431,14 @@ public class ReviewDebateToolFactory {
     private final class ChallengeTool extends BoundTool {
         private ChallengeTool(ReviewRuntimeContext context, RoleType actor) { super(context, actor); }
         @Override public String getName() { return "submit_challenge"; }
-        @Override public String getDescription() { return "Submit a directed public challenge against an existing Claim."; }
-        @Override public Map<String, Object> getParameters() { return turnSchema(Map.of("targetClaimId", stringSchema("Target Claim UUID"),
-                "evidenceGap", stringSchema("Required when no evidenceIds are supplied")), List.of("targetRole", "topicId", "round", "targetClaimId", "publicContent")); }
+        @Override public String getDescription() { return "Submit a directed public challenge against an existing Claim. Requires the commandId of a valid dispatch envelope addressed to this role."; }
+        @Override public Map<String, Object> getParameters() { return turnSchema(merge(Map.of("targetClaimId", stringSchema("Target Claim UUID"),
+                "evidenceGap", stringSchema("Required when no evidenceIds are supplied")), commandIdSchema()), writeRequired(List.of("targetRole", "topicId", "round", "targetClaimId", "publicContent"))); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            ReviewDispatchCommand command = resolveCommand(review, input, DispatchedAction.CHALLENGE);
             DebateService.TurnResult result = debateTools.submitChallenge(review, new DebateToolCommands.Challenge(metadata, actor(), role(input, "targetRole"),
                     topicId(input), integer(input, "round"), claimId(input, "targetClaimId"), text(input, "publicContent"), evidenceIds(input.get("evidenceIds")), optionalText(input, "evidenceGap")));
+            consumeCommand(review, command);
             return ToolResultBlock.text("turnId=" + result.turn().turnId().value() + "; replayed=" + result.replayed());
         }
     }
@@ -332,12 +446,14 @@ public class ReviewDebateToolFactory {
     private final class RebuttalTool extends BoundTool {
         private RebuttalTool(ReviewRuntimeContext context, RoleType actor) { super(context, actor); }
         @Override public String getName() { return "submit_rebuttal"; }
-        @Override public String getDescription() { return "Submit a directed public rebuttal to an existing debate turn."; }
-        @Override public Map<String, Object> getParameters() { return turnSchema(Map.of("targetTurnId", stringSchema("Target Turn UUID")),
-                List.of("targetRole", "topicId", "round", "targetTurnId", "publicContent")); }
+        @Override public String getDescription() { return "Submit a directed public rebuttal to an existing debate turn. Requires the commandId of a valid dispatch envelope addressed to this role."; }
+        @Override public Map<String, Object> getParameters() { return turnSchema(merge(Map.of("targetTurnId", stringSchema("Target Turn UUID")), commandIdSchema()),
+                writeRequired(List.of("targetRole", "topicId", "round", "targetTurnId", "publicContent"))); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            ReviewDispatchCommand command = resolveCommand(review, input, DispatchedAction.REBUTTAL);
             DebateService.TurnResult result = debateTools.submitRebuttal(review, new DebateToolCommands.Rebuttal(metadata, actor(), role(input, "targetRole"),
                     topicId(input), integer(input, "round"), new TurnId(uuid(input, "targetTurnId")), text(input, "publicContent"), evidenceIds(input.get("evidenceIds"))));
+            consumeCommand(review, command);
             return ToolResultBlock.text("turnId=" + result.turn().turnId().value() + "; replayed=" + result.replayed());
         }
     }
@@ -345,12 +461,14 @@ public class ReviewDebateToolFactory {
     private final class PositionChangeTool extends BoundTool {
         private PositionChangeTool(ReviewRuntimeContext context, RoleType actor) { super(context, actor); }
         @Override public String getName() { return "change_claim_position"; }
-        @Override public String getDescription() { return "Record a non-destructive position change for a Claim owned by this role."; }
-        @Override public Map<String, Object> getParameters() { return turnSchema(Map.of("targetClaimId", stringSchema("Owned Claim UUID"),
-                "stanceAfter", enumSchema("SUPPORT", "OPPOSE", "NEUTRAL")), List.of("topicId", "round", "targetClaimId", "stanceAfter", "publicContent")); }
+        @Override public String getDescription() { return "Record a non-destructive position change for a Claim owned by this role. Requires the commandId of a valid dispatch envelope addressed to this role."; }
+        @Override public Map<String, Object> getParameters() { return turnSchema(merge(Map.of("targetClaimId", stringSchema("Owned Claim UUID"),
+                "stanceAfter", enumSchema("SUPPORT", "OPPOSE", "NEUTRAL")), commandIdSchema()), writeRequired(List.of("topicId", "round", "targetClaimId", "stanceAfter", "publicContent"))); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            ReviewDispatchCommand command = resolveCommand(review, input, DispatchedAction.POSITION_CHANGE);
             DebateService.TurnResult result = debateTools.changePosition(review, new DebateToolCommands.PositionChange(metadata, actor(), topicId(input), integer(input, "round"),
                     claimId(input, "targetClaimId"), ClaimPosition.valueOf(text(input, "stanceAfter")), text(input, "publicContent"), evidenceIds(input.get("evidenceIds"))));
+            consumeCommand(review, command);
             return ToolResultBlock.text("turnId=" + result.turn().turnId().value() + "; replayed=" + result.replayed());
         }
     }
@@ -358,12 +476,14 @@ public class ReviewDebateToolFactory {
     private final class EvidenceRequestTool extends BoundTool {
         private EvidenceRequestTool(ReviewRuntimeContext context, RoleType actor) { super(context, actor); }
         @Override public String getName() { return "request_additional_evidence"; }
-        @Override public String getDescription() { return "Request missing evidence from the role that owns a Claim; this does not fabricate evidence."; }
-        @Override public Map<String, Object> getParameters() { return turnSchema(Map.of("targetClaimId", stringSchema("Target Claim UUID")),
-                List.of("targetRole", "topicId", "round", "targetClaimId", "publicContent")); }
+        @Override public String getDescription() { return "Request missing evidence from the role that owns a Claim; this does not fabricate evidence. Requires the commandId of a valid dispatch envelope addressed to this role."; }
+        @Override public Map<String, Object> getParameters() { return turnSchema(merge(Map.of("targetClaimId", stringSchema("Target Claim UUID")), commandIdSchema()),
+                writeRequired(List.of("targetRole", "topicId", "round", "targetClaimId", "publicContent"))); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            ReviewDispatchCommand command = resolveCommand(review, input, DispatchedAction.EVIDENCE_REQUEST);
             DebateService.TurnResult result = debateTools.requestAdditionalEvidence(review, new DebateToolCommands.EvidenceRequest(metadata, actor(), role(input, "targetRole"),
                     topicId(input), integer(input, "round"), claimId(input, "targetClaimId"), text(input, "publicContent")));
+            consumeCommand(review, command);
             return ToolResultBlock.text("turnId=" + result.turn().turnId().value() + "; replayed=" + result.replayed());
         }
     }
@@ -421,6 +541,8 @@ public class ReviewDebateToolFactory {
     private static String optionalText(Map<String, Object> input, String name) { Object value = input.get(name); return value == null ? "" : value.toString(); }
     private static int integer(Map<String, Object> input, String name) { Object value = input.get(name); if (!(value instanceof Number number)) throw new IllegalArgumentException(name + " must be numeric"); return number.intValue(); }
     private static UUID uuid(Map<String, Object> input, String name) { return UUID.fromString(text(input, name)); }
+    private static UUID optionalUuid(Map<String, Object> input, String name) { Object value = input.get(name); if (value == null || value.toString().isBlank()) return null; return UUID.fromString(value.toString()); }
+    private static Map<String, Object> merge(Map<String, Object> first, Map<String, Object> second) { java.util.LinkedHashMap<String, Object> merged = new java.util.LinkedHashMap<>(first); merged.putAll(second); return Map.copyOf(merged); }
     private static TopicId topicId(Map<String, Object> input) { return new TopicId(uuid(input, "topicId")); }
     private static ClaimId claimId(Map<String, Object> input, String name) { return new ClaimId(uuid(input, name)); }
     private static RoleType role(Map<String, Object> input, String name) { return RoleType.valueOf(text(input, name)); }

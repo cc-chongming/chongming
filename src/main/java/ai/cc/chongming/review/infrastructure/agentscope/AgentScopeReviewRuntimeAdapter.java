@@ -412,6 +412,21 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         }).then();
     }
 
+    /**
+     * [AIREVIEW-PLAN-024#方案3] Injects the validated dispatch envelope into exactly the recipient
+     * role's context. The envelope message already carries the commandId and the single authorized
+     * write action; the role's write tools resolve the commandId server-side, so minimal delivery
+     * through {@link #send} preserves the orchestration flow without restructuring this hub.
+     */
+    @Override
+    public Mono<Void> deliverDispatchCommand(
+            String runtimeId, String recipientLabel, String message,
+            ai.cc.chongming.review.domain.model.ReviewDispatchCommand command) {
+        LOGGER.info("DISPATCH_ENVELOPE_INJECTED runtimeId={} recipient={} commandId={} action={}",
+                runtimeId, recipientLabel, command.commandId().value(), command.allowedAction());
+        return send(runtimeId, recipientLabel, message);
+    }
+
     @Override
     public Mono<Void> stopRoleRuns(String runtimeId) {
         return Mono.fromRunnable(() -> {

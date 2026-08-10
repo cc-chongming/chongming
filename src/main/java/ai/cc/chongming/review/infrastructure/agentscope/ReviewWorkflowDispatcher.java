@@ -1,13 +1,23 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewEventListener;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
+import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewCommandMetadata;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
-import java.util.List;
+import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
+import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
@@ -17,8 +27,11 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 /**
- * [AIREVIEW-PLAN-009#1.4] Sends stage-specific public instructions only after a committed
- * business event. It never changes review state itself.
+ * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案3] Delivers only server-verified directed
+ * dispatch envelopes after committed business events. The former broadcast of generic debate
+ * prompts to every role is removed: the Director issues dispatch commands through validated
+ * server tools, and this dispatcher injects the exact same envelope into the target role's
+ * context. It never changes review state itself.
  *
  * @author wangli
  */
@@ -26,11 +39,30 @@ import reactor.core.publisher.Flux;
 public class ReviewWorkflowDispatcher implements ReviewEventListener {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ReviewWorkflowDispatcher.class);
+
+    /** How long the server-generated rebuttal envelope stays consumable after a challenge. */
+    private static final Duration REBUTTAL_DISPATCH_TTL = Duration.ofMinutes(10);
+
     private final ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider;
+    private final ReviewRegistry reviewRegistry;
+    private final ReviewDispatchService dispatchService;
+    private final ReviewDebateStore debateStore;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
 
     public ReviewWorkflowDispatcher(ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider) {
+        this(runtimeAdapterProvider, null, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewWorkflowDispatcher(
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ReviewRegistry reviewRegistry,
+            ReviewDispatchService dispatchService,
+            ReviewDebateStore debateStore) {
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
+        this.reviewRegistry = reviewRegistry;
+        this.dispatchService = dispatchService;
+        this.debateStore = debateStore;
     }
 
     @Override
@@ -40,17 +72,36 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             if (queue != null) {
                 queue.tryEmitComplete();
             }
+            rejectPendingCommands(event, "REVIEW_TERMINATED");
         } else if (event.type() == ReviewEventType.INITIAL_REVIEW_COMPLETED) {
             send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims. If any persisted Claim has an OPPOSE position, open debate topic(s) for those conflicting Claims; only when no persisted Claim has an OPPOSE position call skip_debate_when_no_conflicts. Do not search the workspace for Claim files or create facts in text.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_OPENED) {
-            dispatchRound(event, 1);
+            send(runtimeId(event), directorLabel(event), "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command.");
+        } else if (event.type() == ReviewEventType.DEBATE_ROUND_2_STARTED) {
+            send(runtimeId(event), directorLabel(event), "Debate round two is active. Issue dispatch_debate_action commands for every still-required round-two action with the matching targets, or converge with close_debate_topic/begin_judging when no further action is necessary. Do not run an empty round.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {
             send(runtimeId(event), directorLabel(event), "A debate topic was closed. If more topics need round one or two, use the stage tools; when every topic is terminal, use begin_judging.");
-        } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED
-                || event.type() == ReviewEventType.REBUTTAL_SUBMITTED
+        } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
+            issueRebuttalDispatch(event);
+            send(runtimeId(event), directorLabel(event), "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+        } else if (event.type() == ReviewEventType.REBUTTAL_SUBMITTED
                 || event.type() == ReviewEventType.POSITION_CHANGED
                 || event.type() == ReviewEventType.EVIDENCE_REQUESTED) {
             send(runtimeId(event), directorLabel(event), "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+        } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_ISSUED) {
+            deliverDispatchEnvelope(event);
+        } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_EXPIRED
+                || event.type() == ReviewEventType.DISPATCH_COMMAND_REJECTED) {
+            LOGGER.info("REVIEW_DISPATCH_COMMAND_DROPPED reviewId={} type={} commandId={} reason={}",
+                    event.reviewId().value(), event.type(),
+                    event.payload().getOrDefault("commandId", "-"),
+                    event.payload().getOrDefault("reason", "-"));
+            send(runtimeId(event), directorLabel(event), "Dispatch command "
+                    + event.payload().getOrDefault("commandId", "-") + " ("
+                    + event.payload().getOrDefault("allowedAction", "-") + " for "
+                    + event.payload().getOrDefault("recipientRole", "-") + ") was dropped: "
+                    + event.payload().getOrDefault("reason", event.type().name())
+                    + ". Reissue a valid dispatch_debate_action command or converge with the stage tools.");
         } else if (event.type() == ReviewEventType.JUDGING_STARTED) {
             // The debate is over; stop any role subagent still grinding through its dispatched run
             // so it stops producing output (and rejected turns) during judging / human decision.
@@ -58,27 +109,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             if (adapter != null) {
                 adapter.stopRoleRuns(runtimeId(event)).subscribe();
             }
+            rejectPendingCommands(event, "JUDGING_STARTED");
         }
-    }
-
-    public void dispatchRound(Review review, int round) {
-        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
-        dispatchRound(runtimeId, review.roleActivations().stream().map(activation -> activation.roleType()).toList(), round);
-    }
-
-    private void dispatchRound(ReviewEvent event, int round) {
-        dispatchRound(runtimeId(event), List.of(RoleType.PRODUCT, RoleType.PROJECT, RoleType.FRONTEND, RoleType.BACKEND), round);
-    }
-
-    private void dispatchRound(String runtimeId, List<RoleType> roles, int round) {
-        Flux.fromIterable(roles)
-                .filter(role -> role != RoleType.JUDGE && role != RoleType.DIRECTOR)
-                .concatMap(role -> sendAsync(runtimeId, roleLabel(runtimeId, role),
-                        "Debate round " + round + " is active. First call list_persisted_debate_topics to inspect the persisted topics and their turns. "
-                        + "Then match the tool to each topic's status: if a topic is OPEN, use submit_challenge against a Claim held by another role; "
-                        + "if a topic already has a CHALLENGED turn, reply with submit_rebuttal and pass that turn's turnId from the listing as targetTurnId. "
-                        + "Never submit a new challenge on a topic that is already CHALLENGED, and never challenge or rebut your own Claim or turn."))
-                .subscribe();
     }
 
     public void dispatchJudge(Review review) {
@@ -87,8 +119,110 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 "All debate topics are terminal. Use submit_judgement for each topic; if the topic list is empty, skip it. Then always call draft_gate exactly once so the judging stage can finish. Do not add facts.");
     }
 
+    /**
+     * After a committed challenge the server alone issues the rebuttal envelope, addressed to the
+     * challenge's target role; other roles never see it and cannot rebut in its place.
+     */
+    private void issueRebuttalDispatch(ReviewEvent event) {
+        if (dispatchService == null || reviewRegistry == null || debateStore == null || event.turnId() == null) {
+            return;
+        }
+        Review review = reviewRegistry.find(event.reviewId())
+                .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                .orElse(null);
+        if (review == null) {
+            LOGGER.warn("REBUTTAL_DISPATCH_SKIPPED reviewId={} reason=REVIEW_NOT_FOUND", event.reviewId().value());
+            return;
+        }
+        DebateTurn challenge = debateStore.findTurn(event.reviewId(), event.turnId()).orElse(null);
+        if (challenge == null || challenge.targetRole() == null) {
+            LOGGER.warn("REBUTTAL_DISPATCH_SKIPPED reviewId={} turnId={} reason=CHALLENGE_TURN_NOT_FOUND",
+                    event.reviewId().value(), event.turnId().value());
+            return;
+        }
+        try {
+            synchronized (review) {
+                dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(
+                        new ReviewCommandMetadata(review.id(), review.version(),
+                                new IdempotencyKey("dispatch:rebuttal:" + challenge.turnId().value())),
+                        challenge.targetRole(),
+                        DispatchedAction.REBUTTAL,
+                        challenge.round(),
+                        challenge.topicId(),
+                        null,
+                        challenge.turnId(),
+                        Instant.now().plus(REBUTTAL_DISPATCH_TTL),
+                        RoleType.DIRECTOR,
+                        "SERVER_REBUTTAL_AFTER_CHALLENGE"));
+            }
+        } catch (RuntimeException exception) {
+            // A failed rebuttal issuance must not abort event delivery; the Director wake above
+            // keeps the review moving and the log names the reason.
+            LOGGER.warn("REBUTTAL_DISPATCH_ISSUE_FAILED reviewId={} turnId={}",
+                    event.reviewId().value(), event.turnId().value(), exception);
+        }
+    }
+
+    /** Injects the persisted envelope into exactly the recipient role's context. */
+    private void deliverDispatchEnvelope(ReviewEvent event) {
+        if (dispatchService == null) {
+            return;
+        }
+        String commandIdText = event.payload().get("commandId");
+        if (commandIdText == null || commandIdText.isBlank()) {
+            LOGGER.warn("REVIEW_DISPATCH_ENVELOPE_MISSING_COMMAND_ID reviewId={}", event.reviewId().value());
+            return;
+        }
+        ReviewDispatchCommand command = dispatchService
+                .find(event.reviewId(), new ReviewDispatchCommand.CommandId(UUID.fromString(commandIdText)))
+                .orElse(null);
+        if (command == null) {
+            LOGGER.warn("REVIEW_DISPATCH_ENVELOPE_COMMAND_NOT_FOUND reviewId={} commandId={}",
+                    event.reviewId().value(), commandIdText);
+            return;
+        }
+        if (command.status() != ReviewDispatchCommand.DispatchCommandStatus.PENDING) {
+            LOGGER.info("REVIEW_DISPATCH_ENVELOPE_SKIPPED commandId={} status={}",
+                    command.commandId().value(), command.status());
+            return;
+        }
+        if (command.isExpiredAt(Instant.now())) {
+            LOGGER.info("REVIEW_DISPATCH_ENVELOPE_EXPIRED_BEFORE_DELIVERY commandId={}", command.commandId().value());
+            return;
+        }
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(command.reviewId(), command.attemptNo());
+        String recipient = roleLabel(runtimeId, command.recipientRole());
+        LOGGER.info("REVIEW_DISPATCH_ENVELOPE_DELIVERING runtimeId={} recipient={} commandId={} action={}",
+                runtimeId, recipient, command.commandId().value(), command.allowedAction());
+        reactor.core.publisher.Sinks.EmitResult result = queue(runtimeId)
+                .tryEmitNext(new Dispatch(recipient, ReviewDispatchService.envelopeText(command), command));
+        if (result.isFailure()) {
+            // A dropped dispatch would silently miss a directed wake and stall the debate.
+            LOGGER.warn("REVIEW_WORKFLOW_DISPATCH_DROPPED runtimeId={} recipient={} commandId={} result={}",
+                    runtimeId, recipient, command.commandId().value(), result);
+        }
+    }
+
+    private void rejectPendingCommands(ReviewEvent event, String reason) {
+        if (dispatchService == null || reviewRegistry == null) {
+            return;
+        }
+        reviewRegistry.find(event.reviewId())
+                .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                .ifPresent(review -> {
+                    try {
+                        synchronized (review) {
+                            dispatchService.rejectAllPending(review, reason);
+                        }
+                    } catch (RuntimeException exception) {
+                        LOGGER.warn("REVIEW_DISPATCH_REJECT_PENDING_FAILED reviewId={} reason={}",
+                                event.reviewId().value(), reason, exception);
+                    }
+                });
+    }
+
     private void send(String runtimeId, String recipient, String message) {
-        reactor.core.publisher.Sinks.EmitResult result = queue(runtimeId).tryEmitNext(new Dispatch(recipient, message));
+        reactor.core.publisher.Sinks.EmitResult result = queue(runtimeId).tryEmitNext(new Dispatch(recipient, message, null));
         if (result.isFailure()) {
             // A dropped dispatch would silently miss a Director wake and stall the review.
             LOGGER.warn("REVIEW_WORKFLOW_DISPATCH_DROPPED runtimeId={} recipient={} result={}",
@@ -100,9 +234,12 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         return queues.computeIfAbsent(runtimeId, ignored -> {
             reactor.core.publisher.Sinks.Many<Dispatch> queue = reactor.core.publisher.Sinks.many().unicast().onBackpressureBuffer();
             queue.asFlux()
-                    .concatMap(dispatch -> sendAsync(runtimeId, dispatch.recipient(), dispatch.message())
+                    .concatMap(dispatch -> deliver(runtimeId, dispatch)
                             .onErrorResume(exception -> {
-                                LOGGER.warn("REVIEW_WORKFLOW_DISPATCH_FAILED runtimeId={} recipient={}", runtimeId, dispatch.recipient(), exception);
+                                LOGGER.warn("REVIEW_WORKFLOW_DISPATCH_FAILED runtimeId={} recipient={} commandId={}",
+                                        runtimeId, dispatch.recipient(),
+                                        dispatch.command() == null ? "-" : dispatch.command().commandId().value(),
+                                        exception);
                                 return reactor.core.publisher.Mono.empty();
                             }))
                     .subscribe();
@@ -110,9 +247,15 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         });
     }
 
-    private reactor.core.publisher.Mono<Void> sendAsync(String runtimeId, String recipient, String message) {
+    private reactor.core.publisher.Mono<Void> deliver(String runtimeId, Dispatch dispatch) {
         AgentRuntimeAdapter adapter = runtimeAdapterProvider.getIfAvailable();
-        return adapter == null ? reactor.core.publisher.Mono.empty() : adapter.send(runtimeId, recipient, message);
+        if (adapter == null) {
+            return reactor.core.publisher.Mono.empty();
+        }
+        if (dispatch.command() != null) {
+            return adapter.deliverDispatchCommand(runtimeId, dispatch.recipient(), dispatch.message(), dispatch.command());
+        }
+        return adapter.send(runtimeId, dispatch.recipient(), dispatch.message());
     }
 
     private String directorLabel(ReviewEvent event) {
@@ -131,10 +274,12 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     private static final class Dispatch {
         private final String recipient;
         private final String message;
+        private final ReviewDispatchCommand command;
 
-        private Dispatch(String recipient, String message) {
+        private Dispatch(String recipient, String message, ReviewDispatchCommand command) {
             this.recipient = Objects.requireNonNull(recipient, "recipient must not be null");
             this.message = Objects.requireNonNull(message, "message must not be null");
+            this.command = command;
         }
 
         private String recipient() {
@@ -143,6 +288,10 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
 
         private String message() {
             return message;
+        }
+
+        private ReviewDispatchCommand command() {
+            return command;
         }
     }
 }
