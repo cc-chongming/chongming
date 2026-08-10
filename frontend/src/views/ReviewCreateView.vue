@@ -2,6 +2,9 @@
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
+import RepositorySelect from '../components/RepositorySelect.vue';
+
+// [AIREVIEW-PLAN-023#2] Repository input is constrained to the active backend configuration.
 
 const router = useRouter();
 const requirementFile = ref(null);
@@ -89,7 +92,7 @@ async function submit() {
         <form class="review-form create-form" @submit.prevent="submit">
             <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
             <label class="full">需求文档（.md）<input type="file" accept=".md,text/markdown" required @change="onFileChange" /></label>
-            <label class="full">仓库路径或已配置仓库标识<input v-model="form.repositoryPath" required placeholder="由服务端白名单映射的仓库路径" /></label>
+            <RepositorySelect v-model="form.repositoryPath" class="full" required />
             <label>分支（可选）<input v-model="form.branch" placeholder="main" /></label>
             <label>Commit（可选）<input v-model="form.commit" placeholder="40 位 SHA" /></label>
             <label class="full">提交人<input v-model="form.submitter" maxlength="128" required /></label>

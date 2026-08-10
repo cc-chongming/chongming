@@ -1,7 +1,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { formatApiError, reviewApi } from '../api/review-api';
+import { formatApiError, ReviewApiError, reviewApi } from '../api/review-api';
+import RepositorySelect from '../components/RepositorySelect.vue';
+
+// [AIREVIEW-PLAN-023#2] Draft repository edits use the configured repository selector.
+// [AIREVIEW-PLAN-023#3] Draft review launch is one idempotent multipart command.
 
 const props = defineProps({ requirementId: { type: String, required: true } });
 const router = useRouter();
@@ -10,10 +14,26 @@ const error = ref('');
 const loading = ref(true);
 const changing = ref(false);
 const editing = ref(false);
+const launching = ref(false);
+const launchOpen = ref(false);
+const launchFile = ref(null);
+const launchIdempotencyKey = ref(createLaunchIdempotencyKey());
+const launchRecoveryReviewId = ref(null);
+const repositoryState = ref('loading');
+const configuredRepositoryIds = ref([]);
 const reviewSummary = ref(null);
 const gateVersions = ref([]);
 const claims = ref([]);
 const editForm = reactive({ title: '', description: '', assigneeId: '', repositoryPath: '', priority: 'P1' });
+const launchForm = reactive({
+    repositoryPath: '',
+    branch: 'main',
+    commit: '',
+    submitter: 'demo-reviewer',
+    publicTasks: '核对需求范围、验收标准与实现风险',
+    changeReason: '草稿已补齐，发起首次评审',
+    initialMessage: '请根据公开计划开始需求评审。'
+});
 
 const lifecycleSteps = [
     { key: 'DRAFT', label: '草稿' },
@@ -70,6 +90,8 @@ const canComplete = computed(() => requirement.value?.status === 'DEVELOPING');
 const canCancel = computed(() => requirement.value?.status === 'DRAFT');
 const canEdit = computed(() => ['DRAFT', 'RETURNED'].includes(requirement.value?.status));
 const canDelete = computed(() => requirement.value !== null);
+const canLaunchReview = computed(() => requirement.value?.status === 'DRAFT' && !requirement.value?.reviewId);
+const repositorySubmissionBlocked = computed(() => ['loading', 'empty'].includes(repositoryState.value));
 
 const scout = computed(() => reviewSummary.value?.contextScout ?? null);
 const scoutDone = computed(() => scout.value?.status === 'COMPLETED');
@@ -109,6 +131,108 @@ function gateInfo(result) {
 }
 function shortId(id) {
     return id ? `#${String(id).slice(0, 8)}` : '—';
+}
+
+function createLaunchIdempotencyKey() {
+    return globalThis.crypto?.randomUUID?.() ?? `requirement-launch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function launchTasks() {
+    return launchForm.publicTasks.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+async function refreshRepositoryAvailability() {
+    repositoryState.value = 'loading';
+    try {
+        const repositories = await reviewApi.listRepositories();
+        configuredRepositoryIds.value = Array.isArray(repositories)
+            ? repositories.map((repository) => repository?.id).filter(Boolean)
+            : [];
+        repositoryState.value = configuredRepositoryIds.value.length ? 'ready' : 'empty';
+    } catch {
+        configuredRepositoryIds.value = [];
+        repositoryState.value = 'error';
+    }
+}
+
+async function ensureConfiguredRepository(repositoryId) {
+    if (repositoryState.value !== 'ready') await refreshRepositoryAvailability();
+    if (!configuredRepositoryIds.value.length) {
+        error.value = repositoryState.value === 'empty'
+            ? '当前没有可用仓库，暂不能保存或发起评审。'
+            : '仓库配置读取失败，请重试。';
+        return false;
+    }
+    if (!configuredRepositoryIds.value.includes(String(repositoryId ?? '').trim())) {
+        error.value = '请选择当前配置中可用的仓库。';
+        return false;
+    }
+    return true;
+}
+
+function openLaunchForm() {
+    launchForm.repositoryPath = requirement.value?.repositoryPath ?? '';
+    launchRecoveryReviewId.value = null;
+    launchOpen.value = true;
+    error.value = '';
+}
+
+function onLaunchFileChange(event) {
+    launchFile.value = event.target.files?.[0] ?? null;
+}
+
+async function launchReview() {
+    if (!requirement.value) return;
+    error.value = '';
+    if (!launchFile.value?.name.toLowerCase().endsWith('.md')) {
+        error.value = '请重新上传 Markdown 格式的评审需求文档。';
+        return;
+    }
+    if (!launchForm.repositoryPath || !launchForm.submitter.trim() || !launchTasks().length
+        || !launchForm.changeReason.trim() || !launchForm.initialMessage.trim()) {
+        error.value = '请填写仓库、提交人、公开计划、计划原因和启动说明。';
+        return;
+    }
+    launching.value = true;
+    try {
+        if (!await ensureConfiguredRepository(launchForm.repositoryPath)) return;
+        const result = await reviewApi.launchRequirementReview(props.requirementId, {
+            requirementFile: launchFile.value,
+            repositoryPath: launchForm.repositoryPath,
+            branch: launchForm.branch.trim(),
+            commit: launchForm.commit.trim(),
+            submitter: launchForm.submitter.trim(),
+            publicTasks: launchTasks(),
+            changeReason: launchForm.changeReason.trim(),
+            initialMessage: launchForm.initialMessage.trim(),
+            expectedVersion: requirement.value.version,
+            idempotencyKey: launchIdempotencyKey.value
+        });
+        await router.push(result.liveUrl ?? `/reviews/${result.reviewId}/live`);
+    } catch (requestError) {
+        if (requestError instanceof ReviewApiError) {
+            const existingReviewId = requestError.body?.existingReviewId ?? null;
+            launchRecoveryReviewId.value = existingReviewId;
+            if (requestError.body?.recoverable) {
+                error.value = `评审已绑定但启动未完成；已绑定评审，可使用同一命令安全重试。错误码：${requestError.errorCode}`;
+                return;
+            }
+            if (requestError.errorCode === 'VERSION_CONFLICT') {
+                await load();
+                launchIdempotencyKey.value = createLaunchIdempotencyKey();
+                launchOpen.value = true;
+                error.value = '需求版本已刷新，请检查最新草稿并确认后重试。';
+                return;
+            }
+            if (existingReviewId) {
+                error.value = `需求已绑定既有评审，不能重复创建。错误码：${requestError.errorCode}`;
+                return;
+            }
+        }
+        error.value = formatApiError(requestError);
+    } finally {
+        launching.value = false;
+    }
 }
 
 async function load() {
@@ -155,6 +279,7 @@ async function saveEdit() {
     changing.value = true;
     error.value = '';
     try {
+        if (!await ensureConfiguredRepository(editForm.repositoryPath)) return;
         requirement.value = await reviewApi.reviseRequirement(props.requirementId, {
             title: editForm.title.trim(),
             description: editForm.description,
@@ -203,11 +328,13 @@ async function deleteRequirement() {
 }
 
 onMounted(load);
+onMounted(refreshRepositoryAvailability);
 </script>
 
 <template>
     <section class="platform-page">
-        <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
+        <p v-if="error" class="error-banner" role="alert">{{ error }} <RouterLink v-if="launchRecoveryReviewId" :to="`/reviews/${launchRecoveryReviewId}/live`">查看已绑定评审</RouterLink></p>
+        <p v-if="repositoryState === 'empty'" class="error-banner" role="status">当前没有可用仓库，暂不能保存或发起评审。</p>
         <p v-if="loading" class="empty-note">正在读取需求详情…</p>
         <template v-else-if="requirement">
             <div class="rd-top">
@@ -247,10 +374,29 @@ onMounted(load);
                     <label class="full">需求描述<textarea v-model="editForm.description" /></label>
                     <label>优先级<select v-model="editForm.priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></label>
                     <label>负责人（可选）<input v-model="editForm.assigneeId" /></label>
-                    <label class="full">仓库标识<input v-model="editForm.repositoryPath" /></label>
+                    <RepositorySelect v-model="editForm.repositoryPath" class="full" label="仓库标识" required />
                     <div class="form-actions full">
-                        <button class="button" type="submit" :disabled="changing">保存修改</button>
+                        <button class="button" type="submit" :disabled="changing || repositorySubmissionBlocked || !editForm.repositoryPath">保存修改</button>
                         <button class="button secondary" type="button" :disabled="changing" @click="cancelEdit">取消编辑</button>
+                    </div>
+                </form>
+            </section>
+
+            <section v-if="launchOpen" class="panel requirement-launch-panel" aria-labelledby="requirement-launch-title" style="margin-bottom:16px">
+                <h2 id="requirement-launch-title">发起评审</h2>
+                <p class="muted">草稿不保存 Markdown 原文，请重新上传需求文档。提交后将创建、绑定并启动一次评审。</p>
+                <form class="review-form compact" @submit.prevent="launchReview">
+                    <label class="full">评审需求文档（.md）<input type="file" accept=".md,text/markdown" required @change="onLaunchFileChange" /></label>
+                    <RepositorySelect v-model="launchForm.repositoryPath" class="full" required />
+                    <label>分支<input v-model="launchForm.branch" placeholder="main" /></label>
+                    <label>Commit（可选）<input v-model="launchForm.commit" placeholder="40 位 SHA" /></label>
+                    <label class="full">提交人<input v-model="launchForm.submitter" maxlength="128" required /></label>
+                    <label class="full">公开评审计划（每行一项）<textarea v-model="launchForm.publicTasks" required /></label>
+                    <label class="full">计划原因<input v-model="launchForm.changeReason" maxlength="512" required /></label>
+                    <label class="full">启动说明<textarea v-model="launchForm.initialMessage" required /></label>
+                    <div class="form-actions full">
+                        <button class="button" type="submit" :disabled="launching || repositorySubmissionBlocked || !launchForm.repositoryPath">{{ launching ? '正在发起…' : '确认发起评审' }}</button>
+                        <button class="button secondary" type="button" :disabled="launching" @click="launchOpen = false">取消</button>
                     </div>
                 </form>
             </section>
@@ -347,6 +493,7 @@ onMounted(load);
                         <div class="card-bd">
                             <div class="rd-op-actions">
                                 <button v-if="canEdit" class="button secondary" type="button" :disabled="changing || editing" @click="beginEdit">编辑需求</button>
+                                <button v-if="canLaunchReview" class="button" type="button" :disabled="changing || launching || launchOpen || repositorySubmissionBlocked" @click="openLaunchForm">发起评审</button>
                                 <button v-if="canDelete" class="button danger-button" type="button" :disabled="changing" @click="deleteRequirement">删除需求</button>
                                 <button v-if="canStartDevelopment" class="button" type="button" :disabled="changing" @click="apply('development')">开始开发</button>
                                 <button v-if="canComplete" class="button" type="button" :disabled="changing" @click="apply('complete')">标记完成</button>

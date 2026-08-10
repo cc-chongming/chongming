@@ -1,9 +1,11 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.application.ContextScoutConclusionService;
 import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.model.RepositorySnapshot;
+import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,9 +21,9 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
- * [AIREVIEW-PLAN-018#3.3] Creates the non-voting Context Scout Harness that prepares a bounded repository overview.
+ * [AIREVIEW-PLAN-018#3.3][AIREVIEW-PLAN-023#5] Creates the non-voting Context Scout Harness that prepares a bounded repository overview.
  *
- * @author wangli
+ * @author zyj
  */
 @Component
 public class ContextScoutHarnessFactory {
@@ -34,18 +36,21 @@ public class ContextScoutHarnessFactory {
     private final ReviewRepositoryToolFactory repositoryToolFactory;
     private final ObjectMapper objectMapper;
     private final ReviewWorkspaceLayout workspaceLayout;
+    private final ContextScoutConclusionService conclusionService;
 
     public ContextScoutHarnessFactory(
             ModelGateway modelGateway,
             AgentScopeProperties properties,
             ReviewRepositoryToolFactory repositoryToolFactory,
             ObjectMapper objectMapper,
-            ReviewWorkspaceLayout workspaceLayout) {
+            ReviewWorkspaceLayout workspaceLayout,
+            ContextScoutConclusionService conclusionService) {
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.repositoryToolFactory = Objects.requireNonNull(repositoryToolFactory, "repositoryToolFactory must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
+        this.conclusionService = Objects.requireNonNull(conclusionService, "conclusionService must not be null");
     }
 
     /** Creates one attempt-local, read-only scout without Claim, debate or Gate capabilities. */
@@ -192,15 +197,17 @@ public class ContextScoutHarnessFactory {
                 + "按“初始化清单 -> 需求关键词检索 -> 高相关文件验证 -> 立即输出”的固定顺序执行；"
                 + "清单已经足以回答的信息不得再次检索。"
                 + "识别与需求有关的模块、入口文件、构建方式与风险边界。"
-                + "完成后仅用简体中文输出 JSON：summary、moduleRoots、entryPoints、risks、evidencePaths、roleScopes 六个字段；"
+                + "完成后仅用简体中文输出 JSON：summary、moduleRoots、entryPoints、constraints、risks、evidencePaths、roleScopes 七个字段；"
                 + "每项结论必须列出 INIT 清单或已读取的快照相对路径；信息不足时明确标记 unknown，不可继续循环检索。\n\n"
                 + "## INIT 清单（服务器生成，可信的结构性输入）\n"
                 + overview.publicText(RoleType.PROJECT);
     }
 
     /** Persists the Scout's final visible response as a public, integrity-protected workspace artifact. */
-    public void recordResult(
+    public ContextScoutConclusion recordResult(
             ReviewRuntimeContext context, ReviewWorkspaceLayout.ReviewWorkspace workspace, String visibleResult) {
+        ContextScoutConclusion conclusion = conclusionService.capture(
+                context.reviewId(), context.attemptNo(), visibleResult);
         repositoryToolFactory.recordScoutResult(context, visibleResult);
         try {
             String payload = objectMapper.writeValueAsString(java.util.Map.of(
@@ -212,6 +219,7 @@ public class ContextScoutHarnessFactory {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Unable to serialize Context Scout result", exception);
         }
+        return conclusion;
     }
 
     /** Writes a preview artifact without changing the shared role context cache. */

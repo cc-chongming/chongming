@@ -20,9 +20,9 @@ import org.springframework.stereotype.Service;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-010#1.5] Accepts a Judge conclusion that may select existing facts but never introduce a Claim, Evidence or final Gate result.
+ * [AIREVIEW-PLAN-010#1.5][AIREVIEW-PLAN-023#6] Accepts a Judge conclusion that may select existing facts but never introduce a Claim, Evidence or final Gate result.
  *
- * @author wangli
+ * @author zyj
  */
 @Service
 public class JudgeService {
@@ -127,7 +127,10 @@ debateStore.saveJudgeDecision(review.id(), decision);
                 null,
                 null,
                 90,
-                java.util.Map.of("result", draft.result().name(), "status", draft.status().name())));
+                java.util.Map.of(
+                        "result", draft.result().name(),
+                        "status", draft.status().name(),
+                        "reasonSummary", draft.publicReasonSummary())));
         if (awaitingHumanDecision) {
             eventPublisher.publish(ReviewEventDrafts.completedCommand(
                     review,

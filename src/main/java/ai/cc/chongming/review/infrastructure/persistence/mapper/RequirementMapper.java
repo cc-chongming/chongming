@@ -2,6 +2,7 @@ package ai.cc.chongming.review.infrastructure.persistence.mapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
+
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -92,6 +93,78 @@ public interface RequirementMapper {
     List<StatusCountRow> countByStatus();
 
     /**
+     * [AIREVIEW-PLAN-023#3] Atomically creates the requirement-scoped launch reservation.
+     */
+    @Insert("""
+            INSERT IGNORE INTO requirement_review_launch_command
+                (requirement_id, idempotency_key, request_fingerprint, owner_token, lease_until)
+            VALUES
+                (#{requirementId}, #{idempotencyKey}, #{requestFingerprint}, #{ownerToken}, #{leaseUntil})
+            """)
+    int insertLaunchCommand(RequirementReviewLaunchCommandRow row);
+
+    @Select("""
+            SELECT requirement_id AS requirementId, idempotency_key AS idempotencyKey,
+                   request_fingerprint AS requestFingerprint, owner_token AS ownerToken,
+                   lease_until AS leaseUntil, review_id AS reviewId
+            FROM requirement_review_launch_command
+            WHERE requirement_id = #{requirementId} AND idempotency_key = #{idempotencyKey}
+            """)
+    RequirementReviewLaunchCommandRow findLaunchCommand(
+            @Param("requirementId") String requirementId, @Param("idempotencyKey") String idempotencyKey);
+
+    @Update("""
+            UPDATE requirement_review_launch_command
+            SET owner_token = #{ownerToken}, lease_until = #{leaseUntil}
+            WHERE requirement_id = #{requirementId} AND idempotency_key = #{idempotencyKey}
+              AND request_fingerprint = #{requestFingerprint} AND review_id IS NULL
+              AND lease_until <= #{now}
+            """)
+    int takeOverExpiredLaunchCommand(
+            @Param("requirementId") String requirementId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("requestFingerprint") String requestFingerprint,
+            @Param("ownerToken") String ownerToken,
+            @Param("now") LocalDateTime now,
+            @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Update("""
+            UPDATE requirement_review_launch_command
+            SET lease_until = #{leaseUntil}
+            WHERE requirement_id = #{requirementId} AND idempotency_key = #{idempotencyKey}
+              AND owner_token = #{ownerToken} AND review_id IS NULL
+            """)
+    int renewLaunchCommand(
+            @Param("requirementId") String requirementId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("ownerToken") String ownerToken,
+            @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Update("""
+            UPDATE requirement_review_launch_command
+            SET review_id = #{reviewId}, lease_until = NULL
+            WHERE requirement_id = #{requirementId} AND idempotency_key = #{idempotencyKey}
+              AND request_fingerprint = #{requestFingerprint} AND owner_token = #{ownerToken}
+              AND review_id IS NULL
+            """)
+    int completeLaunchCommand(
+            @Param("requirementId") String requirementId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("requestFingerprint") String requestFingerprint,
+            @Param("ownerToken") String ownerToken,
+            @Param("reviewId") String reviewId);
+
+    @Delete("""
+            DELETE FROM requirement_review_launch_command
+            WHERE requirement_id = #{requirementId} AND idempotency_key = #{idempotencyKey}
+              AND owner_token = #{ownerToken} AND review_id IS NULL
+            """)
+    int releaseLaunchCommand(
+            @Param("requirementId") String requirementId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("ownerToken") String ownerToken);
+
+    /**
      * @author zyj
      */
     record RequirementRow(
@@ -113,5 +186,19 @@ public interface RequirementMapper {
      * @author zyj
      */
     record StatusCountRow(String status, long total) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-023#3] Durable launch reservation row.
+     *
+     * @author zyj
+     */
+    record RequirementReviewLaunchCommandRow(
+            String requirementId,
+            String idempotencyKey,
+            String requestFingerprint,
+            String ownerToken,
+            LocalDateTime leaseUntil,
+            String reviewId) {
     }
 }

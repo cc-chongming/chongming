@@ -9,6 +9,7 @@ import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
+import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
@@ -28,7 +29,10 @@ import ai.cc.chongming.review.infrastructure.agentscope.RoleSubagentFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ScoutToolTraceCollector;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import io.agentscope.core.permission.PermissionMode;
+import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.MsgRole;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,14 +54,56 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies that a review has one active director and cancellation releases the next-attempt lock.
+ * [AIREVIEW-PLAN-023#5] Verifies runtime lifecycle and persisted Context Scout completion ordering.
  *
- * @author wangli
+ * @author zyj
  */
 class AgentScopeReviewRuntimeAdapterTests {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void publishesScoutCompletionOnlyAfterTheConclusionWasPersisted() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
+                List.of(), Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        HarnessAgent scout = Mockito.mock(HarnessAgent.class);
+        ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
+        String result = "{\"summary\":\"上下文已收集\"}";
+        ContextScoutConclusion conclusion = new ContextScoutConclusion(
+                context.reviewId(), 1, 1, "上下文已收集", List.of(), List.of(), List.of(), List.of(),
+                List.of(), Map.of(), result, java.time.Instant.parse("2026-08-10T08:00:00Z"));
+        Mockito.when(scoutFactory.createRuntime(Mockito.any(), Mockito.any()))
+                .thenReturn(new ContextScoutHarnessFactory.ScoutRuntime(scout, new ScoutToolTraceCollector()));
+        Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Flux.just(new AgentResultEvent(Msg.builder()
+                        .role(MsgRole.ASSISTANT)
+                        .textContent(result)
+                        .build())));
+        Mockito.when(scoutFactory.recordResult(Mockito.any(), Mockito.any(), Mockito.eq(result)))
+                .thenReturn(conclusion);
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, new AtomicInteger());
+
+        adapter.start(startRequest(context)).block();
+
+        Mockito.verify(scoutFactory).recordResult(
+                Mockito.argThat(actual -> actual.reviewId().equals(context.reviewId())
+                        && actual.attemptNo() == context.attemptNo()),
+                Mockito.any(),
+                Mockito.eq(result));
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .containsExactly(ReviewEventType.CONTEXT_SCOUT_COMPLETED);
+        assertThat(events.getFirst().payload())
+                .containsEntry("status", "COMPLETED")
+                .containsEntry("schemaVersion", "1")
+                .containsEntry("publicSummary", "上下文已收集")
+                .containsEntry("conclusionRef", context.reviewId().value() + ":1");
+        adapter.cancel(context.runtimeId()).block();
+    }
 
     @Test
     void rejectsSecondDirectorThenAllowsNewAttemptAfterCancellation() {

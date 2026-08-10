@@ -170,6 +170,11 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             if (SUMMARY_AFFECTING_EVENTS.has(domainEvent.type)) {
                 refreshSummary().catch(() => {});
             }
+            if (domainEvent.type === 'HUMAN_GATE_FINALIZED') {
+                // [AIREVIEW-PLAN-023#6.3] Another reviewer can finalize the Gate while this page is open.
+                // Refresh the versioned human result independently so summary.gate is never presented alone.
+                refreshHumanGateVersions().catch(() => {});
+            }
             if (domainEvent.type === 'CLAIM_SUBMITTED' || domainEvent.type === 'POSITION_CHANGED') {
                 refreshClaims().catch(() => {});
             }
@@ -186,6 +191,10 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         ]);
         state.humanItems = items;
         state.humanGateVersions = gates;
+    }
+
+    async function refreshHumanGateVersions() {
+        state.humanGateVersions = await api.getHumanGateVersions(state.reviewId);
     }
 
     async function refreshClaims() {

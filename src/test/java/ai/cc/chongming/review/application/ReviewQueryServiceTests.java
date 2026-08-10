@@ -4,6 +4,7 @@ import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
+import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
@@ -13,6 +14,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
+import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
@@ -30,11 +32,60 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * [AIREVIEW-PLAN-018#3.3] Verifies persisted Context Scout degradation remains visible after later events.
+ * [AIREVIEW-PLAN-018#3.3][AIREVIEW-PLAN-023#5] Verifies persisted Context Scout conclusions and degradation.
  *
- * @author wangli
+ * @author zyj
  */
 class ReviewQueryServiceTests {
+
+    @Test
+    void prefersThePersistedCurrentAttemptScoutConclusion() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Review review = Review.restore(reviewId, ReviewStage.PLANNING, 2, 7, List.of(), Map.of());
+        ReviewEventStore eventStore = mock(ReviewEventStore.class);
+        ReviewDebateStore debateStore = mock(ReviewDebateStore.class);
+        HumanGateDecisionStore humanGateStore = mock(HumanGateDecisionStore.class);
+        ContextScoutConclusionStore conclusionStore = mock(ContextScoutConclusionStore.class);
+        ReviewRegistry reviewRegistry = mock(ReviewRegistry.class);
+        when(eventStore.findLatest(reviewId)).thenReturn(Optional.of(event(
+                reviewId, 12, 2, ReviewEventType.PLAN_CREATED, Map.of())));
+        when(debateStore.findGateDraft(reviewId)).thenReturn(Optional.empty());
+        when(humanGateStore.findLatest(reviewId)).thenReturn(Optional.empty());
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.of(review));
+        when(conclusionStore.find(reviewId, 2)).thenReturn(Optional.of(new ContextScoutConclusion(
+                reviewId,
+                2,
+                1,
+                "上下文收集完成",
+                List.of("src/main"),
+                List.of("ReviewQueryService"),
+                List.of("只公开授权信息"),
+                List.of("历史数据需降级展示"),
+                List.of("src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java"),
+                Map.of("BACKEND", List.of("src/main/")),
+                "{\"summary\":\"上下文收集完成\"}",
+                Instant.parse("2026-08-10T08:00:00Z"))));
+        ReviewQueryService service = new ReviewQueryService(
+                eventStore,
+                debateStore,
+                mock(EvidenceLedgerService.class),
+                humanGateStore,
+                reviewRegistry,
+                conclusionStore);
+
+        ReviewQueryService.ContextScoutView view = service.findSummary(reviewId).orElseThrow().contextScout();
+
+        assertThat(view.status()).isEqualTo("COMPLETED");
+        assertThat(view.publicSummary()).isEqualTo("上下文收集完成");
+        assertThat(view.moduleRoots()).containsExactly("src/main");
+        assertThat(view.entryPoints()).containsExactly("ReviewQueryService");
+        assertThat(view.constraints()).containsExactly("只公开授权信息");
+        assertThat(view.risks()).containsExactly("历史数据需降级展示");
+        assertThat(view.evidencePaths()).hasSize(1);
+        assertThat(view.roleScopes()).containsEntry("BACKEND", List.of("src/main/"));
+        assertThat(view.rawPublicResult()).contains("上下文收集完成");
+        assertThat(view.legacy()).isFalse();
+    }
 
     @Test
     void exposesCurrentAttemptScoutDegradationFromItsDedicatedEvent() {
@@ -132,6 +183,7 @@ class ReviewQueryServiceTests {
         ReviewEventStore eventStore = mock(ReviewEventStore.class);
         ReviewDebateStore debateStore = mock(ReviewDebateStore.class);
         HumanGateDecisionStore humanGateStore = mock(HumanGateDecisionStore.class);
+        ContextScoutConclusionStore conclusionStore = mock(ContextScoutConclusionStore.class);
         ReviewRegistry reviewRegistry = mock(ReviewRegistry.class);
         ReviewRepositories reviewRepositories = mock(ReviewRepositories.class);
         Review restored = Review.restore(
@@ -147,6 +199,19 @@ class ReviewQueryServiceTests {
         when(humanGateStore.findLatest(reviewId)).thenReturn(Optional.empty());
         when(reviewRegistry.find(reviewId)).thenReturn(Optional.empty());
         when(reviewRepositories.findReview(reviewId)).thenReturn(Optional.of(restored));
+        when(conclusionStore.find(reviewId, 1)).thenReturn(Optional.of(new ContextScoutConclusion(
+                reviewId,
+                1,
+                1,
+                "重启后恢复的 Scout 结论",
+                List.of("src/main"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                Map.of(),
+                "{\"summary\":\"重启后恢复的 Scout 结论\"}",
+                Instant.parse("2026-08-10T08:00:00Z"))));
         ObjectProvider<ReviewRepositories> reviewRepositoriesProvider = mock(ObjectProvider.class);
         when(reviewRepositoriesProvider.getIfAvailable()).thenReturn(reviewRepositories);
         ReviewQueryService service = new ReviewQueryService(
@@ -155,13 +220,15 @@ class ReviewQueryServiceTests {
                 mock(EvidenceLedgerService.class),
                 humanGateStore,
                 reviewRegistry,
-                reviewRepositoriesProvider);
+                reviewRepositoriesProvider,
+                conclusionStore);
 
         ReviewQueryService.ReviewSummary summary = service.findSummary(reviewId).orElseThrow();
 
         assertThat(summary.reviewVersion()).isEqualTo(4L);
         assertThat(summary.activatedRoles()).containsExactly(
                 new ReviewQueryService.RoleActivationView("PRODUCT", "product-reviewer", true));
+        assertThat(summary.contextScout().publicSummary()).isEqualTo("重启后恢复的 Scout 结论");
     }
 
     private ReviewEvent event(

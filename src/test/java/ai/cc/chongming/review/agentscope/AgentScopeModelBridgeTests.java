@@ -7,27 +7,33 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeModelBridge;
 import io.agentscope.core.message.ThinkingBlock;
+import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultMessage;
 import io.agentscope.core.message.UserMessage;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.tool.ToolValidator;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Verifies the credential-safe model boundary used by AgentScope harnesses.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 class AgentScopeModelBridgeTests {
 
@@ -76,7 +82,7 @@ class AgentScopeModelBridgeTests {
     }
 
     @Test
-    void preservesProviderThinkingAsAnAgentScopeThinkingBlock() {
+    void doesNotExposeProviderThinkingAsAnAgentScopeThinkingBlock() {
         ModelGateway gateway = (request, cancellation) -> Mono.just(new ModelGateway.ModelResponse(
                 "response-001", "model-001", "公开结论。", "先核对需求与代码边界。",
                 new ModelGateway.Usage(1, 2, 3), ModelGateway.FinishReason.STOP,
@@ -88,10 +94,44 @@ class AgentScopeModelBridgeTests {
 
         assertThat(response.getContent().stream()
                 .filter(ThinkingBlock.class::isInstance)
-                .map(ThinkingBlock.class::cast)
-                .map(ThinkingBlock::getThinking)
                 .toList())
-                .containsExactly("先核对需求与代码边界。");
+                .isEmpty();
+    }
+
+    @Test
+    void forwardsGatewayDeltasAsAgentScopeChunksWithAStableResponseId() {
+        ModelGateway gateway = new ModelGateway() {
+            @Override
+            public Mono<ModelResponse> generate(ModelRequest request, IntakeCancellation cancellation) {
+                return Mono.error(new AssertionError("stream path must be used"));
+            }
+
+            @Override
+            public Flux<ModelStreamChunk> stream(ModelRequest request, IntakeCancellation cancellation) {
+                return Flux.just(
+                        new ModelStreamChunk(
+                                "response-stream-1", "公开", new Usage(0, 0, 0), FinishReason.UNKNOWN,
+                                Duration.ZERO, 1, List.of(), "trace-001", false),
+                        new ModelStreamChunk(
+                                "response-stream-1", "结论", new Usage(0, 0, 0), FinishReason.UNKNOWN,
+                                Duration.ZERO, 1, List.of(), "trace-001", false),
+                        new ModelStreamChunk(
+                                "response-stream-1", "", new Usage(1, 2, 3), FinishReason.STOP,
+                                Duration.ofMillis(20), 1, List.of(), "trace-001", true));
+            }
+        };
+        AgentScopeModelBridge bridge = new AgentScopeModelBridge(
+                gateway, context(), RoleType.PRODUCT, "role-reviewer", "Review public requirements", Set.of());
+
+        List<io.agentscope.core.model.ChatResponse> chunks =
+                bridge.stream(List.of(new UserMessage("Assess")), List.of(), null).collectList().block();
+
+        assertThat(chunks).hasSize(3).extracting(io.agentscope.core.model.ChatResponse::getId)
+                .containsOnly("response-stream-1");
+        assertThat(chunks.subList(0, 2))
+                .extracting(chunk -> ((TextBlock) chunk.getContent().getFirst()).getText())
+                .containsExactly("公开", "结论");
+        assertThat(chunks.getLast().getContent()).isEmpty();
     }
 
     @Test

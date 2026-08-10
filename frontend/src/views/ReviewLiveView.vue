@@ -1,8 +1,19 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
-import { buildRuntimeConversation } from '../services/runtime-conversation-adapter';
+import LiveAgentConversation from '../components/LiveAgentConversation.vue';
+import ReviewClaimList from '../components/ReviewClaimList.vue';
+import ReviewConversationDrawer from '../components/ReviewConversationDrawer.vue';
+import ScoutConclusionPanel from '../components/ScoutConclusionPanel.vue';
+import {
+    buildRuntimeConversation,
+    createLatestOnlyLoadQueue,
+    gateDifference,
+    isReasoningEvent,
+    partitionClaimsByPosition
+} from '../services/runtime-conversation-adapter';
 import { describeLiveRunState } from '../services/live-run-status';
+import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
 
@@ -12,22 +23,25 @@ const runtimeTrace = createRuntimeTraceStore();
 const selectedPhase = ref(null);
 const selectedRound = ref(1);
 const expandedRole = ref(null);
-const sidebarTab = ref('facts');
-let loadGeneration = 0;
+const drawerOpen = ref(true);
+const latestReviewReady = ref(false);
 const stage = computed(() => store.state.summary?.stage ?? 'PENDING');
 const liveRunState = computed(() => describeLiveRunState(stage.value, runtimeTrace.state.status));
 const runtimeItems = computed(() => buildRuntimeConversation(runtimeTrace.state.events));
+const loadQueue = createLatestOnlyLoadQueue(() => {
+    store.dispose();
+    runtimeTrace.dispose();
+}, (ready) => { latestReviewReady.value = ready; });
 
 const phases = [
     { id: 'scout', icon: '🔍', name: 'Context Scout', subtitle: '项目信息收集' },
     { id: 'director', icon: '🎬', name: 'Director 规划', subtitle: '创建评审计划' },
-    { id: 'review', icon: '👥', name: '独立审查', subtitle: '4 角色并行' },
+    { id: 'review', icon: '👥', name: '独立审查', subtitle: '多角色并行' },
     { id: 'conflict', icon: '⚡', name: '冲突检测', subtitle: '识别分歧与风险' },
     { id: 'debate', icon: '⚖️', name: '多轮辩论', subtitle: '围绕争议收敛' },
     { id: 'judge', icon: '👨‍⚖️', name: 'Judge 裁决', subtitle: '形成评审判断' },
     { id: 'human', icon: '🧑', name: '人工决策', subtitle: '最终 Gate' }
 ];
-const coreRoles = ['PRODUCT', 'PROJECT', 'FRONTEND', 'BACKEND'];
 const streamPhases = ['scout', 'director', 'judge'];
 const severityRank = { P0: 0, P1: 1, P2: 2, P3: 3 };
 const phaseIndexByStage = {
@@ -47,7 +61,8 @@ const phaseIndexByStage = {
 function roleTitle(role) {
     return {
         DIRECTOR: 'Director 协调者', CONTEXT_SCOUT: 'Context Scout', PRODUCT: '产品经理', PROJECT: '项目经理',
-        FRONTEND: '前端工程师', BACKEND: '后端工程师', JUDGE: 'Judge 裁决者'
+        FRONTEND: '前端工程师', BACKEND: '后端工程师', ARCHITECTURE: '架构师', SECURITY: '安全工程师',
+        TESTING: '测试工程师', PERFORMANCE: '性能工程师', JUDGE: 'Judge 裁决者'
     }[role] ?? role ?? 'Agent';
 }
 
@@ -59,7 +74,7 @@ function phaseForRole(role) {
     if (role === 'CONTEXT_SCOUT') return 0;
     if (role === 'DIRECTOR') return 1;
     if (role === 'JUDGE') return 5;
-    return coreRoles.includes(role) ? 2 : 1;
+    return 2;
 }
 
 const activePhaseIndex = computed(() => {
@@ -81,7 +96,16 @@ const roleClaims = computed(() => {
         .forEach((claim) => { if (claim?.claimId) byId.set(claim.claimId, claim); });
     return [...byId.values()];
 });
-const completedRoles = computed(() => (store.state.summary?.activatedRoles ?? []).filter((entry) => entry.initialReviewCompleted).length);
+const reviewRoleCodes = computed(() => {
+    return reviewRoles(store.state.summary?.activatedRoles, roleClaims.value, runtimeItems.value);
+});
+const completedRoleCodes = computed(() => completedReviewRoles(
+    store.state.summary?.activatedRoles,
+    store.events.value,
+    store.state.summary?.attempt
+));
+const completedRoles = computed(() => completedRoleCodes.value.length);
+const completedRoleSet = computed(() => new Set(completedRoleCodes.value));
 const scoutHasActivity = computed(() => runtimeTrace.state.events.some((event) =>
     String(event?.runId ?? '').includes(':context-scout')));
 const scoutRunFinished = computed(() => runtimeTrace.state.events.some((event) =>
@@ -103,17 +127,20 @@ const conflicts = computed(() => debateTopics.value.flatMap((topic, index) => {
     return [{ index: index + 1, topicId: topic.topicId, subject: topic.subjectKey, severity, support: supports[0], oppose: opposes[0] }];
 }));
 const phaseList = computed(() => phases.map((phase) => {
-    if (phase.id === 'review' && completedRoles.value) return { ...phase, subtitle: `${completedRoles.value}/${coreRoles.length} 角色初审完成` };
+    if (phase.id === 'review') return { ...phase, subtitle: `${completedRoles.value}/${reviewRoleCodes.value.length} 角色初审完成` };
     if (phase.id === 'conflict' && conflicts.value.length) return { ...phase, subtitle: `${conflicts.value.length} 组冲突发现` };
     if (phase.id === 'debate' && debateTopics.value.length) return { ...phase, subtitle: `第 ${maxDebateRound.value} 轮 · ${debateTopics.value.length} 个议题` };
     return phase;
 }));
 
-const proClaims = computed(() => allClaims.value.filter((claim) => claim.position === 'SUPPORT'));
-const conClaims = computed(() => allClaims.value.filter((claim) => claim.position !== 'SUPPORT'));
+const claimPartitions = computed(() => partitionClaimsByPosition(allClaims.value));
+const proClaims = computed(() => claimPartitions.value.support);
+const conClaims = computed(() => claimPartitions.value.oppose);
+const neutralClaims = computed(() => claimPartitions.value.neutral);
 const consensusPercent = computed(() => {
-    if (!allClaims.value.length) return 0;
-    return Math.round((proClaims.value.length / allClaims.value.length) * 100);
+    const directionalClaims = proClaims.value.length + conClaims.value.length;
+    if (!directionalClaims) return 0;
+    return Math.round((proClaims.value.length / directionalClaims) * 100);
 });
 const consensusOffset = computed(() => 264 - Math.round((264 * consensusPercent.value) / 100));
 const consensusStroke = computed(() => {
@@ -126,6 +153,11 @@ const roundTurns = computed(() => debateTopics.value
 const judgements = computed(() => debateTopics.value.filter((topic) => topic.judgement));
 const debateSubject = computed(() => debateTopics.value[0]?.subjectKey ?? null);
 const gateDraft = computed(() => store.state.summary?.gate ?? null);
+const gateOverride = computed(() => gateDifference(gateDraft.value, store.state.humanGateVersions));
+const scoutConclusion = computed(() => store.state.summary?.contextScout?.conclusion
+    ?? store.state.summary?.contextScoutConclusion
+    ?? store.state.summary?.contextScout
+    ?? null);
 
 const phaseItems = computed(() => {
     const phase = activePhase.value;
@@ -139,15 +171,14 @@ const streamOwner = computed(() => {
     if (activePhase.value === 'judge') return { initial: 'J', role: 'JUDGE', name: 'Judge 裁决者', roleDesc: '仅基于已持久化的 Claim 和证据裁决' };
     return { initial: 'D', role: 'DIRECTOR', name: 'Director 协调者', roleDesc: '评审流程编排 Agent' };
 });
-const reviewCards = computed(() => coreRoles.map((role) => {
+const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
     const items = runtimeItems.value.filter((item) => item.role === role);
     const claims = roleClaims.value.filter((claim) => claim.role === role);
-    const activation = store.state.summary?.activatedRoles?.find((entry) => entry.role === role);
     const latest = items.at(-1);
     const running = latest?.status === 'streaming' || latest?.status === 'RUNNING';
     const stance = claims.some((claim) => claim.position === 'OPPOSE') ? 'oppose'
         : claims.some((claim) => claim.position === 'SUPPORT') ? 'support' : null;
-    const completed = Boolean(activation?.initialReviewCompleted);
+    const completed = completedRoleSet.value.has(role);
     return {
         role,
         label: roleTitle(role),
@@ -156,7 +187,7 @@ const reviewCards = computed(() => coreRoles.map((role) => {
             : stance === 'oppose' ? '❌ 反对' : stance === 'support' ? '✅ 支持' : '等待分配',
         tone: completed || stance === 'support' ? 'done' : running ? 'running' : stance === 'oppose' ? 'opposed' : 'pending',
         summary: claims.length
-            ? `提交 ${claims.length} 个 Claim · ${claims.map((claim) => `${claim.severity}: ${claim.subjectKey}`).join(' · ')}`
+            ? claimOverview(claims)
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'
             : latest ? itemSummary(latest) : activation ? '角色已激活，等待公开运行事件。' : '等待 Director 分配评审任务。',
         claims,
@@ -177,8 +208,22 @@ const streamEmpty = computed(() => {
     }
     return { title: '等待当前阶段的公开运行事件', message: '运行事件会按照实际到达顺序显示；工具参数与完整结果仅在展开后可见。' };
 });
-const factTimeline = computed(() => store.events.value.slice(-14).reverse());
-const debugItems = computed(() => runtimeItems.value.slice(-24).reverse());
+const factTimeline = computed(() => store.events.value.slice().reverse().map((event) => ({
+    ...event, title: eventTitle(event), detail: eventDetail(event)
+})));
+const debugItems = computed(() => {
+    const visibleEvents = runtimeTrace.state.events.filter((event) => !isReasoningEvent(event));
+    const lastEvent = visibleEvents.at(-1);
+    return [
+        { id: 'runtime-connection', role: 'SYSTEM', summary: `连接状态：${runtimeTrace.state.status}` },
+        { id: 'runtime-cursor', role: 'SYSTEM', summary: `当前游标：${lastEvent?.sequence ?? lastEvent?.id ?? '尚无事件'}` },
+        ...visibleEvents.map((event, index) => ({
+            id: `debug:${event.id ?? event.sequence ?? index}`,
+            role: event.value?.role ?? String(event.runId ?? '').split(':').at(-1)?.toUpperCase() ?? 'SYSTEM',
+            summary: runtimeDebugSummary(event)
+        }))
+    ];
+});
 
 function isTopicTerminal(topic) {
     return ['RESOLVED', 'ESCALATED'].includes(topic?.status ?? '');
@@ -247,6 +292,21 @@ function toolStatus(status) {
     return { RUNNING: '调用中', SUCCESS: '已完成', ERROR: '失败', DENIED: '被拒绝', INTERRUPTED: '中断' }[status] ?? status ?? '调用中';
 }
 
+function claimsForIds(ids) {
+    const requested = new Set(ids ?? []);
+    return roleClaims.value.filter((claim) => requested.has(claim.claimId));
+}
+
+function runtimeDebugSummary(event) {
+    if (event.type === 'CUSTOM') {
+        const state = event.value?.phase ?? event.value?.lifecycle ?? event.value?.eventType ?? event.value?.status;
+        return `${event.name ?? 'CUSTOM'}${state ? ` · ${state}` : ''}`;
+    }
+    if (event.type === 'RUN_ERROR') return `${event.type} · ${event.message ?? '运行异常'}`;
+    const identity = event.messageId ?? event.toolCallId ?? event.runId;
+    return `${event.type}${identity ? ` · ${identity}` : ''}`;
+}
+
 function eventTitle(event) {
     return {
         PLAN_CREATED: 'Director 发布评审计划', ROLE_ACTIVATED: `激活 ${roleTitle(event.actorRole)} 角色`,
@@ -275,14 +335,14 @@ function format(value) {
 }
 
 async function load(reviewId) {
-    const generation = ++loadGeneration;
     selectedPhase.value = null;
     selectedRound.value = 1;
     expandedRole.value = null;
-    sidebarTab.value = 'facts';
-    await store.load(reviewId);
-    if (generation !== loadGeneration || reviewId !== props.reviewId) return;
-    runtimeTrace.start(reviewId, store.state.summary?.attempt ?? 1);
+    await loadQueue.run(
+        reviewId,
+        (targetReviewId) => store.load(targetReviewId),
+        (targetReviewId) => runtimeTrace.start(targetReviewId, store.state.summary?.attempt ?? 1)
+    );
 }
 
 watch(() => props.reviewId, load, { immediate: true });
@@ -292,7 +352,7 @@ watch(() => props.reviewId, load, { immediate: true });
 watch([() => activePhase.value, maxDebateRound], ([phase, round]) => {
     if (phase === 'debate' && round > selectedRound.value) selectedRound.value = round;
 }, { immediate: true });
-onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
+onUnmounted(() => loadQueue.dispose());
 </script>
 
 <template>
@@ -301,12 +361,13 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
             <div class="review-flow-brand">重明</div>
             <div class="review-flow-title"><strong>需求评审全流程</strong><span>评审 #{{ reviewId }}</span></div>
             <div class="review-flow-header-status" :data-status="runtimeTrace.state.status"><span aria-hidden="true"></span>{{ liveRunState.connectionText }} · {{ stage }}</div>
+            <button class="flow-drawer-toggle" type="button" :aria-expanded="drawerOpen" @click="drawerOpen = !drawerOpen">{{ drawerOpen ? '收起观察' : '展开观察' }}</button>
             <RouterLink class="flow-header-link" :to="{ name: 'review-workbench', params: { reviewId } }">返回评审工作台</RouterLink>
         </header>
 
-        <p v-if="store.state.error" class="flow-error" role="alert">加载评审观察数据失败，请返回工作台查看正式状态。</p>
-        <div v-else-if="store.state.loading" class="flow-loading" aria-label="正在连接评审运行流"><span></span><span></span><span></span></div>
-        <div v-else class="review-flow-layout">
+        <p v-if="latestReviewReady && store.state.error" class="flow-error" role="alert">加载评审观察数据失败，请返回工作台查看正式状态。</p>
+        <div v-else-if="!latestReviewReady || store.state.loading" class="flow-loading" aria-label="正在连接评审运行流"><span></span><span></span><span></span></div>
+        <div v-else :class="['review-flow-layout', { 'drawer-closed': !drawerOpen }]">
             <nav class="flow-pipeline" aria-label="评审流程">
                 <p>评审流程</p>
                 <template v-for="(phase, index) in phaseList" :key="phase.id">
@@ -335,19 +396,10 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                             <div><strong>{{ streamOwner.name }}</strong><span>{{ streamOwner.roleDesc }}</span></div>
                             <small>{{ phaseItems.length }} 条运行记录</small>
                         </header>
-                        <ol v-if="phaseItems.length" class="flow-stream-list">
-                            <li v-for="item in phaseItems" :key="item.id" :class="`is-${item.kind}`">
-                                <div class="flow-stream-role"><span class="flow-agent-avatar" :data-role="item.role">{{ roleInitial(item.role) }}</span><strong>{{ roleTitle(item.role) }}</strong></div>
-                                <details v-if="item.kind === 'tool'" :open="item.status === 'RUNNING'" class="flow-tool-event" :data-status="item.status">
-                                    <summary><code>{{ item.toolName }}</code><span>{{ toolStatus(item.status) }}</span><small v-if="item.elapsedMs != null">{{ item.elapsedMs }}ms</small></summary>
-                                    <div><section><h2>参数</h2><pre>{{ format(item.input) }}</pre></section><section><h2>结果</h2><pre>{{ format(item.output) }}</pre></section></div>
-                                </details>
-                                <details v-else-if="item.kind === 'thinking'" class="flow-thought"><summary>{{ itemSummary(item) }}</summary><pre>{{ item.content }}</pre></details>
-                                <p v-else :class="item.kind === 'notice' ? 'flow-notice' : 'flow-message'">{{ item.content }}</p>
-                            </li>
-                        </ol>
-                        <div v-else class="flow-empty"><strong>{{ streamEmpty.title }}</strong><p>{{ streamEmpty.message }}</p></div>
+                        <LiveAgentConversation :items="phaseItems" :status="runtimeTrace.state.status" :empty-state="streamEmpty" />
                     </section>
+
+                    <ScoutConclusionPanel v-if="activePhase === 'scout'" :conclusion="scoutConclusion" />
 
                     <section v-if="activePhase === 'director' && planCards.length" class="flow-plan-section" aria-label="评审计划">
                         <article v-for="plan in planCards" :key="plan.sequence" class="flow-plan-card">
@@ -359,14 +411,16 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
 
                     <section v-if="activePhase === 'judge' && judgements.length" class="flow-judgement-section" aria-label="议题裁决">
                         <article v-for="topic in judgements" :key="topic.topicId" class="flow-judgement-card">
-                            <header><span class="flow-judgement-badge">{{ topic.judgement.result }}</span><strong>{{ topic.subjectKey }}</strong></header>
+                            <header><span class="flow-judgement-badge">{{ gateLabel(topic.judgement.result) }}</span><strong>{{ topic.subjectKey }}</strong></header>
                             <p>{{ topic.judgement.reasonSummary }}</p>
                             <small>接受 {{ topic.judgement.acceptedClaimIds?.length ?? 0 }} 项 · 拒绝 {{ topic.judgement.rejectedClaimIds?.length ?? 0 }} 项</small>
+                            <details v-if="topic.judgement.acceptedClaimIds?.length"><summary>查看采信的 Claim</summary><ReviewClaimList :claims="claimsForIds(topic.judgement.acceptedClaimIds)" /></details>
+                            <details v-if="topic.judgement.rejectedClaimIds?.length"><summary>查看拒绝的 Claim</summary><ReviewClaimList :claims="claimsForIds(topic.judgement.rejectedClaimIds)" /></details>
                         </article>
                     </section>
                 </template>
 
-                <!-- ── 独立审查：4 角色卡片 ── -->
+                <!-- [AIREVIEW-PLAN-023#7.1] 独立审查角色来自实际激活和运行身份。 -->
                 <template v-else-if="activePhase === 'review'">
                     <div class="flow-review-grid">
                         <article v-for="card in reviewCards" :key="card.role" :class="['flow-review-card', card.tone, { expanded: expandedRole === card.role }]">
@@ -377,21 +431,12 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                             </button>
                             <p class="flow-review-summary">{{ card.summary }}</p>
                             <div v-if="expandedRole === card.role" class="flow-review-body">
-                                <div v-for="claim in card.claims" :key="claim.claimId" class="flow-review-claim">
-                                    <span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span>
-                                    <div><strong>{{ claim.subjectKey }}</strong><p>{{ claim.statement }}</p><small v-if="claim.reasonSummary">{{ claim.reasonSummary }}</small></div>
-                                </div>
+                                <ReviewClaimList :claims="card.claims" />
                                 <p v-if="!card.claims.length && !card.items.length" class="flow-review-empty">该角色尚未公开 Claim 或运行事件。</p>
-                                <div v-for="item in card.items" :key="item.id" class="flow-review-runtime">
-                                    <details v-if="item.kind === 'tool'" :open="item.status === 'RUNNING'" class="flow-tool-event" :data-status="item.status">
-                                        <summary><code>{{ item.toolName }}</code><span>{{ toolStatus(item.status) }}</span><small v-if="item.elapsedMs != null">{{ item.elapsedMs }}ms</small></summary>
-                                        <div><section><h2>参数</h2><pre>{{ format(item.input) }}</pre></section><section><h2>结果</h2><pre>{{ format(item.output) }}</pre></section></div>
-                                    </details>
-                                    <details v-else-if="item.kind === 'thinking'" class="flow-thought"><summary>{{ itemSummary(item) }}</summary><pre>{{ item.content }}</pre></details>
-                                    <p v-else :class="item.kind === 'notice' ? 'flow-notice' : 'flow-message'">{{ item.content }}</p>
-                                </div>
+                                <section class="flow-review-conversation"><h2>公开对话</h2><LiveAgentConversation compact :items="card.items" :empty-state="{ title: '等待公开对话', message: '该角色的正式 AI 输出到达后显示在这里。' }" /></section>
                             </div>
                         </article>
+                        <p v-if="!reviewCards.length" class="flow-empty flow-review-grid-empty"><strong>尚未激活独立审查角色</strong><span>Director 发布角色激活结果后，这里只展示实际参与评审的角色。</span></p>
                     </div>
                 </template>
 
@@ -414,6 +459,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                             <p v-else>暂无需要处置的冲突；如后续出现立场对立，将自动合并为辩论议题。</p>
                             <p v-if="runtimeItems.filter((item) => item.role === 'DIRECTOR').length" class="flow-conflict-director-latest">{{ itemSummary(runtimeItems.filter((item) => item.role === 'DIRECTOR').at(-1)) }}</p>
                         </div>
+
                     </section>
                 </template>
 
@@ -431,7 +477,7 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                                 <p class="flow-debate-label">🟢 支持方</p>
                                 <article v-for="claim in proClaims" :key="claim.claimId" class="flow-debate-claim">
                                     <header><span class="flow-agent-avatar" :data-role="claim.role">{{ roleInitial(claim.role) }}</span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
-                                    {{ claim.subjectKey }}
+                                    <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                                 </article>
                                 <p v-if="!proClaims.length" class="flow-debate-empty">暂无支持方 Claim。</p>
                             </div>
@@ -444,18 +490,26 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                                     <strong>{{ consensusPercent }}%</strong>
                                 </div>
                                 <small>共识度（支持 Claim 占比）</small>
-                                <p v-if="!proClaims.length && allClaims.length" class="flow-debate-empty">议题当前仅含反对方论点，暂无支持方。</p>
+                                <p v-if="!proClaims.length && conClaims.length" class="flow-debate-empty">议题当前仅含反对方论点，暂无支持方。</p>
                                 <p class="flow-round-display"><strong>R{{ selectedRound }}</strong> / {{ maxDebateRound }}</p>
                             </div>
                             <div class="flow-debate-side con">
                                 <p class="flow-debate-label">🔴 质疑方</p>
                                 <article v-for="claim in conClaims" :key="claim.claimId" class="flow-debate-claim">
                                     <header><span class="flow-agent-avatar" :data-role="claim.role">{{ roleInitial(claim.role) }}</span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
-                                    {{ claim.subjectKey }}
+                                    <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                                 </article>
                                 <p v-if="!conClaims.length" class="flow-debate-empty">暂无质疑方 Claim。</p>
                             </div>
                         </div>
+
+                        <section v-if="neutralClaims.length" class="flow-neutral-claims" aria-label="中立方 Claim">
+                            <p class="flow-debate-label">⚪ 中立方</p>
+                            <article v-for="claim in neutralClaims" :key="claim.claimId" class="flow-debate-claim">
+                                <header><span class="flow-agent-avatar" :data-role="claim.role">{{ roleInitial(claim.role) }}</span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
+                                <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
+                            </article>
+                        </section>
 
                         <section class="flow-debate-dialogue" aria-label="辩论对话流">
                             <p class="flow-conflict-heading">📜 辩论对话流 · R{{ selectedRound }}</p>
@@ -474,48 +528,38 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
 
                 <!-- ── 人工决策 ── -->
                 <template v-else-if="activePhase === 'human'">
-                    <section class="flow-gate-card" aria-label="AI 裁决草案">
-                        <p class="flow-conflict-heading">⚖️ AI 裁决草案</p>
-                        <template v-if="gateDraft">
-                            <p><strong>结论:</strong> {{ gateDraft.result }} · {{ gateDraft.status }}</p>
-                            <p v-if="gateDraft.reasonSummary">{{ gateDraft.reasonSummary }}</p>
-                            <small v-if="gateDraft.decidedAt">{{ gateDraft.actor ?? 'Judge' }} · {{ gateDraft.decidedAt }}</small>
-                        </template>
-                        <p v-else class="flow-debate-empty">Judge 完成裁决后，AI Gate 草案会在此展示。</p>
+                    <section class="flow-conclusion-chain" aria-label="评审结论链">
+                        <article><span>1</span><div><small>Judge 议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
+                        <i aria-hidden="true">↓</i>
+                        <article><span>2</span><div><small>确定性 AI Gate 草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><p v-if="gateDraft?.reasonSummary">{{ gateDraft.reasonSummary }}</p></div></article>
+                        <i aria-hidden="true">↓</i>
+                        <article><span>3</span><div><small>人工最终 Gate</small><strong v-if="store.state.humanGateVersions.length">{{ gateLabel(store.state.humanGateVersions.at(-1).result) }}</strong><strong v-else>等待人工决策</strong><p v-if="store.state.humanGateVersions.at(-1)?.reason">{{ store.state.humanGateVersions.at(-1).reason }}</p></div></article>
+                        <i aria-hidden="true">↓</i>
+                        <article><span>4</span><div><small>正式报告版本</small><strong>{{ store.state.reportVersions?.length ? `已生成 ${store.state.reportVersions.length} 个版本` : '等待最终 Gate 后生成' }}</strong></div></article>
+                    </section>
+
+                    <section v-if="gateOverride" class="flow-gate-difference" role="status">
+                        <strong>人工结论与 AI Gate 草案不同</strong>
+                        <p>AI 草案：{{ gateLabel(gateOverride.aiResult) }}；人工最终结论：{{ gateLabel(gateOverride.humanResult) }}。</p>
+                        <p v-if="gateOverride.reason">人工理由：{{ gateOverride.reason }}</p>
                     </section>
 
                     <section class="flow-verdict-bar">
                         <span class="flow-verdict-badge">🧑 人工决策</span>
-                        <span class="flow-verdict-text">系统已暂停 AI 输出，等待人类做出最终版本化决策</span>
-                        <div class="flow-verdict-btns">
-                            <RouterLink class="pass" :to="{ name: 'review-workbench', params: { reviewId } }">✅ 通过</RouterLink>
-                            <RouterLink class="conditional" :to="{ name: 'review-workbench', params: { reviewId } }">⚠️ 有条件通过</RouterLink>
-                            <RouterLink class="block" :to="{ name: 'review-workbench', params: { reviewId } }">❌ 驳回</RouterLink>
-                            <RouterLink class="return" :to="{ name: 'review-workbench', params: { reviewId } }">↩️ 退回</RouterLink>
-                            <RouterLink class="override" :to="{ name: 'review-workbench', params: { reviewId } }">🔮 覆盖</RouterLink>
-                        </div>
+                        <span class="flow-verdict-text">系统已暂停 AI 输出，最终结论必须由人工在工作台明确选择并提交</span>
+                        <RouterLink class="flow-human-decision-link" :to="{ name: 'review-workbench', params: { reviewId } }">进入人工决策</RouterLink>
                     </section>
 
                     <section v-if="store.state.humanGateVersions.length" class="flow-gate-history" aria-label="Gate 版本历史">
                         <article v-for="gate in store.state.humanGateVersions" :key="gate.gateVersion">
-                            <strong>v{{ gate.gateVersion }} · {{ gate.result }}</strong><span>{{ gate.decidedAt }}</span>
+                            <strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ gate.decidedAt }}</span>
                             <p>{{ gate.reason }}</p>
                         </article>
                     </section>
                 </template>
             </main>
 
-            <aside class="flow-sidebar">
-                <div class="flow-sidebar-tabs"><button type="button" :class="{ active: sidebarTab === 'facts' }" @click="sidebarTab = 'facts'">评审事实</button><button type="button" :class="{ active: sidebarTab === 'debug' }" @click="sidebarTab = 'debug'">运行调试</button></div>
-                <ol v-if="sidebarTab === 'facts'" class="flow-fact-timeline">
-                    <li v-for="event in factTimeline" :key="event.sequence" :data-type="event.type"><span></span><div><strong>{{ eventTitle(event) }}</strong><p>{{ eventDetail(event) }}</p><small>#{{ event.sequence }} · {{ event.occurredAt }}</small></div></li>
-                    <li v-if="!factTimeline.length" class="flow-sidebar-empty">尚未收到持久化评审事实。</li>
-                </ol>
-                <ol v-else class="flow-debug-list">
-                    <li v-for="item in debugItems" :key="item.id"><strong>{{ roleTitle(item.role) }}</strong><span>{{ itemSummary(item) }}</span></li>
-                    <li v-if="!debugItems.length" class="flow-sidebar-empty">暂无可展示的实时调试事件。</li>
-                </ol>
-            </aside>
+            <ReviewConversationDrawer :open="drawerOpen" :items="runtimeItems" :facts="factTimeline" :debug-items="debugItems" @close="drawerOpen = false" />
         </div>
     </section>
 </template>

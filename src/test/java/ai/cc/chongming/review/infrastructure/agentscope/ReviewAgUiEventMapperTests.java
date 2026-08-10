@@ -8,6 +8,11 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import io.agentscope.core.agui.event.AguiEvent;
 import io.agentscope.core.event.AgentResultEvent;
+import io.agentscope.core.event.ModelCallStartEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.TextBlockEndEvent;
+import io.agentscope.core.event.TextBlockStartEvent;
+import io.agentscope.core.event.ThinkingBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.Msg;
@@ -15,18 +20,151 @@ import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.middleware.ActingInput;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
 /**
  * [AIREVIEW-PLAN-019#3.2] Contract coverage for browser-visible native Scout tool observations.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 class ReviewAgUiEventMapperTests {
+
+    @Test
+    void mapsTextBlockLifecycleToOneStableAgUiMessage() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+        ReviewRuntimeContext context = context();
+
+        List<AguiEvent> started = mapper.map(
+                new TextBlockStartEvent("reply-1", "text"), context, RoleType.PRODUCT, "PRODUCT");
+        List<AguiEvent> content = mapper.map(
+                new TextBlockDeltaEvent("reply-1", "text", "公开结论"), context, RoleType.PRODUCT, "PRODUCT");
+        List<AguiEvent> ended = mapper.map(
+                new TextBlockEndEvent("reply-1", "text"), context, RoleType.PRODUCT, "PRODUCT");
+
+        AguiEvent.TextMessageStart start = (AguiEvent.TextMessageStart) started.getFirst();
+        AguiEvent.TextMessageContent delta = (AguiEvent.TextMessageContent) content.getFirst();
+        AguiEvent.TextMessageEnd end = (AguiEvent.TextMessageEnd) ended.getFirst();
+        assertThat(start.messageId()).isEqualTo(delta.messageId()).isEqualTo(end.messageId());
+        assertThat(start.messageId()).endsWith(":message:reply-1:text");
+        assertThat(delta.delta()).isEqualTo("公开结论");
+    }
+
+    @Test
+    void doesNotDuplicateFinalResultAfterStreamingText() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+        ReviewRuntimeContext context = context();
+        mapper.map(new TextBlockStartEvent("reply-1", "text"), context, RoleType.PRODUCT, "PRODUCT");
+        mapper.map(new TextBlockDeltaEvent("reply-1", "text", "公开结论"), context, RoleType.PRODUCT, "PRODUCT");
+        mapper.map(new TextBlockEndEvent("reply-1", "text"), context, RoleType.PRODUCT, "PRODUCT");
+
+        List<AguiEvent> events = mapper.map(
+                new AgentResultEvent(io.agentscope.core.message.AssistantMessage.builder()
+                        .id("result-1")
+                        .name("agent")
+                        .content(io.agentscope.core.message.TextBlock.builder().text("公开结论").build())
+                        .build()),
+                context,
+                RoleType.PRODUCT,
+                "PRODUCT");
+
+        assertThat(events).singleElement().isInstanceOf(AguiEvent.RunFinished.class);
+    }
+
+    @Test
+    void blocksThinkingDeltasInsteadOfPublishingReasoningOrCustomEvents() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+
+        List<AguiEvent> events = mapper.map(
+                new ThinkingBlockDeltaEvent("reply-1", "thinking", "内部推理"),
+                context(),
+                RoleType.PRODUCT,
+                "PRODUCT");
+
+        assertThat(events).isEmpty();
+    }
+
+    @Test
+    void dropsNonPublicRuntimeEventsInsteadOfTurningThemIntoCustomNoise() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+
+        List<AguiEvent> events = mapper.map(
+                new ModelCallStartEvent("reply-1"), context(), RoleType.PRODUCT, "PRODUCT");
+
+        assertThat(events).isEmpty();
+    }
+
+    @Test
+    void failedLifecycleClosesOpenStreamingMessageBeforePublishingRunError() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+        ReviewRuntimeContext context = context();
+        mapper.map(new TextBlockStartEvent("reply-1", "text"), context, RoleType.PRODUCT, "PRODUCT");
+        mapper.map(new TextBlockDeltaEvent("reply-1", "text", "部分输出"), context, RoleType.PRODUCT, "PRODUCT");
+
+        List<AguiEvent> terminal = mapper.lifecycle(context, RoleType.PRODUCT, "PRODUCT", "FAILED");
+        List<AguiEvent> afterFailure = mapper.map(
+                new TextBlockEndEvent("reply-1", "text"), context, RoleType.PRODUCT, "PRODUCT");
+
+        assertThat(terminal)
+                .hasSize(3)
+                .element(0).isInstanceOf(AguiEvent.TextMessageEnd.class);
+        assertThat(terminal.get(1)).isInstanceOf(AguiEvent.Custom.class);
+        AguiEvent.RunError runError = (AguiEvent.RunError) terminal.get(2);
+        assertThat(runError.code()).isEqualTo("FAILED");
+        assertThat(runError.message()).contains("PRODUCT", "FAILED");
+        assertThat(afterFailure).isEmpty();
+    }
+
+    @Test
+    void cancelledLifecycleAlsoClosesItsRunWithAnError() {
+        for (String lifecycle : List.of("CANCELLED")) {
+            ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+            ReviewRuntimeContext context = context();
+            mapper.map(new TextBlockStartEvent("reply-1", "text"), context, RoleType.DIRECTOR, "DIRECTOR");
+
+            List<AguiEvent> terminal = mapper.lifecycle(
+                    context, RoleType.DIRECTOR, "DIRECTOR", lifecycle);
+
+            assertThat(terminal.getFirst()).isInstanceOf(AguiEvent.TextMessageEnd.class);
+            assertThat(terminal.getLast()).isInstanceOf(AguiEvent.RunError.class);
+            assertThat(((AguiEvent.RunError) terminal.getLast()).code()).isEqualTo(lifecycle);
+        }
+    }
+
+    @Test
+    void closedLifecycleEndsOpenTextWithoutReportingAnError() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+        ReviewRuntimeContext context = context();
+        mapper.map(new TextBlockStartEvent("reply-1", "text"), context, RoleType.DIRECTOR, "DIRECTOR");
+
+        List<AguiEvent> terminal = mapper.lifecycle(context, RoleType.DIRECTOR, "DIRECTOR", "CLOSED");
+
+        assertThat(terminal.getFirst()).isInstanceOf(AguiEvent.TextMessageEnd.class);
+        assertThat(terminal.getLast()).isInstanceOf(AguiEvent.Custom.class);
+        assertThat(terminal).noneMatch(AguiEvent.RunError.class::isInstance);
+        assertThat(terminal).noneMatch(AguiEvent.RunFinished.class::isInstance);
+    }
+
+    @Test
+    void degradedLifecycleEndsOpenTextButRemainsAdvisory() {
+        ReviewAgUiEventMapper mapper = new ReviewAgUiEventMapper(new RuntimeTraceRedactor());
+        ReviewRuntimeContext context = context();
+        mapper.map(new TextBlockStartEvent("reply-1", "text"), context, RoleType.DIRECTOR, "CONTEXT_SCOUT");
+
+        List<AguiEvent> terminal = mapper.lifecycle(
+                context, RoleType.DIRECTOR, "CONTEXT_SCOUT", "DEGRADED");
+
+        assertThat(terminal.getFirst()).isInstanceOf(AguiEvent.TextMessageEnd.class);
+        assertThat(terminal.getLast()).isInstanceOf(AguiEvent.Custom.class);
+        assertThat(terminal).noneMatch(AguiEvent.RunError.class::isInstance);
+    }
 
     @Test
     void mapsAnAgentResultWithoutAMessageAsRunCompletion() {

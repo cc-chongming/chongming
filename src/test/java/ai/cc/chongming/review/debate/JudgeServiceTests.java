@@ -1,7 +1,10 @@
 package ai.cc.chongming.review.debate;
 
 import ai.cc.chongming.review.application.JudgeService;
+import ai.cc.chongming.review.domain.event.ReviewEventDraft;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
+import ai.cc.chongming.review.domain.gate.GatePolicy;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
@@ -9,6 +12,7 @@ import ai.cc.chongming.review.domain.protocol.DebateStateMachine;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -18,9 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Verifies Judge conclusions only select immutable Claims belonging to a terminal topic.
+ * [AIREVIEW-PLAN-023#6] Verifies Judge conclusions and replayable AI Gate draft summaries.
  *
- * @author wangli
+ * @author zyj
  */
 class JudgeServiceTests {
 
@@ -63,14 +67,21 @@ class JudgeServiceTests {
         store.saveClaim(backendClaim);
         DebateTopic topic = terminalTopic(review.id(), productClaim, backendClaim);
         store.saveTopic(topic);
-        JudgeService service = new JudgeService(store);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        JudgeService service = new JudgeService(store, new GatePolicy(), events::add);
         service.submitJudgement(review, new JudgeService.JudgeSubmission(
                 metadata(review, "judge-human-required"), topic.id(), GateResult.CONDITIONAL,
                 "Unverified high-severity evidence needs an operator.", List.of(productClaim.claimId()),
                 List.of(backendClaim.claimId())));
 
-        assertThat(service.draftGate(review).result()).isEqualTo(GateResult.HUMAN_REQUIRED);
+        var draft = service.draftGate(review);
+
+        assertThat(draft.result()).isEqualTo(GateResult.HUMAN_REQUIRED);
         assertThat(review.stage()).isEqualTo(ReviewStage.WAITING_HUMAN);
+        assertThat(events).filteredOn(event -> event.type() == ReviewEventType.GATE_DRAFTED)
+                .singleElement()
+                .satisfies(event -> assertThat(event.payload())
+                        .containsEntry("reasonSummary", draft.publicReasonSummary()));
     }
 
     @Test

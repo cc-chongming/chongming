@@ -1,5 +1,185 @@
 # Errors
 
+## [ERR-20260810-004] npm dependency probe returned non-zero
+
+**Logged**: 2026-08-10T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+`npm ls marked --depth=0` returned exit code 1 because the optional Markdown renderer is not installed.
+
+### Error
+```
+chongming-review-workbench@0.1.0 E:\aicode\chongming\frontend
+`-- (empty)
+```
+
+### Context
+- The command was a dependency capability probe before implementing safe Markdown rendering for PLAN-023.
+- The empty tree is an expected negative result, not an npm installation failure.
+
+### Suggested Fix
+When probing optional dependencies, interpret npm's exit code 1 together with the dependency tree instead of treating it as a build failure.
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/package.json
+
+### Resolution
+- **Resolved**: 2026-08-10T00:00:00+08:00
+- **Commit/PR**: n/a
+- **Notes**: Confirmed that `marked` is absent; implementation must add a reviewed dependency or provide an internal safe renderer.
+
+---
+
+## [ERR-20260810-005] playwright-chromium-executable-missing
+
+**Logged**: 2026-08-10T16:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: tests
+
+### Summary
+PLAN-023 前端聚焦 E2E 未能启动，因为本机 Playwright 对应版本的 Chromium Headless Shell 尚未安装。
+
+### Error
+```
+browserType.launch: Executable doesn't exist at C:\Users\cxwhdev\AppData\Local\ms-playwright\chromium_headless_shell-1228\chrome-headless-shell-win64\chrome-headless-shell.exe
+```
+
+### Context
+- 在 `frontend` 目录运行 PLAN-023 #2/#3 的四个聚焦 Playwright 用例。
+- Vite webServer 正常准备，失败发生在浏览器进程启动之前。
+- 未经用户授权不自动执行 `npx playwright install` 下载外部二进制。
+
+### Suggested Fix
+在允许下载浏览器依赖的环境执行 `npx playwright install chromium`，随后重跑聚焦 E2E 与完整 E2E。
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/tests/review-workbench.e2e.js, frontend/playwright.config.js
+
+---
+
+## [ERR-20260810-003] IDEA MCP large Markdown payload orchestration
+
+**Logged**: 2026-08-10T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: docs
+
+### Summary
+
+通过 JavaScript 编排 IDEA MCP 创建大型 Markdown 计划时，模板字符串中的 Markdown 反引号触发语法错误，随后使用不可用的 `TextEncoder` 编码又失败。
+
+### Error
+
+```
+SyntaxError: Unexpected identifier 'subjectKey'
+ReferenceError: TextEncoder is not defined
+```
+
+### Context
+
+- 目标是通过 IDEA MCP `create_new_file` 创建 PLAN-023。
+- 两次失败均发生在调用 IDEA MCP 前，没有生成半成品计划文件。
+
+### Suggested Fix
+
+避免在 JavaScript 模板字符串内嵌未转义的 Markdown 反引号；直接使用 PowerShell 单引号 here-string 承载正文，再由 HttpClient 发送 JSON-RPC。
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: docs/AIREVIEW-PLAN-023-评审入口与公开对话体验收口.md
+
+### Resolution
+
+- **Resolved**: 2026-08-10T00:00:00+08:00
+- **Notes**: 使用 here-string 后，IDEA MCP 创建、替换、格式化和检查均成功。
+
+---
+
+## [ERR-20260810-002] PowerShell Invoke-WebRequest failed on IDEA MCP stream
+
+**Logged**: 2026-08-10T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: config
+
+### Summary
+
+PowerShell `Invoke-WebRequest` 调用 IDEA MCP stream 端点时在响应处理阶段触发空引用，未能取得 MCP session header。
+
+### Error
+
+```
+Invoke-WebRequest : Object reference not set to an instance of an object.
+```
+
+### Context
+
+- 目标为 `http://127.0.0.1:64342/stream`。
+- 请求是标准 MCP initialize JSON-RPC。
+- 未修改项目业务文件。
+
+### Suggested Fix
+
+Windows 下对 IDEA MCP streamable-http 端点使用 `curl.exe -D` 获取响应头，再携带 `Mcp-Session-Id` 调用工具。
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: E:/plus/ECC/.agents/skills/idea-mcp-http/SKILL.md
+
+### Resolution
+
+- **Resolved**: 2026-08-10T00:00:00+08:00
+- **Notes**: 切换为 curl.exe 传输。
+
+---
+
+## [ERR-20260810-001] broad ripgrep output exceeded tool budget
+
+**Logged**: 2026-08-10T00:00:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+一次跨前后端目录的宽范围 `rg` 检索输出超过工具预算，命令结果被截断并以非零状态返回。
+
+### Error
+
+```
+Warning: truncated output
+Exit code: 1
+```
+
+### Context
+
+- 同时检索仓库、草稿、Context Scout、Claim 和 runtime conversation 相关实现。
+- 没有修改业务文件。
+
+### Suggested Fix
+
+按功能或文件分组执行定向检索，并限制每次返回的匹配范围。
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: frontend/src/views/ReviewLiveView.vue
+
+### Resolution
+
+- **Resolved**: 2026-08-10T00:00:00+08:00
+- **Notes**: 改为按组件和接口分批读取。
+
+---
+
 ## [ERR-20260720-001] Maven test dependency resolution blocked by sandbox network policy
 
 **Logged**: 2026-07-20T00:00:00+08:00
@@ -355,5 +535,167 @@ After formatting, re-read exact table rows or patch stable prose anchors separat
 - **Resolved**: 2026-07-14T19:40:00+08:00
 - **Commit/PR**: n/a
 - **Notes**: Read the formatted rows and reapplied scoped patches. The same whitespace-sensitive mismatch recurred once on PLAN-002 and was fixed with an exact formatted-row anchor.
+
+---
+## [ERR-20260810-004] idea-mcp-run-tests-unavailable
+
+**Logged**: 2026-08-10T00:00:00+08:00
+**Priority**: medium
+**Status**: pending
+**Area**: tests
+
+### Summary
+IDEA MCP HTTP 会话可用，但服务端未暴露文档中列出的 `run_tests` 工具。
+
+### Error
+```
+Tool run_tests not found
+```
+
+### Context
+- 通过 `http://127.0.0.1:64342/stream` 初始化成功后调用 `tools/call`。
+- 目标为 PLAN-023 后端聚焦测试。
+- IDEA MCP 的文件搜索和读取工具仍可用。
+
+### Suggested Fix
+先通过 `tools/list` 探测当前 IDEA MCP 实际工具集；若没有 `run_tests`，使用其 `execute_terminal_command` 或 `build_project` 完成测试与构建验证。
+
+### Metadata
+- Reproducible: yes
+- Related Files: docs/AIREVIEW-PLAN-023-评审入口与公开对话体验收口.md
+- See Also: ERR-20260810-002
+
+### Resolution
+- **Resolved**: 2026-08-10T16:06:11+08:00
+- **Commit/PR**: n/a
+- **Notes**: 使用当前服务实际暴露的 `execute_terminal_command`，直接调用 Surefire 聚焦测试目标完成验证。
+
+---
+
+## [ERR-20260810-005] maven-jdk-trust-and-version-mismatch
+
+**Logged**: 2026-08-10T16:04:45+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: tests
+
+### Summary
+默认 Java 17 的 Maven TLS 信任链失败；IDEA JBR 可下载依赖但版本 25 不满足项目 Java 21 Enforcer。
+
+### Error
+```
+PKIX path building failed
+Detected JDK version 25.0.3 is not in the allowed range [21,22)
+```
+
+### Context
+- Maven 首次需要下载 `spring-boot-starter-mail:4.0.7`。
+- 默认 Java 17 无法建立 Maven Central TLS 信任链。
+- IDEA JBR 25 成功补齐依赖，但项目只允许 Java 21。
+
+### Suggested Fix
+先用具有有效信任库的 JBR 补齐缺失依赖，再将 `JAVA_HOME` 指向 IDEA 项目 SDK `D:\Tool\Java21` 执行 Maven 测试。
+
+### Metadata
+- Reproducible: yes
+- Related Files: pom.xml
+- See Also: ERR-20260810-004
+
+### Resolution
+- **Resolved**: 2026-08-10T16:06:11+08:00
+- **Commit/PR**: n/a
+- **Notes**: 使用 Azul Java 21 运行 Surefire，13 个 PLAN-023 #2/#3 聚焦测试全部通过。
+
+---
+## [ERR-20260810-006] PowerShell regex quoting broke a read-only rg command
+
+**Logged**: 2026-08-10T16:07:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+PowerShell parsed a double-quoted ripgrep regex containing escaped quotes as an array expression instead of passing it to rg.
+
+### Error
+```text
+Array index expression is missing or not valid.
+The string is missing the terminator: ".
+```
+
+### Context
+- Attempted to pipe a complex `rg -o` class-attribute regex into `Select-String`.
+- No file was changed and the check was non-destructive.
+
+### Suggested Fix
+Use a single-quoted PowerShell argument or simpler direct `rg -n` patterns instead of embedding backslash-escaped quotes in a double-quoted command string.
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/src/views/ReviewLiveView.vue
+
+### Resolution
+- **Resolved**: 2026-08-10T16:07:00+08:00
+- **Notes**: Replaced the command with direct targeted searches.
+
+---
+## [ERR-20260810-007] rg did not expand Windows path wildcards
+
+**Logged**: 2026-08-10T16:11:00+08:00
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+Passing `frontend/src/components/*.vue` directly to rg on Windows produced an invalid path error because the wildcard was not expanded.
+
+### Error
+```text
+文件名、目录名或卷标语法不正确。 (os error 123)
+```
+
+### Context
+- The preceding `git status` and explicit-file searches completed and returned the required evidence.
+- The failure only affected an optional annotation inventory search.
+
+### Suggested Fix
+Search the directory and use `--glob '*.vue'`, or enumerate explicit paths instead of embedding a wildcard in the path argument.
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/src/components
+- See Also: ERR-20260810-006
+
+### Resolution
+- **Resolved**: 2026-08-10T16:11:00+08:00
+- **Notes**: Used already collected explicit-file status and build evidence for handoff.
+
+---
+
+## [ERR-20260810-008] Playwright could not spawn installed Chrome
+
+**Logged**: 2026-08-10T16:33:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: tests
+
+### Summary
+Playwright discovered all E2E cases but the environment denied launching the installed Chrome executable with `spawn EACCES`.
+
+### Context
+- `PLAYWRIGHT_CHANNEL=chrome npx playwright test` discovered 11 tests.
+- Every case failed before page navigation at `browserType.launch`.
+- The same local Vite page was reachable through the Codex in-app browser.
+
+### Suggested Fix
+Keep Playwright channel selection configurable for developer machines, and use the in-app browser for non-mutating visual verification when local process policy blocks browser launch.
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/playwright.config.js, frontend/tests/review-workbench.e2e.js
+
+### Resolution
+- **Resolved**: 2026-08-10T16:35:00+08:00
+- **Notes**: Verified the light `/live` layout, conclusion chain, hidden reasoning, and default-collapsed tool details in the in-app browser.
 
 ---

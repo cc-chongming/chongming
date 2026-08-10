@@ -7,11 +7,14 @@ import java.util.Map;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * Non-sensitive logical model profile definitions bound beneath {@code review.model-gateway.profiles}.
  *
- * @author wangli
+ * [AIREVIEW-PLAN-023#8]
+ *
+ * @author zyj
  */
 @ConfigurationProperties(prefix = "review.model-gateway")
 public record ModelProfilesProperties(@Valid Map<String, ProfileDefinition> profiles) {
@@ -23,7 +26,7 @@ public record ModelProfilesProperties(@Valid Map<String, ProfileDefinition> prof
     /**
      * One logical model profile that can be referenced by a RolePack.
      *
-     * @author wangli
+     * @author zyj
      */
     public record ProfileDefinition(
             @NotBlank String provider,
@@ -32,13 +35,30 @@ public record ModelProfilesProperties(@Valid Map<String, ProfileDefinition> prof
             Duration timeout,
             int maxTokens,
             @Valid RetryDefinition retry,
-            String fallbackProfile) {
+            String fallbackProfile,
+            Boolean streamEnabled) {
+
+        @ConstructorBinding
+        public ProfileDefinition {
+            streamEnabled = streamEnabled == null ? Boolean.TRUE : streamEnabled;
+        }
+
+        public ProfileDefinition(
+                String provider,
+                String modelName,
+                double temperature,
+                Duration timeout,
+                int maxTokens,
+                RetryDefinition retry,
+                String fallbackProfile) {
+            this(provider, modelName, temperature, timeout, maxTokens, retry, fallbackProfile, Boolean.TRUE);
+        }
     }
 
     /**
      * Transient-failure retry settings. The domain layer enforces the maximum of two retries.
      *
-     * @author wangli
+     * @author zyj
      */
     public record RetryDefinition(int maxRetries, Duration initialBackoff) {
     }

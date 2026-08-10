@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
 
+// [AIREVIEW-PLAN-023#2] Repository fixtures expose identifiers and display names only.
+// [AIREVIEW-PLAN-023#3] Draft launch is exercised through the single idempotent command endpoint.
+
 const reviewId = '11111111-1111-1111-1111-111111111111';
 const topicId = '20000000-0000-0000-0000-000000000001';
 const claimId = '30000000-0000-0000-0000-000000000001';
@@ -70,7 +73,7 @@ test('renders the live review page as the full-flow workspace with phase-specifi
         if (path === `/api/reviews/${reviewId}`) {
             return json({
                 reviewId, attempt: 1, stage: 'INITIAL_REVIEW', progress: 40, lastSequence: 2, reviewVersion: 4,
-                occurredAt: '2026-08-04 15:25:57', gate: null,
+                occurredAt: '2026-08-04 15:25:57', gate: { result: 'PASS', status: 'DRAFT', reasonSummary: 'AI 判断可以通过。' },
                 activatedRoles: [{ role: 'PRODUCT', agentLabel: 'product-reviewer', initialReviewCompleted: false }]
             });
         }
@@ -81,7 +84,8 @@ test('renders the live review page as the full-flow workspace with phase-specifi
                 currentRound: 1, resolution: null, closedAt: null,
                 claims: [
                     { claimId, role: 'PRODUCT', subjectKey: '增量同步是核心诉求', severity: 'P1', position: 'SUPPORT', statement: '增量同步必须上线。', reasonSummary: '全量方案已到瓶颈。', status: 'SUBMITTED', evidenceIds: [] },
-                    { claimId: '30000000-0000-0000-0000-000000000002', role: 'BACKEND', subjectKey: '冲突策略未定义', severity: 'P0', position: 'OPPOSE', statement: '并发写入一致性无法保证。', reasonSummary: '缺少版本号字段。', status: 'SUBMITTED', evidenceIds: [] }
+                    { claimId: '30000000-0000-0000-0000-000000000002', role: 'BACKEND', subjectKey: '冲突策略未定义', severity: 'P0', position: 'OPPOSE', statement: '并发写入一致性无法保证。', reasonSummary: '缺少版本号字段。', status: 'SUBMITTED', evidenceIds: [] },
+                    { claimId: '30000000-0000-0000-0000-000000000003', role: 'SECURITY', subjectKey: '认证边界待确认', severity: 'P2', position: 'NEUTRAL', statement: '认证改动范围尚待确认。', reasonSummary: '当前证据不足。', status: 'SUBMITTED', evidenceIds: [] }
                 ],
                 turns: [{ turnId: '40000000-0000-0000-0000-000000000001', round: 1, actorRole: 'BACKEND', targetRole: 'PRODUCT', type: 'CHALLENGE', targetClaimId: claimId, targetTurnId: null, content: '业务上能接受数据丢失吗？', evidenceIds: [], stanceBefore: 'OPPOSE', stanceAfter: null }],
                 judgement: null
@@ -93,7 +97,8 @@ test('renders the live review page as the full-flow workspace with phase-specifi
                 { claimId: '30000000-0000-0000-0000-000000000002', role: 'BACKEND', subjectKey: '冲突策略未定义', severity: 'P0', position: 'OPPOSE', statement: '并发写入一致性无法保证。', reasonSummary: '缺少版本号字段。', status: 'SUBMITTED', evidenceIds: [] }
             ]);
         }
-        if (path.endsWith('/human-review-items') || path.endsWith('/human-gate-decisions')
+        if (path.endsWith('/human-gate-decisions')) return json([{ gateVersion: 1, result: 'RETURN', reason: '范围需要补齐', decidedAt: '2026-08-04 15:30:00' }]);
+        if (path.endsWith('/human-review-items')
             || path.endsWith('/notifications') || path.endsWith('/report/versions')) return json([]);
         if (path.endsWith('/report')) return json({ title: '报告' }, 404);
         return json({});
@@ -105,11 +110,12 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await expect(page.getByRole('navigation', { name: '评审流程' })).toBeVisible();
     await expect(page.getByRole('button', { name: '运行调试' })).toBeVisible();
 
-    // 默认停留在当前阶段：独立审查，展示 4 角色卡片；已持久化的 Claim 始终保留在卡片上
+    // 默认停留在当前阶段：只展示实际激活或有正式 Claim 的动态角色。
     await expect(page.getByRole('heading', { name: /独立审查/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /产品经理/ })).toBeVisible();
-    await expect(page.getByText('提交 1 个 Claim · P1: 增量同步是核心诉求')).toBeVisible();
-    await expect(page.getByText('等待 Director 分配评审任务。').first()).toBeVisible();
+    await expect(page.getByText('发现 1 项：0 项阻断、1 项高风险、0 项改进建议')).toBeVisible();
+    await expect(page.getByText('角色已激活，等待公开运行事件。')).toBeVisible();
+    await expect(page.getByRole('button', { name: /项目经理/ })).toHaveCount(0);
     // 展开角色卡后可看到论点与可折叠的运行详情
     await page.getByRole('button', { name: /后端工程师/ }).click();
     await expect(page.getByText('并发写入一致性无法保证。')).toBeVisible();
@@ -124,24 +130,31 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await expect(page.getByRole('heading', { name: /多轮辩论 — 数据冲突解决策略/ })).toBeVisible();
     await expect(page.getByText('🟢 支持方')).toBeVisible();
     await expect(page.getByText('🔴 质疑方')).toBeVisible();
+    await expect(page.getByText('⚪ 中立方')).toBeVisible();
+    await expect(page.getByText('认证改动范围尚待确认。')).toBeVisible();
     await expect(page.getByText('业务上能接受数据丢失吗？')).toBeVisible();
     await expect(page.getByText('共识度（支持 Claim 占比）')).toBeVisible();
 
     // 切换到人工决策：展示 Gate 草案区与决策按钮条
     await page.getByRole('button', { name: /人工决策/ }).click();
-    await expect(page.getByText('系统已暂停 AI 输出，等待人类做出最终版本化决策')).toBeVisible();
-    await expect(page.getByRole('link', { name: '✅ 通过' })).toBeVisible();
+    await expect(page.getByText('系统已暂停 AI 输出，最终结论必须由人工在工作台明确选择并提交')).toBeVisible();
+    await expect(page.getByText('人工结论与 AI Gate 草案不同')).toBeVisible();
+    await expect(page.getByText('范围需要补齐')).toBeVisible();
+    await expect(page.getByRole('link', { name: '进入人工决策' })).toBeVisible();
 });
 
 test('removes the temporary draft when the uploaded Markdown already has a review', async ({ page }) => {
     const requirementId = '70000000-0000-0000-0000-000000000001';
     const reusedReviewId = '80000000-0000-0000-0000-000000000001';
     const deletedDrafts = [];
-    await page.route(/\/api\/(?:requirements|reviews)(?:\/|\?|$)/, async (route) => {
+    await page.route(/\/api\/(?:repositories|requirements|reviews)(?:\/|\?|$)/, async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();
         const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path === '/api/repositories' && method === 'GET') {
+            return json([{ id: 'cx-ai', displayName: 'CX AI' }]);
+        }
         if (path === '/api/requirements' && method === 'POST') {
             return json({ id: requirementId, version: 0, status: 'DRAFT' }, 201);
         }
@@ -157,12 +170,12 @@ test('removes the temporary draft when the uploaded Markdown already has a revie
 
     await page.goto('/index.html#/requirements/create');
     await page.getByLabel('需求标题').fill('重复快照测试');
-    await page.getByLabel('仓库标识').fill('cx-ai');
-    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+    await expect(page.getByLabel('目标仓库')).toHaveValue('cx-ai');
+    await page.locator('input[type="file"][accept*=".md"]').setInputFiles({
         name: 'repeat.md', mimeType: 'text/markdown', buffer: Buffer.from('# 已有评审的需求')
     });
 
-    await page.getByRole('button', { name: '创建需求并启动评审' }).click();
+    await page.getByRole('button', { name: /提交并启动评审/ }).click();
 
     await expect(page.getByText('该 Markdown 快照已有评审，本次未保留重复需求草稿。可直接进入既有评审查看或重试。')).toBeVisible();
     await expect(page.getByRole('link', { name: '查看既有评审' })).toBeVisible();
@@ -178,11 +191,14 @@ test('edits and deletes an unbound requirement draft from its detail page', asyn
     };
     let revisedPayload = null;
     let deletedVersion = null;
-    await page.route(/\/api\/requirements(?:\/|\?|$)/, async (route) => {
+    await page.route(/\/api\/(?:repositories|requirements)(?:\/|\?|$)/, async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();
         const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path === '/api/repositories' && method === 'GET') {
+            return json([{ id: 'cx-ai', displayName: 'CX AI' }]);
+        }
         if (path === `/api/requirements/${requirementId}` && method === 'GET') return json(draft);
         if (path === `/api/requirements/${requirementId}` && method === 'PUT') {
             revisedPayload = route.request().postDataJSON();
@@ -208,6 +224,147 @@ test('edits and deletes an unbound requirement draft from its detail page', asyn
 
     await expect(page).toHaveURL(/#\/requirements$/);
     expect(deletedVersion).toBe('1');
+});
+
+test('launches an unbound draft from its detail page with a configured repository', async ({ page }) => {
+    const requirementId = '91000000-0000-0000-0000-000000000001';
+    const launchedReviewId = '92000000-0000-0000-0000-000000000001';
+    const draft = {
+        id: requirementId, title: '待发起评审的草稿', description: '草稿描述', status: 'DRAFT', creatorId: 'demo-reviewer',
+        assigneeId: null, repositoryPath: 'legacy-repository', priority: 'P1', reviewId: null, version: 3,
+        createdAt: '2026-08-10T00:00:00Z', updatedAt: '2026-08-10T00:00:00Z'
+    };
+    const launchRequests = [];
+    await page.route('**/api/**', async (route) => {
+        const requestUrl = new URL(route.request().url());
+        const path = requestUrl.pathname;
+        const method = route.request().method();
+        const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path === '/api/repositories') {
+            return json([{ id: 'cx-ai', displayName: 'CX AI' }, { id: 'chongming', displayName: '重明' }]);
+        }
+        if (path === `/api/requirements/${requirementId}` && method === 'GET') return json(draft);
+        if (path === `/api/requirements/${requirementId}/reviews` && method === 'POST') {
+            launchRequests.push({
+                headers: route.request().headers(),
+                body: route.request().postData() ?? ''
+            });
+            if (launchRequests.length === 1) {
+                return json({
+                    detail: 'review was bound but could not be started; retry the same launch command',
+                    code: 'REVIEW_START_FAILED', phase: 'BOUND', recoverable: true, existingReviewId: launchedReviewId
+                }, 409);
+            }
+            return json({
+                requirementId,
+                reviewId: launchedReviewId,
+                stage: 'PLANNING',
+                phase: 'STARTED',
+                recoverable: false,
+                liveUrl: `/reviews/${launchedReviewId}/live`
+            }, 202);
+        }
+        if (path.endsWith('/events') || path.endsWith('/runtime/ag-ui')) {
+            return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+        }
+        if (path === `/api/reviews/${launchedReviewId}`) {
+            return json({ reviewId: launchedReviewId, attempt: 1, stage: 'PLANNING', progress: 10, reviewVersion: 1 });
+        }
+        if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
+        if (path.endsWith('/debates') || path.endsWith('/claims') || path.endsWith('/human-review-items')
+            || path.endsWith('/human-gate-decisions') || path.endsWith('/notifications') || path.endsWith('/report/versions')) return json([]);
+        if (path.endsWith('/report')) return json({ detail: 'Not found' }, 404);
+        return json({});
+    });
+
+    await page.goto(`/index.html#/requirements/${requirementId}`);
+    await page.getByRole('button', { name: '发起评审' }).click();
+
+    await expect(page.getByText('历史仓库“legacy-repository”已不可用，请重新选择。')).toBeVisible();
+    await page.getByLabel('目标仓库').selectOption('cx-ai');
+    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+        name: 'draft.md', mimeType: 'text/markdown', buffer: Buffer.from('# 草稿评审')
+    });
+    await page.getByRole('button', { name: '确认发起评审' }).click();
+
+    await expect(page.getByText(/已绑定评审，可使用同一命令安全重试/)).toBeVisible();
+    await expect(page.getByRole('link', { name: '查看已绑定评审' })).toHaveAttribute('href', `#/reviews/${launchedReviewId}/live`);
+    await page.getByRole('button', { name: '确认发起评审' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`#\/reviews\/${launchedReviewId}\/live$`));
+    expect(launchRequests).toHaveLength(2);
+    expect(launchRequests[0].headers['idempotency-key']).toBeTruthy();
+    expect(launchRequests[1].headers['idempotency-key']).toBe(launchRequests[0].headers['idempotency-key']);
+    expect(launchRequests[0].body).toContain('name="repositoryPath"');
+    expect(launchRequests[0].body).toContain('cx-ai');
+    expect(launchRequests[0].body).toContain('name="expectedVersion"');
+    expect(launchRequests[0].body).toContain('3');
+    expect(launchRequests[0].body).toContain('name="publicTasks"');
+});
+
+test('refreshes a draft and rotates the command key after a version conflict', async ({ page }) => {
+    const requirementId = '93000000-0000-0000-0000-000000000001';
+    let reads = 0;
+    const launches = [];
+    await page.route('**/api/**', async (route) => {
+        const requestUrl = new URL(route.request().url());
+        const path = requestUrl.pathname;
+        const method = route.request().method();
+        const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path === '/api/repositories') return json([{ id: 'cx-ai', displayName: 'CX AI' }]);
+        if (path === `/api/requirements/${requirementId}` && method === 'GET') {
+            reads += 1;
+            return json({
+                id: requirementId, title: '并发更新草稿', description: '', status: 'DRAFT', repositoryPath: 'cx-ai',
+                priority: 'P1', reviewId: null, version: reads === 1 ? 3 : 4
+            });
+        }
+        if (path === `/api/requirements/${requirementId}/reviews` && method === 'POST') {
+            launches.push({ headers: route.request().headers(), body: route.request().postData() ?? '' });
+            return json({ detail: 'expectedVersion does not match aggregate version', code: 'VERSION_CONFLICT' }, 409);
+        }
+        return json([]);
+    });
+
+    await page.goto(`/index.html#/requirements/${requirementId}`);
+    await page.getByRole('button', { name: '发起评审' }).click();
+    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+        name: 'version.md', mimeType: 'text/markdown', buffer: Buffer.from('# 版本冲突')
+    });
+    await page.getByRole('button', { name: '确认发起评审' }).click();
+
+    await expect(page.getByText('需求版本已刷新，请检查最新草稿并确认后重试。')).toBeVisible();
+    expect(reads).toBeGreaterThanOrEqual(2);
+    await page.getByRole('button', { name: '确认发起评审' }).click();
+    await expect.poll(() => launches.length).toBe(2);
+    expect(launches[1].headers['idempotency-key']).not.toBe(launches[0].headers['idempotency-key']);
+    expect(launches[1].body).toContain('name="expectedVersion"');
+    expect(launches[1].body).toContain('4');
+});
+
+test('uses configured repository options on the independent review form', async ({ page }) => {
+    await page.route('**/api/repositories', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ id: 'cx-ai', displayName: 'CX AI' }])
+    }));
+
+    await page.goto('/index.html#/create');
+
+    await expect(page.getByLabel('目标仓库')).toHaveValue('cx-ai');
+    await expect(page.getByText('CX AI（cx-ai）')).toBeAttached();
+});
+
+test('disables requirement creation when the server has no configured repositories', async ({ page }) => {
+    await page.route('**/api/repositories', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: '[]'
+    }));
+
+    await page.goto('/index.html#/requirements/create');
+
+    await expect(page.getByRole('button', { name: '保存草稿' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /提交并启动评审/ })).toBeDisabled();
+    await expect(page.getByText('当前没有可用仓库，暂不能保存或提交需求。')).toBeVisible();
 });
 
 test('deletes a requirement directly from the requirement list regardless of its lifecycle status', async ({ page }) => {

@@ -14,7 +14,9 @@ import org.springframework.stereotype.Component;
 /**
  * Resolves immutable logical profiles without exposing provider identifiers to RolePacks.
  *
- * @author wangli
+ * [AIREVIEW-PLAN-023#8]
+ *
+ * @author zyj
  */
 @Component
 public class ModelProfileRegistry {
@@ -76,7 +78,8 @@ public class ModelProfileRegistry {
                 new RetryPolicy(
                         retry == null ? 0 : retry.maxRetries(),
                         retry == null || retry.initialBackoff() == null ? DEFAULT_BACKOFF : retry.initialBackoff()),
-                definition.fallbackProfile());
+                definition.fallbackProfile(),
+                definition.streamEnabled() == null || definition.streamEnabled());
     }
 
     private static void validateFallbackProfile(

@@ -7,7 +7,6 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.TextBlock;
-import io.agentscope.core.message.ThinkingBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatResponse;
@@ -16,6 +15,7 @@ import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.util.JsonUtils;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -29,14 +29,17 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
 /**
  * Adapts AgentScope model calls to the review application's credential-safe {@link ModelGateway}.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 public final class AgentScopeModelBridge implements Model {
 
@@ -173,9 +176,8 @@ public final class AgentScopeModelBridge implements Model {
                 toolDefinitions(tools),
                 runtimeContext.traceId());
         logModelRequest(request, safeMessages);
-        return modelGateway.generate(request, cancellation)
-                .map(response -> toResponse(response, requestedTools))
-                .flux();
+        return modelGateway.stream(request, cancellation)
+                .map(response -> toResponse(response, requestedTools));
     }
 
     @Override
@@ -183,7 +185,7 @@ public final class AgentScopeModelBridge implements Model {
         return profileId;
     }
 
-    private ChatResponse toResponse(ModelGateway.ModelResponse response, Set<String> requestedTools) {
+    private ChatResponse toResponse(ModelGateway.ModelStreamChunk response, Set<String> requestedTools) {
         ModelGateway.Usage usage = response.usage();
         return ChatResponse.builder()
                 .id(response.responseId())
@@ -198,13 +200,10 @@ public final class AgentScopeModelBridge implements Model {
                 .build();
     }
 
-    private List<ContentBlock> content(ModelGateway.ModelResponse response, Set<String> requestedTools) {
+    private List<ContentBlock> content(ModelGateway.ModelStreamChunk response, Set<String> requestedTools) {
         List<ContentBlock> blocks = new java.util.ArrayList<>();
-        if (!response.thinkingText().isBlank()) {
-            blocks.add(ThinkingBlock.builder().thinking(response.thinkingText()).build());
-        }
-        if (!response.publicText().isBlank()) {
-            blocks.add(TextBlock.builder().text(response.publicText()).build());
+        if (!response.publicTextDelta().isBlank()) {
+            blocks.add(TextBlock.builder().text(response.publicTextDelta()).build());
         }
         Set<String> callIds = new LinkedHashSet<>();
         for (ModelGateway.ToolCall call : response.toolCalls()) {
@@ -306,7 +305,8 @@ public final class AgentScopeModelBridge implements Model {
         }
     }
 
-    private record ToolResultDiagnostic(int count, int totalChars, String latestSha256) {}
+    private record ToolResultDiagnostic(int count, int totalChars, String latestSha256) {
+    }
 
     private void notifyToolCallObserver(ToolUseBlock toolUse) {
         if (toolCallObserver == null) {

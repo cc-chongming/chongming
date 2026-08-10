@@ -33,6 +33,7 @@ build/
 .vscode/
 /.agentscope/
 /output/
+/logs/
 ### Vue / Vite ###
 /frontend/node_modules/
 /frontend/playwright-report/

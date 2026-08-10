@@ -4,6 +4,7 @@ import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventCategory;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
+import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.EvidenceBlock;
 import ai.cc.chongming.review.domain.model.GateDecision;
@@ -16,6 +17,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.JudgeDecision;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
+import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
@@ -39,9 +41,10 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * [AIREVIEW-PLAN-010#1.3][AIREVIEW-PLAN-011#1.3][AIREVIEW-PLAN-012#1.8] Builds public review read models from append-only events and batch domain stores.
+ * [AIREVIEW-PLAN-010#1.3][AIREVIEW-PLAN-011#1.3][AIREVIEW-PLAN-012#1.8][AIREVIEW-PLAN-023#5]
+ * Builds public review read models from append-only events and batch domain stores.
  *
- * @author wangli
+ * @author zyj
  */
 @Service
 public class ReviewQueryService {
@@ -57,6 +60,7 @@ public class ReviewQueryService {
     private final HumanGateDecisionStore humanGateDecisionStore;
     private final ReviewRegistry reviewRegistry;
     private final ReviewRepositories reviewRepositories;
+    private final ContextScoutConclusionStore contextScoutConclusionStore;
 
     ReviewQueryService(
             ReviewEventStore eventStore,
@@ -65,7 +69,29 @@ public class ReviewQueryService {
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry) {
         this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
-                (ReviewRepositories) null);
+                (ReviewRepositories) null, null);
+    }
+
+    ReviewQueryService(
+            ReviewEventStore eventStore,
+            ReviewDebateStore debateStore,
+            EvidenceLedgerService evidenceLedgerService,
+            HumanGateDecisionStore humanGateDecisionStore,
+            ReviewRegistry reviewRegistry,
+            ContextScoutConclusionStore contextScoutConclusionStore) {
+        this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
+                (ReviewRepositories) null, contextScoutConclusionStore);
+    }
+
+    public ReviewQueryService(
+            ReviewEventStore eventStore,
+            ReviewDebateStore debateStore,
+            EvidenceLedgerService evidenceLedgerService,
+            HumanGateDecisionStore humanGateDecisionStore,
+            ReviewRegistry reviewRegistry,
+            ObjectProvider<ReviewRepositories> reviewRepositoriesProvider) {
+        this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
+                reviewRepositoriesProvider.getIfAvailable(), null);
     }
 
     @Autowired
@@ -75,9 +101,10 @@ public class ReviewQueryService {
             EvidenceLedgerService evidenceLedgerService,
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry,
-            ObjectProvider<ReviewRepositories> reviewRepositoriesProvider) {
+            ObjectProvider<ReviewRepositories> reviewRepositoriesProvider,
+            ContextScoutConclusionStore contextScoutConclusionStore) {
         this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
-                reviewRepositoriesProvider.getIfAvailable());
+                reviewRepositoriesProvider.getIfAvailable(), contextScoutConclusionStore);
     }
 
     private ReviewQueryService(
@@ -86,13 +113,15 @@ public class ReviewQueryService {
             EvidenceLedgerService evidenceLedgerService,
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry,
-            ReviewRepositories reviewRepositories) {
+            ReviewRepositories reviewRepositories,
+            ContextScoutConclusionStore contextScoutConclusionStore) {
         this.eventStore = eventStore;
         this.debateStore = debateStore;
         this.evidenceLedgerService = evidenceLedgerService;
         this.humanGateDecisionStore = humanGateDecisionStore;
         this.reviewRegistry = reviewRegistry;
         this.reviewRepositories = reviewRepositories;
+        this.contextScoutConclusionStore = contextScoutConclusionStore;
     }
 
     @Transactional(readOnly = true)
@@ -100,9 +129,6 @@ public class ReviewQueryService {
         Optional<ReviewEvent> latestEvent = eventStore.findLatest(reviewId);
         Optional<GateDecision> gate = debateStore.findGateDraft(reviewId);
         Optional<HumanGateDecision> humanGate = humanGateDecisionStore.findLatest(reviewId);
-        if (latestEvent.isEmpty() && gate.isEmpty() && humanGate.isEmpty()) {
-            return Optional.empty();
-        }
         ReviewEvent event = latestEvent.orElse(null);
         // [AIREVIEW-PLAN-012#1.8] After a restart the process-local registry is empty. Fall back to the
         // durable review projection (role_activation persists INITIAL_REVIEW_COMPLETED) so the
@@ -113,14 +139,24 @@ public class ReviewQueryService {
                         : reviewRepositories.findReview(reviewId).orElse(null));
         Long reviewVersion = review == null ? null : review.version();
         int currentAttempt = review == null ? (event == null ? 0 : event.attemptNo()) : review.attemptNo();
+        Optional<ContextScoutConclusion> conclusion = currentAttempt < 1 || contextScoutConclusionStore == null
+                ? Optional.empty()
+                : contextScoutConclusionStore.find(reviewId, currentAttempt);
+        if (latestEvent.isEmpty() && gate.isEmpty() && humanGate.isEmpty() && conclusion.isEmpty()) {
+            return Optional.empty();
+        }
         GateView gateView = humanGate.map(this::toGateView)
                 .orElseGet(() -> gate.map(this::toGateView).orElse(null));
         ContextScoutView contextScout = currentAttempt < 1
                 ? null
-                : eventStore.findLatestByTypeAndAttempt(
-                                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, currentAttempt)
-                        .map(this::toContextScoutView)
-                        .orElse(null);
+                : conclusion.map(this::toContextScoutView)
+                        .orElseGet(() -> eventStore.findLatestByTypeAndAttempt(
+                                        reviewId, ReviewEventType.CONTEXT_SCOUT_COMPLETED, currentAttempt)
+                                .map(this::toLegacyContextScoutView)
+                                .orElseGet(() -> eventStore.findLatestByTypeAndAttempt(
+                                                reviewId, ReviewEventType.CONTEXT_SCOUT_DEGRADED, currentAttempt)
+                                        .map(this::toContextScoutView)
+                                        .orElse(null)));
         return Optional.of(new ReviewSummary(
                 reviewId.value(),
                 event == null ? null : event.attemptNo(),
@@ -306,7 +342,50 @@ public class ReviewQueryService {
                 event.payload().getOrDefault(
                         "publicSummary",
                         "Context Scout 未能完成项目上下文预处理，Director 将继续评审。"),
-                format(event.occurredAt()));
+                format(event.occurredAt()),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                Map.of(),
+                null,
+                false);
+    }
+
+    private ContextScoutView toContextScoutView(ContextScoutConclusion conclusion) {
+        return new ContextScoutView(
+                "COMPLETED",
+                null,
+                conclusion.summary(),
+                format(conclusion.createdAt()),
+                conclusion.schemaVersion(),
+                conclusion.moduleRoots(),
+                conclusion.entryPoints(),
+                conclusion.constraints(),
+                conclusion.risks(),
+                conclusion.evidencePaths(),
+                conclusion.roleScopes(),
+                conclusion.rawPublicResult(),
+                false);
+    }
+
+    private ContextScoutView toLegacyContextScoutView(ReviewEvent event) {
+        return new ContextScoutView(
+                event.payload().getOrDefault("status", "COMPLETED"),
+                null,
+                event.payload().getOrDefault("publicSummary", "Context Scout 已完成上下文收集。"),
+                format(event.occurredAt()),
+                parseInteger(event.payload().get("schemaVersion")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                Map.of(),
+                null,
+                true);
     }
 
     private RoleActivationView toRoleActivationView(ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation activation) {
@@ -334,6 +413,17 @@ public class ReviewQueryService {
 
     private String format(Instant instant) {
         return TIME_FORMATTER.format(instant);
+    }
+
+    private static Integer parseInteger(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     /**
@@ -474,9 +564,50 @@ public class ReviewQueryService {
     }
 
     /**
-     * @author wangli
+     * [AIREVIEW-PLAN-023#5]
+     *
+     * @author zyj
      */
-    public record ContextScoutView(String status, String reasonCode, String publicSummary, String occurredAt) {
+    public record ContextScoutView(
+            String status,
+            String reasonCode,
+            String publicSummary,
+            String occurredAt,
+            Integer schemaVersion,
+            List<String> moduleRoots,
+            List<String> entryPoints,
+            List<String> constraints,
+            List<String> risks,
+            List<String> evidencePaths,
+            Map<String, List<String>> roleScopes,
+            String rawPublicResult,
+            boolean legacy) {
+
+        public ContextScoutView {
+            moduleRoots = List.copyOf(moduleRoots);
+            entryPoints = List.copyOf(entryPoints);
+            constraints = List.copyOf(constraints);
+            risks = List.copyOf(risks);
+            evidencePaths = List.copyOf(evidencePaths);
+            roleScopes = Map.copyOf(roleScopes);
+        }
+
+        public ContextScoutView(String status, String reasonCode, String publicSummary, String occurredAt) {
+            this(
+                    status,
+                    reasonCode,
+                    publicSummary,
+                    occurredAt,
+                    null,
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    Map.of(),
+                    null,
+                    false);
+        }
     }
 
     /**

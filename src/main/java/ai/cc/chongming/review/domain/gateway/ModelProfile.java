@@ -7,7 +7,9 @@ import java.util.Objects;
 /**
  * Logical, vendor-neutral model profile referenced by RolePacks instead of hard-coded model IDs.
  *
- * @author wangli
+ * [AIREVIEW-PLAN-023#8]
+ *
+ * @author zyj
  */
 public record ModelProfile(
         String profileId,
@@ -17,7 +19,20 @@ public record ModelProfile(
         Duration timeout,
         int maxTokens,
         RetryPolicy retryPolicy,
-        String fallbackProfileId) {
+        String fallbackProfileId,
+        boolean streamEnabled) {
+
+    public ModelProfile(
+            String profileId,
+            Provider provider,
+            String modelName,
+            double temperature,
+            Duration timeout,
+            int maxTokens,
+            RetryPolicy retryPolicy,
+            String fallbackProfileId) {
+        this(profileId, provider, modelName, temperature, timeout, maxTokens, retryPolicy, fallbackProfileId, true);
+    }
 
     public ModelProfile {
         requireText(profileId, "profileId");
@@ -39,7 +54,7 @@ public record ModelProfile(
     /**
      * Supported wire formats. DashScope-compatible endpoints share the OpenAI chat-completions shape.
      *
-     * @author wangli
+     * @author zyj
      */
     public enum Provider {
         OPENAI_COMPATIBLE,
@@ -54,7 +69,7 @@ public record ModelProfile(
     /**
      * Bounded retry policy for transient provider failures only.
      *
-     * @author wangli
+     * @author zyj
      */
     public record RetryPolicy(int maxRetries, Duration initialBackoff) {
 

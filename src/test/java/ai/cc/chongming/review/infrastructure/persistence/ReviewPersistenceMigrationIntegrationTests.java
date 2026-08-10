@@ -28,9 +28,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Verifies that the business persistence schema migrates on a real MySQL server.
+ * [AIREVIEW-PLAN-023#5] Verifies that the business persistence schema migrates on a real MySQL server.
  *
- * @author wangli
+ * @author zyj
  */
 @Testcontainers(disabledWithoutDocker = true)
 class ReviewPersistenceMigrationIntegrationTests {
@@ -72,14 +72,18 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "requirement",
                     "chongming_agentscope_state",
                     "chongming_agentscope_workspace",
-                    "runtime_trace_event");
+                    "runtime_trace_event",
+                    "context_scout_conclusion",
+                    "requirement_review_launch_command");
             Map<String, String> expectedLongTextColumns = Map.of(
                     "review_plan.plan_json", "LONGTEXT",
                     "repository_snapshot.manifest_json", "LONGTEXT",
                     "debate_turn.evidence_summary", "LONGTEXT",
                     "review_event.payload_json", "LONGTEXT",
                     "audit_event.metadata_json", "LONGTEXT",
-                    "notification_outbox.payload_json", "LONGTEXT");
+                    "notification_outbox.payload_json", "LONGTEXT",
+                    "context_scout_conclusion.module_roots_json", "LONGTEXT",
+                    "context_scout_conclusion.raw_public_result", "LONGTEXT");
             for (Map.Entry<String, String> expectedColumn : expectedLongTextColumns.entrySet()) {
                 String[] tableAndColumn = expectedColumn.getKey().split("\\.", 2);
                 assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), tableAndColumn[0], tableAndColumn[1]))

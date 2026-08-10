@@ -15,6 +15,7 @@ import ai.cc.chongming.review.infrastructure.model.CommercialModelGateway;
 import ai.cc.chongming.review.infrastructure.model.ModelCallAuditService;
 import ai.cc.chongming.review.infrastructure.model.ModelProfileRegistry;
 import ai.cc.chongming.review.infrastructure.model.ModelProviderClient;
+
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -23,14 +24,118 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 /**
  * Tests deterministic commercial-gateway behavior without contacting a real model provider.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 class ModelGatewayContractTests {
+
+    @Test
+    void streamsProviderDeltasAndAuditsTheAggregatedPublicResult() {
+        ModelProviderClient provider = new ModelProviderClient() {
+            @Override
+            public ProviderResponse invoke(ProviderRequest request) {
+                throw new AssertionError("non-streaming fallback must not be used");
+            }
+
+            @Override
+            public Flux<ProviderStreamChunk> stream(ProviderRequest request) {
+                return Flux.just(
+                        new ProviderStreamChunk(
+                                "stream-1", "公开", new ModelGateway.Usage(0, 0, 0),
+                                ModelGateway.FinishReason.UNKNOWN, List.of(), false),
+                        new ProviderStreamChunk(
+                                "stream-1", "结论", new ModelGateway.Usage(0, 0, 0),
+                                ModelGateway.FinishReason.UNKNOWN, List.of(), false),
+                        new ProviderStreamChunk(
+                                "stream-1", "", new ModelGateway.Usage(3, 5, 8),
+                                ModelGateway.FinishReason.STOP, List.of(), true));
+            }
+        };
+        ModelCallAuditService audit = new ModelCallAuditService();
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                enabledProperties(), profileRegistry(0), provider, audit);
+
+        List<ModelGateway.ModelStreamChunk> chunks =
+                gateway.stream(request(), IntakeCancellation.neverCancelled()).collectList().block();
+
+        assertThat(chunks).hasSize(3);
+        assertThat(chunks.subList(0, 2)).extracting(ModelGateway.ModelStreamChunk::publicTextDelta)
+                .containsExactly("公开", "结论");
+        assertThat(chunks.getLast().terminal()).isTrue();
+        assertThat(audit.findByReview(responseRequestReviewId())).singleElement().satisfies(entry -> {
+            assertThat(entry.outputHash()).hasSize(64);
+            assertThat(entry.usage()).isEqualTo(new ModelGateway.Usage(3, 5, 8));
+        });
+    }
+
+    @Test
+    void doesNotRetryAfterTheFirstPublicDelta() {
+        AtomicInteger calls = new AtomicInteger();
+        ModelProviderClient provider = new ModelProviderClient() {
+            @Override
+            public ProviderResponse invoke(ProviderRequest request) {
+                throw new AssertionError("non-streaming fallback must not be used");
+            }
+
+            @Override
+            public Flux<ProviderStreamChunk> stream(ProviderRequest request) {
+                calls.incrementAndGet();
+                return Flux.concat(
+                        Flux.just(new ProviderStreamChunk(
+                                "stream-1", "已输出", new ModelGateway.Usage(0, 0, 0),
+                                ModelGateway.FinishReason.UNKNOWN, List.of(), false)),
+                        Flux.error(new ModelGatewayException(Code.MODEL_RATE_LIMITED, "transient")));
+            }
+        };
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                enabledProperties(), profileRegistry(1), provider, new ModelCallAuditService());
+
+        assertThatThrownBy(() -> gateway.stream(request(), IntakeCancellation.neverCancelled()).collectList().block())
+                .isInstanceOf(ModelGatewayException.class)
+                .satisfies(error -> assertThat(((ModelGatewayException) error).code())
+                        .isEqualTo(Code.MODEL_RATE_LIMITED));
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
+    void usesOneTerminalNonStreamingChunkWhenProfileDisablesSse() {
+        AtomicInteger synchronousCalls = new AtomicInteger();
+        ModelProviderClient provider = new ModelProviderClient() {
+            @Override
+            public ProviderResponse invoke(ProviderRequest request) {
+                synchronousCalls.incrementAndGet();
+                return new ProviderResponse(
+                        "fallback-1",
+                        "完整公开结论",
+                        new ModelGateway.Usage(2, 4, 6),
+                        ModelGateway.FinishReason.STOP);
+            }
+
+            @Override
+            public Flux<ProviderStreamChunk> stream(ProviderRequest request) {
+                return Flux.error(new AssertionError("SSE must not be used for this profile"));
+            }
+        };
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                enabledProperties(), nonStreamingProfileRegistry(), provider, new ModelCallAuditService());
+
+        List<ModelGateway.ModelStreamChunk> chunks =
+                gateway.stream(request(), IntakeCancellation.neverCancelled()).collectList().block();
+
+        assertThat(synchronousCalls).hasValue(1);
+        assertThat(chunks).singleElement().satisfies(chunk -> {
+            assertThat(chunk.publicTextDelta()).isEqualTo("完整公开结论");
+            assertThat(chunk.terminal()).isTrue();
+        });
+    }
 
     @Test
     void retriesOnlyTransientFailuresAndAuditsHashesInsteadOfPrompts() {
@@ -79,7 +184,7 @@ class ModelGatewayContractTests {
                 .extracting(error -> ((ModelGatewayException) error).code())
                 .isEqualTo(Code.MODEL_GATEWAY_DISABLED);
         assertThatThrownBy(() -> new CommercialModelGateway(
-                        enabledProperties(), profileRegistry(0), provider, new ModelCallAuditService())
+                enabledProperties(), profileRegistry(0), provider, new ModelCallAuditService())
                 .generate(request(), () -> true)
                 .block())
                 .isInstanceOf(ModelGatewayException.class)
@@ -156,6 +261,20 @@ class ModelGatewayContractTests {
                         256,
                         new ModelProfilesProperties.RetryDefinition(maxRetries, Duration.ZERO),
                         null))));
+    }
+
+    private ModelProfileRegistry nonStreamingProfileRegistry() {
+        return new ModelProfileRegistry(new ModelProfilesProperties(Map.of(
+                "role-reviewer",
+                new ModelProfilesProperties.ProfileDefinition(
+                        "openai-compatible",
+                        "test-model",
+                        0.2d,
+                        Duration.ofSeconds(1),
+                        256,
+                        new ModelProfilesProperties.RetryDefinition(0, Duration.ZERO),
+                        null,
+                        false))));
     }
 
     private ModelProfileRegistry fallbackProfileRegistry() {

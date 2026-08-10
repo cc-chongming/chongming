@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { latestGateDecision, presentDebateJudgement } from '../services/review-conclusion-presenter';
 
 const props = defineProps({ reviewId: { type: String, required: true } });
 const loading = ref(false);
@@ -42,9 +43,12 @@ const summary = computed(() => report.value?.summary ?? null);
 const claims = computed(() => report.value?.claims ?? []);
 const debates = computed(() => report.value?.debates ?? []);
 const gateDecisions = computed(() => report.value?.gateDecisions ?? []);
-const finalGate = computed(() => gateDecisions.value.reduce((latest, decision) => (
-    !latest || Number(decision.gateVersion) > Number(latest.gateVersion) ? decision : latest
-), null));
+const finalGate = computed(() => latestGateDecision(gateDecisions.value));
+// [AIREVIEW-PLAN-023#6.3] A final report must preserve every debate's readable Judge outcome.
+const debateConclusions = computed(() => debates.value.map((debate) => ({
+    debate,
+    judgement: presentDebateJudgement(debate, claims.value)
+})));
 
 const opposeCount = computed(() => claims.value.filter((claim) => claim.position === 'OPPOSE').length);
 const totalRounds = computed(() => debates.value.reduce((sum, debate) => sum + (Number(debate.currentRound) || 0), 0));
@@ -178,19 +182,58 @@ onMounted(() => load(selectedVersion.value));
                     </div>
                 </div>
 
-                <div class="rpt-section"><h3>立场收敛</h3>
+                <div class="rpt-section"><h3>辩论与 Judge 裁决</h3>
                     <div class="card"><div class="card-bd">
-                        <div v-for="debate in debates" :key="debate.topicId ?? debate.subjectKey" class="wcv-item">
+                        <article v-for="entry in debateConclusions" :key="entry.debate.topicId ?? entry.debate.subjectKey" class="wcv-item report-debate">
                             <div class="wcv-row">
-                                <div class="wcv-lb">{{ debate.subjectKey }}</div>
+                                <div class="wcv-lb">{{ entry.debate.subjectKey }}</div>
                                 <div class="wcv-tr">
-                                    <span v-for="round in maxRound" :key="round" class="wcv-dot" :class="{ done: round <= (Number(debate.currentRound) || 0) }"></span>
-                                    <span class="wcv-topic">{{ debateClaimCount(debate) }} 个论点</span>
-                                    <span class="wcv-st">{{ debateStatus(debate) }}</span>
+                                    <span v-for="round in maxRound" :key="round" class="wcv-dot" :class="{ done: round <= (Number(entry.debate.currentRound) || 0) }"></span>
+                                    <span class="wcv-topic">{{ debateClaimCount(entry.debate) }} 个论点</span>
+                                    <span class="wcv-st">{{ debateStatus(entry.debate) }}</span>
                                 </div>
                             </div>
-                            <p v-if="debate.resolution" class="wcv-res-line">{{ debate.resolution }}</p>
-                        </div>
+                            <p v-if="entry.debate.resolution" class="wcv-res-line">{{ entry.debate.resolution }}</p>
+
+                            <section v-if="entry.judgement" class="report-judge-result" :aria-label="`${entry.debate.subjectKey} 的 Judge 裁决`">
+                                <header>
+                                    <div><span class="judge-label">Judge 结论</span><strong>{{ entry.judgement.resultLabel }}</strong></div>
+                                    <time v-if="entry.judgement.createdAt">{{ entry.judgement.createdAt }}</time>
+                                </header>
+                                <p class="judge-reason"><strong>裁决理由：</strong>{{ entry.judgement.reason }}</p>
+                                <div class="judge-claim-columns">
+                                    <section class="judge-claim-group accepted">
+                                        <h4>采信 {{ entry.judgement.accepted.length }} 项</h4>
+                                        <ol v-if="entry.judgement.accepted.length">
+                                            <li v-for="claim in entry.judgement.accepted" :key="claim.claimId">
+                                                <template v-if="!claim.missing">
+                                                    <strong>{{ claim.statement || '该 Claim 暂无公开正文' }}</strong>
+                                                    <p v-if="claim.reasonSummary">{{ claim.reasonSummary }}</p>
+                                                    <code v-if="claim.subjectKey">{{ claim.subjectKey }}</code>
+                                                </template>
+                                                <span v-else>Claim {{ claim.claimId }}（当前报告未包含详情）</span>
+                                            </li>
+                                        </ol>
+                                        <p v-else class="muted">Judge 未列出采信 Claim。</p>
+                                    </section>
+                                    <section class="judge-claim-group rejected">
+                                        <h4>拒绝 {{ entry.judgement.rejected.length }} 项</h4>
+                                        <ol v-if="entry.judgement.rejected.length">
+                                            <li v-for="claim in entry.judgement.rejected" :key="claim.claimId">
+                                                <template v-if="!claim.missing">
+                                                    <strong>{{ claim.statement || '该 Claim 暂无公开正文' }}</strong>
+                                                    <p v-if="claim.reasonSummary">{{ claim.reasonSummary }}</p>
+                                                    <code v-if="claim.subjectKey">{{ claim.subjectKey }}</code>
+                                                </template>
+                                                <span v-else>Claim {{ claim.claimId }}（当前报告未包含详情）</span>
+                                            </li>
+                                        </ol>
+                                        <p v-else class="muted">Judge 未列出拒绝 Claim。</p>
+                                    </section>
+                                </div>
+                            </section>
+                            <p v-else class="report-judge-empty">该议题尚未形成 Judge 裁决。</p>
+                        </article>
                         <p v-if="!debates.length" class="dash-empty">本次评审未产生公开辩论。</p>
                     </div></div>
                 </div>
@@ -243,3 +286,29 @@ onMounted(() => load(selectedVersion.value));
         </section>
     </section>
 </template>
+
+<style scoped>
+.report-debate { display: grid; gap: 12px; padding: 14px 0; }
+.report-debate + .report-debate { border-top: 1px solid #e7e5e4; }
+.report-judge-result { padding: 14px; border: 1px solid #d6d3d1; border-radius: 10px; background: #fafaf9; }
+.report-judge-result > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.report-judge-result > header div { display: flex; align-items: center; gap: 8px; }
+.report-judge-result time { color: #78716c; font-size: 12px; }
+.judge-label { padding: 3px 7px; color: #1d4ed8; background: #dbeafe; border-radius: 999px; font-size: 11px; font-weight: 800; }
+.judge-reason { margin: 11px 0; line-height: 1.65; }
+.judge-claim-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.judge-claim-group { padding: 11px 12px; border: 1px solid #e7e5e4; border-radius: 8px; background: #fff; }
+.judge-claim-group.accepted { border-top: 3px solid #16a34a; }
+.judge-claim-group.rejected { border-top: 3px solid #dc2626; }
+.judge-claim-group h4 { margin: 0 0 8px; font-size: 13px; }
+.judge-claim-group ol { display: grid; gap: 8px; margin: 0; padding-left: 20px; }
+.judge-claim-group li { padding-left: 2px; line-height: 1.5; }
+.judge-claim-group li strong { display: block; font-size: 13px; }
+.judge-claim-group li p { margin: 3px 0; color: #57534e; font-size: 12px; }
+.judge-claim-group li code { color: #78716c; font-size: 11px; overflow-wrap: anywhere; }
+.report-judge-empty { margin: 0; padding: 10px 12px; color: #92400e; background: #fffbeb; border-radius: 8px; }
+@media (max-width: 760px) {
+    .judge-claim-columns { grid-template-columns: 1fr; }
+    .report-judge-result > header { align-items: flex-start; flex-direction: column; }
+}
+</style>

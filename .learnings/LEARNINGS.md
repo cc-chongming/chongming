@@ -8,6 +8,33 @@ OpenAI-compatible providers may return a valid response with no text and only `t
 
 ---
 
+## [LRN-20260810-001] correction
+
+**Logged**: 2026-08-10T00:00:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: diagnostics-security-boundary
+
+### Summary
+
+评估调试配置时，不能脱离实际部署边界把“本地完整模型会话日志”和“Git 忽略的本地明文模型密钥”直接判定为待修复缺陷；本项目当前明确保留两者以提高本地排障效率。
+
+### Details
+
+通用 `application.yml` 已默认关闭完整会话日志，`application-local.yml` 只用于受控本地调试且不纳入版本控制。后续分析应先区分通用/生产配置与本地开发配置，再判断风险是否已经越过边界。可接受边界是：本地可记录完整会话并保存调试密钥，但密钥、Authorization 和敏感正文不得进入 Git 提交、公共事件、评审报告或对外日志。
+
+### Suggested Action
+
+后续安全或运行报告使用“已确认缺陷 / 接受的本地调试约定 / 建议加固”三类结论；未发现越界证据时，不要求关闭本地日志，也不要求迁移或轮换本地调试密钥。
+
+### Metadata
+
+- Source: user correction during AIREVIEW-PLAN-024 planning
+- Related Files: src/main/resources/application.yml, src/main/resources/application-local.yml, docs/AIREVIEW-PLAN-024-评审确定性覆盖与编排收敛.md
+- Tags: correction, local-profile, conversation-log, api-key, threat-boundary
+
+---
+
 Record project-specific corrections, knowledge gaps, and reusable practices here.
 ## [LRN-20260716-001] compatibility
 

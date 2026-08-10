@@ -29,12 +29,12 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 /**
- * Registers only server-bound, snapshot-relative local repository reads for review roles.
+ * [AIREVIEW-PLAN-023#5] Registers only server-bound, snapshot-relative local repository reads for review roles.
  *
  * <p>The model never receives a host path or selects a repository. The requirement snapshot supplies the
  * administrator-configured repository identifier, and all reads are served from the resulting frozen copy.
  *
- * @author wangli
+ * @author zyj
  */
 @Component
 public class ReviewRepositoryToolFactory {
@@ -127,7 +127,7 @@ public class ReviewRepositoryToolFactory {
         Objects.requireNonNull(contextAssembler, "contextAssembler must not be null");
         SharedProjectContext overview = sharedProjectContext(runtimeContext);
         Instant createdAt = Instant.now();
-        List<ReviewContextAssembler.ContextFact> facts = List.of(
+        List<ReviewContextAssembler.ContextFact> facts = new ArrayList<>(List.of(
                 new ReviewContextAssembler.ContextFact(
                         "requirement-snapshot", "requirement-snapshot", ReviewContextAssembler.Priority.CRITICAL,
                         false, createdAt, "Public requirement context:\n" + String.join("\n", overview.requirementSections())),
@@ -135,12 +135,15 @@ public class ReviewRepositoryToolFactory {
                         "repository-snapshot", "repository-snapshot", ReviewContextAssembler.Priority.HIGH,
                         false, createdAt, repositorySummary(overview, rolePack.roleType())),
                 new ReviewContextAssembler.ContextFact(
-                        "scout-overview", "scout-overview", ReviewContextAssembler.Priority.HIGH,
-                        false, createdAt, "Context Scout overview: " + scoutSummary(runtimeContext, overview, rolePack.roleType())),
-                new ReviewContextAssembler.ContextFact(
                         "role-scope", "role-scope", ReviewContextAssembler.Priority.CRITICAL,
                         false, createdAt, "Authorized snapshot scope for " + rolePack.roleType().name() + ": "
-                                + String.join(", ", allowedPathPrefixes(rolePack.roleType()))));
+                                + String.join(", ", allowedPathPrefixes(rolePack.roleType())))));
+        facts.add(contextAssembler.contextScoutFact(
+                        runtimeContext.reviewId(), runtimeContext.attemptNo(), rolePack.roleType())
+                .orElseGet(() -> new ReviewContextAssembler.ContextFact(
+                        "scout-overview", "scout-overview", ReviewContextAssembler.Priority.HIGH,
+                        false, createdAt,
+                        "Context Scout overview: " + scoutSummary(runtimeContext, overview, rolePack.roleType()))));
         ReviewContextAssembler.AssembledContext assembled = contextAssembler.assemble(
                 new ReviewContextAssembler.ContextRequest(runtimeContext.reviewId(), rolePack, facts, 8_000));
         return assembled.facts().stream()

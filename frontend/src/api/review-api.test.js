@@ -83,4 +83,54 @@ describe('requirement platform API', () => {
         expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ reviewId, expectedVersion: 0 });
         expect(fetchMock.mock.calls[3][0]).toBe('/api/dashboard');
     });
+
+    it('loads safe repository options from the active server configuration', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(response([
+            { id: 'cx-ai', displayName: 'CX AI' }
+        ]));
+        globalThis.fetch = fetchMock;
+
+        const repositories = await reviewApi.listRepositories();
+
+        expect(fetchMock).toHaveBeenCalledWith('/api/repositories', expect.objectContaining({ method: 'GET' }));
+        expect(repositories).toEqual([{ id: 'cx-ai', displayName: 'CX AI' }]);
+        expect(repositories[0]).not.toHaveProperty('root');
+    });
+
+    it('launches a draft requirement through the idempotent multipart orchestration endpoint', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(response({
+            requirementId: 'requirement-001', reviewId, stage: 'PLANNING', phase: 'STARTED', recoverable: false
+        }));
+        globalThis.fetch = fetchMock;
+        const requirementFile = new File(['# 需求'], 'requirement.md', { type: 'text/markdown' });
+
+        await reviewApi.launchRequirementReview('requirement-001', {
+            requirementFile,
+            repositoryPath: 'cx-ai',
+            branch: 'main',
+            commit: 'abc123',
+            submitter: 'reviewer-001',
+            publicTasks: ['核对范围', '核对风险'],
+            changeReason: '草稿已就绪',
+            initialMessage: '开始评审',
+            expectedVersion: 2,
+            idempotencyKey: 'launch-001',
+            traceId: 'trace-001'
+        });
+
+        const [path, options] = fetchMock.mock.calls[0];
+        expect(path).toBe('/api/requirements/requirement-001/reviews');
+        expect(options).toMatchObject({ method: 'POST' });
+        expect(options.headers).toEqual({ 'Idempotency-Key': 'launch-001', 'X-Trace-Id': 'trace-001' });
+        expect(options.body).toBeInstanceOf(FormData);
+        expect(options.body.get('requirementFile')).toBe(requirementFile);
+        expect(options.body.get('repositoryPath')).toBe('cx-ai');
+        expect(options.body.get('branch')).toBe('main');
+        expect(options.body.get('commit')).toBe('abc123');
+        expect(options.body.get('submitter')).toBe('reviewer-001');
+        expect(options.body.get('publicTasks')).toBe('["核对范围","核对风险"]');
+        expect(options.body.get('changeReason')).toBe('草稿已就绪');
+        expect(options.body.get('initialMessage')).toBe('开始评审');
+        expect(options.body.get('expectedVersion')).toBe('2');
+    });
 });

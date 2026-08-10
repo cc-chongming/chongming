@@ -88,7 +88,7 @@ class RepositoryBoundaryGuardTests {
     }
     private RepositoryBoundaryGuard guard(String id, Path root) {
         return new RepositoryBoundaryGuard(new RepositoryAccessProperties(
-                List.of(new RepositoryAccessProperties.RepositoryDefinition(id, root.toString()))));
+                List.of(new RepositoryAccessProperties.RepositoryDefinition(id, root.toString(), null))));
     }
 
     private Path createGitRepository(String name) throws Exception {

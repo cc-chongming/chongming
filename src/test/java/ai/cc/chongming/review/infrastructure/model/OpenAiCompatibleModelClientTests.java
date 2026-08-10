@@ -12,25 +12,29 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Set;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
  * Tests OpenAI-compatible request and response normalization using a local JDK HTTP server.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 class OpenAiCompatibleModelClientTests {
 
@@ -77,7 +81,7 @@ class OpenAiCompatibleModelClientTests {
                         128,
                         new RetryPolicy(0, Duration.ZERO),
                         null),
-                        new ModelGateway.ModelRequest(
+                new ModelGateway.ModelRequest(
                         new ReviewId(UUID.randomUUID()),
                         RoleType.BACKEND,
                         "role-reviewer",
@@ -91,7 +95,7 @@ class OpenAiCompatibleModelClientTests {
         assertThat(authorization).hasValue("Bearer safe-test-key");
         assertThat(requestBody.get()).contains("\"model\":\"test-model\"").contains("Public context only.");
         assertThat(response.publicText()).isEqualTo("{\"tasks\":[]}");
-        assertThat(response.thinkingText()).isEqualTo("先判断评审范围。");
+        assertThat(response.thinkingText()).isBlank();
         assertThat(response.usage()).isEqualTo(new ModelGateway.Usage(3, 5, 8));
         assertThat(response.finishReason()).isEqualTo(ModelGateway.FinishReason.STOP);
     }
@@ -179,5 +183,58 @@ class OpenAiCompatibleModelClientTests {
                 .isInstanceOf(ModelGatewayException.class)
                 .satisfies(exception -> assertThat(((ModelGatewayException) exception).code())
                         .isEqualTo(ModelGatewayException.Code.MODEL_RESPONSE_INVALID));
+    }
+
+    @Test
+    void streamsPublicTextAndAggregatesToolArgumentsOnlyAtDone() {
+        responseBody.set("""
+                data: {"id":"chat-stream-1","choices":[{"delta":{"content":"公开"},"finish_reason":null}]}
+                data: {"id":"chat-stream-1","choices":[{"delta":{"content":"结论"},"finish_reason":null}]}
+                data: {"id":"chat-stream-1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"submit_claim","arguments":"{\\\"subject"}}]},"finish_reason":null}]}
+                data: {"id":"chat-stream-1","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Key\\\":\\\"api\\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}
+                data: [DONE]
+                """);
+        OpenAiCompatibleModelClient client = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new ObjectMapper());
+
+        List<ModelProviderClient.ProviderStreamChunk> chunks = client.stream(request()).collectList().block();
+
+        assertThat(requestBody.get()).contains("\"stream\":true");
+        assertThat(chunks).hasSize(3);
+        assertThat(chunks.subList(0, 2)).extracting(ModelProviderClient.ProviderStreamChunk::publicTextDelta)
+                .containsExactly("公开", "结论");
+        ModelProviderClient.ProviderStreamChunk terminal = chunks.getLast();
+        assertThat(terminal.terminal()).isTrue();
+        assertThat(terminal.toolCalls()).containsExactly(
+                new ModelGateway.ToolCall("call-1", "submit_claim", Map.of("subjectKey", "api")));
+        assertThat(terminal.usage()).isEqualTo(new ModelGateway.Usage(3, 5, 8));
+        assertThat(terminal.finishReason()).isEqualTo(ModelGateway.FinishReason.TOOL_CALL);
+    }
+
+    @Test
+    void rejectsMalformedSseChunk() {
+        responseBody.set("""
+                data: {not-json}
+                data: [DONE]
+                """);
+        OpenAiCompatibleModelClient client = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new ObjectMapper());
+
+        assertThatThrownBy(() -> client.stream(request()).collectList().block())
+                .isInstanceOf(ModelGatewayException.class)
+                .satisfies(exception -> assertThat(((ModelGatewayException) exception).code())
+                        .isEqualTo(ModelGatewayException.Code.MODEL_RESPONSE_INVALID));
+    }
+
+    @Test
+    void providerInterfaceUsesExplicitNonStreamingFallback() {
+        ModelProviderClient fallbackClient = ignored -> new ModelProviderClient.ProviderResponse(
+                "fallback-1",
+                "完整结论",
+                new ModelGateway.Usage(1, 2, 3),
+                ModelGateway.FinishReason.STOP);
+
+        ModelProviderClient.ProviderStreamChunk chunk = fallbackClient.stream(request()).single().block();
+
+        assertThat(chunk.publicTextDelta()).isEqualTo("完整结论");
+        assertThat(chunk.terminal()).isTrue();
     }
 }

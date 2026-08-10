@@ -8,26 +8,39 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
-import java.util.Locale;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * OpenAI chat-completions adapter usable by OpenAI-compatible and DashScope-compatible endpoints.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 @Component
 public class OpenAiCompatibleModelClient implements ModelProviderClient {
@@ -50,7 +63,7 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
     @Override
     public ProviderResponse invoke(ProviderRequest request) {
         try {
-            String payload = serialize(request);
+            String payload = serialize(request, false);
             if (request.logConversation()) {
                 LOGGER.info("MODEL_CONVERSATION_REQUEST traceId={} profile={} model={} endpoint={}\n{}",
                         request.request().traceId(), request.profile().profileId(), request.profile().modelName(), endpoint(request.baseUrl()), payload);
@@ -83,13 +96,16 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
         return URI.create(value + "/chat/completions");
     }
 
-    private String serialize(ProviderRequest request) {
+    private String serialize(ProviderRequest request, boolean stream) {
         try {
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("model", request.profile().modelName());
             payload.put("temperature", request.profile().temperature());
             payload.put("max_tokens", request.profile().maxTokens());
-            payload.put("stream", false);
+            payload.put("stream", stream);
+            if (stream) {
+                payload.putObject("stream_options").put("include_usage", true);
+            }
             ArrayNode messages = payload.putArray("messages");
             addMessage(messages, "system", request.request().systemInstruction());
             addMessage(messages, "user", request.request().publicContext());
@@ -118,7 +134,30 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
     }
 
     private ProviderResponse parseResponse(HttpResponse<String> response) {
-        int status = response.statusCode();
+        validateStatus(response.statusCode());
+        try {
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode choice = root.path("choices").path(0);
+            JsonNode message = choice.path("message");
+            String content = message.path("content").asText("");
+            java.util.List<ModelGateway.ToolCall> toolCalls = parseToolCalls(message.path("tool_calls"));
+            if (content.isBlank() && toolCalls.isEmpty()) {
+                throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model response has no public text");
+            }
+            JsonNode usage = root.path("usage");
+            return new ProviderResponse(
+                    text(root, "id", "provider-response"),
+                    content,
+                    "",
+                    usage(usage),
+                    finishReason(choice.path("finish_reason").asText()),
+                    toolCalls);
+        } catch (JsonProcessingException exception) {
+            throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model response is not valid JSON", exception);
+        }
+    }
+
+    private void validateStatus(int status) {
         if (status == 429) {
             throw new ModelGatewayException(Code.MODEL_RATE_LIMITED, "Model provider rate limit reached");
         }
@@ -132,38 +171,83 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
                     Code.MODEL_PROVIDER_ERROR,
                     "Model provider returned HTTP " + status);
         }
+    }
+
+    private static ModelGateway.Usage usage(JsonNode usage) {
+        return new ModelGateway.Usage(
+                usage.path("prompt_tokens").asLong(0),
+                usage.path("completion_tokens").asLong(0),
+                usage.path("total_tokens").asLong(0));
+    }
+
+    @Override
+    public Flux<ProviderStreamChunk> stream(ProviderRequest request) {
+        Objects.requireNonNull(request, "request must not be null");
+        return Flux.defer(() -> streamResponse(request))
+                .timeout(request.profile().timeout())
+                .onErrorMap(TimeoutException.class,
+                        timeout -> new ModelGatewayException(Code.MODEL_CALL_TIMEOUT, "Model stream timed out", timeout))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private Flux<ProviderStreamChunk> streamResponse(ProviderRequest request) {
+        HttpResponse<Stream<String>> response = sendStreamingRequest(request);
         try {
-            JsonNode root = objectMapper.readTree(response.body());
-            JsonNode choice = root.path("choices").path(0);
-            JsonNode message = choice.path("message");
-            String content = message.path("content").asText("");
-            String thinking = providerThinking(message);
-            java.util.List<ModelGateway.ToolCall> toolCalls = parseToolCalls(message.path("tool_calls"));
-            if (content.isBlank() && toolCalls.isEmpty()) {
-                throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model response has no public text");
+            validateStatus(response.statusCode());
+        } catch (RuntimeException failure) {
+            response.body().close();
+            throw failure;
+        }
+        SseAccumulator accumulator = new SseAccumulator(request.request().traceId());
+        return Flux.using(
+                        response::body,
+                        lines -> Flux.fromStream(lines)
+                                .concatMap(line -> Flux.fromIterable(accumulator.accept(line)))
+                                .concatWith(Flux.defer(accumulator::verifyCompleted)),
+                        Stream::close)
+                .onErrorMap(this::normalizeStreamFailure);
+    }
+
+    private HttpResponse<Stream<String>> sendStreamingRequest(ProviderRequest request) {
+        try {
+            String payload = serialize(request, true);
+            if (request.logConversation()) {
+                LOGGER.info(
+                        "MODEL_CONVERSATION_STREAM_REQUEST traceId={} profile={} model={} endpoint={}\n{}",
+                        request.request().traceId(),
+                        request.profile().profileId(),
+                        request.profile().modelName(),
+                        endpoint(request.baseUrl()),
+                        payload);
             }
-            JsonNode usage = root.path("usage");
-            return new ProviderResponse(
-                    text(root, "id", "provider-response"),
-                    content,
-                    thinking,
-                    new ModelGateway.Usage(
-                            usage.path("prompt_tokens").asLong(0),
-                            usage.path("completion_tokens").asLong(0),
-                            usage.path("total_tokens").asLong(0)),
-                    finishReason(choice.path("finish_reason").asText()),
-                    toolCalls);
-        } catch (JsonProcessingException exception) {
-            throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model response is not valid JSON", exception);
+            HttpRequest httpRequest = HttpRequest.newBuilder(endpoint(request.baseUrl()))
+                    .timeout(request.profile().timeout())
+                    .header("Authorization", "Bearer " + request.apiKey())
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .header("X-Request-Id", request.request().traceId())
+                    .POST(HttpRequest.BodyPublishers.ofString(payload))
+                    .build();
+            return httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofLines());
+        } catch (HttpTimeoutException exception) {
+            throw new ModelGatewayException(Code.MODEL_CALL_TIMEOUT, "Model call timed out", exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ModelGatewayException(Code.MODEL_CANCELLED, "Model call was interrupted", exception);
+        } catch (IOException exception) {
+            throw new ModelGatewayException(Code.MODEL_NETWORK_ERROR, "Model provider is unavailable", exception);
         }
     }
 
-    private static String providerThinking(JsonNode message) {
-        String reasoningContent = message.path("reasoning_content").asText("");
-        if (!reasoningContent.isBlank()) {
-            return reasoningContent;
+    private Throwable normalizeStreamFailure(Throwable failure) {
+        if (failure instanceof ModelGatewayException) {
+            return failure;
         }
-        return message.path("reasoning").asText("");
+        if (failure instanceof UncheckedIOException unchecked) {
+            return new ModelGatewayException(
+                    Code.MODEL_NETWORK_ERROR, "Model provider stream was interrupted", unchecked.getCause());
+        }
+        return failure;
     }
 
     private String text(JsonNode node, String field, String fallback) {
@@ -203,5 +287,156 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
             case "content_filter" -> ModelGateway.FinishReason.CONTENT_FILTER;
             default -> ModelGateway.FinishReason.UNKNOWN;
         };
+    }
+
+    private final class SseAccumulator {
+
+        private final String fallbackResponseId;
+        private final Map<Integer, ToolCallAccumulator> toolCalls = new LinkedHashMap<>();
+        private String responseId;
+        private ModelGateway.Usage usage = new ModelGateway.Usage(0, 0, 0);
+        private ModelGateway.FinishReason finishReason = ModelGateway.FinishReason.UNKNOWN;
+        private boolean done;
+        private boolean hasPublicText;
+
+        private SseAccumulator(String traceId) {
+            fallbackResponseId = traceId + ":provider-response";
+            responseId = fallbackResponseId;
+        }
+
+        private List<ProviderStreamChunk> accept(String line) {
+            if (line == null || line.isBlank() || line.startsWith(":")) {
+                return List.of();
+            }
+            if (!line.startsWith("data:")) {
+                return List.of();
+            }
+            String data = line.substring("data:".length()).stripLeading();
+            if ("[DONE]".equals(data)) {
+                if (done) {
+                    return List.of();
+                }
+                done = true;
+                List<ModelGateway.ToolCall> completedTools = completedToolCalls();
+                if (!hasPublicText && completedTools.isEmpty()) {
+                    throw new ModelGatewayException(
+                            Code.MODEL_RESPONSE_INVALID, "Model stream has no public text or tool call");
+                }
+                return List.of(new ProviderStreamChunk(
+                        responseId, "", usage, finishReason, completedTools, true));
+            }
+            if (done) {
+                throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model stream contains data after DONE");
+            }
+            return parseData(data);
+        }
+
+        private List<ProviderStreamChunk> parseData(String data) {
+            try {
+                JsonNode root = objectMapper.readTree(data);
+                updateResponseId(root.path("id").asText(""));
+                if (!root.path("usage").isMissingNode() && !root.path("usage").isNull()) {
+                    usage = usage(root.path("usage"));
+                }
+                JsonNode choice = root.path("choices").path(0);
+                if (!choice.isMissingNode()) {
+                    String finish = choice.path("finish_reason").asText("");
+                    if (!finish.isBlank()) {
+                        finishReason = finishReason(finish);
+                    }
+                    JsonNode delta = choice.path("delta");
+                    accumulateToolDeltas(delta.path("tool_calls"));
+                    String publicDelta = delta.path("content").asText("");
+                    if (!publicDelta.isEmpty()) {
+                        hasPublicText = true;
+                        return List.of(new ProviderStreamChunk(
+                                responseId,
+                                publicDelta,
+                                new ModelGateway.Usage(0, 0, 0),
+                                ModelGateway.FinishReason.UNKNOWN,
+                                List.of(),
+                                false));
+                    }
+                }
+                return List.of();
+            } catch (JsonProcessingException exception) {
+                throw new ModelGatewayException(
+                        Code.MODEL_RESPONSE_INVALID, "Model stream contains malformed JSON", exception);
+            }
+        }
+
+        private void updateResponseId(String candidate) {
+            if (candidate == null || candidate.isBlank()) {
+                return;
+            }
+            if (!fallbackResponseId.equals(responseId) && !responseId.equals(candidate)) {
+                throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID, "Model stream response id changed");
+            }
+            responseId = candidate;
+        }
+
+        private void accumulateToolDeltas(JsonNode calls) {
+            if (!calls.isArray()) {
+                return;
+            }
+            int position = 0;
+            for (JsonNode call : calls) {
+                int index = call.path("index").asInt(position++);
+                ToolCallAccumulator accumulator =
+                        toolCalls.computeIfAbsent(index, ignored -> new ToolCallAccumulator());
+                accumulator.append(
+                        call.path("id").asText(""),
+                        call.path("function").path("name").asText(""),
+                        call.path("function").path("arguments").asText(""));
+            }
+        }
+
+        private List<ModelGateway.ToolCall> completedToolCalls() {
+            List<ModelGateway.ToolCall> completed = new ArrayList<>();
+            Set<String> callIds = new HashSet<>();
+            for (ToolCallAccumulator accumulator : toolCalls.values()) {
+                String id = accumulator.id.toString();
+                String name = accumulator.name.toString();
+                if (id.isBlank() || name.isBlank() || !callIds.add(id)) {
+                    throw new ModelGatewayException(
+                            Code.MODEL_RESPONSE_INVALID, "Model stream contains an invalid tool call identity");
+                }
+                try {
+                    JsonNode input = objectMapper.readTree(accumulator.arguments.toString());
+                    if (input == null || !input.isObject()) {
+                        throw new ModelGatewayException(
+                                Code.MODEL_RESPONSE_INVALID, "Model tool call arguments must be a JSON object");
+                    }
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> parameters = objectMapper.convertValue(input, Map.class);
+                    completed.add(new ModelGateway.ToolCall(id, name, parameters));
+                } catch (JsonProcessingException exception) {
+                    throw new ModelGatewayException(
+                            Code.MODEL_RESPONSE_INVALID, "Model stream tool arguments are incomplete", exception);
+                }
+            }
+            return List.copyOf(completed);
+        }
+
+        private Flux<ProviderStreamChunk> verifyCompleted() {
+            if (done) {
+                return Flux.empty();
+            }
+            return Flux.error(new ModelGatewayException(
+                    Code.MODEL_RESPONSE_INVALID, "Model stream ended before DONE"));
+        }
+    }
+
+    private static final class ToolCallAccumulator {
+
+        private final StringBuilder id = new StringBuilder();
+        private final StringBuilder name = new StringBuilder();
+        private final StringBuilder arguments = new StringBuilder();
+
+        private void append(String idDelta, String nameDelta, String argumentsDelta) {
+            id.append(idDelta == null ? "" : idDelta);
+            name.append(nameDelta == null ? "" : nameDelta);
+            arguments.append(argumentsDelta == null ? "" : argumentsDelta);
+        }
     }
 }

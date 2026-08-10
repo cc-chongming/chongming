@@ -197,6 +197,39 @@ describe('review store', () => {
         expect(store.state.summary.progress).toBe(40);
     });
 
+    it('refreshes human Gate versions when another reviewer finalizes the Gate', async () => {
+        let gateReads = 0;
+        const finalGate = {
+            gateVersion: 1,
+            result: 'BLOCK',
+            reason: '人工复核发现高风险问题未关闭。',
+            decidedAt: '2026-08-10T10:00:00Z'
+        };
+        const api = {
+            ...createApi(),
+            getHumanGateVersions: async () => {
+                gateReads += 1;
+                return gateReads === 1 ? [] : [finalGate];
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId,
+            sequence: 4,
+            attemptNo: 1,
+            type: 'HUMAN_GATE_FINALIZED',
+            category: 'GATE',
+            stage: 'NOTIFYING',
+            occurredAt: '2026-08-10T10:00:00Z',
+            payload: { result: 'BLOCK' }
+        });
+
+        await vi.waitFor(() => expect(store.state.humanGateVersions).toEqual([finalGate]));
+        expect(gateReads).toBe(2);
+    });
+
     it('refreshes debates and plans when projection-relevant events arrive', async () => {
         let debatesReads = 0;
         let plansReads = 0;

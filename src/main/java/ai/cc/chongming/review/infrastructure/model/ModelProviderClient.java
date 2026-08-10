@@ -2,13 +2,18 @@ package ai.cc.chongming.review.infrastructure.model;
 
 import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.gateway.ModelProfile;
+
 import java.net.URI;
 import java.util.Objects;
 
+import reactor.core.publisher.Flux;
+
 /**
  * Provider wire-protocol port used by the commercial gateway and replaceable by deterministic tests.
+ * <p>
+ * [AIREVIEW-PLAN-023#8]
  *
- * @author wangli
+ * @author zyj
  */
 public interface ModelProviderClient {
 
@@ -21,9 +26,19 @@ public interface ModelProviderClient {
     ProviderResponse invoke(ProviderRequest request);
 
     /**
+     * Streams provider chunks when the concrete provider supports it. Implementations that do not
+     * expose a streaming transport deliberately fall back to one terminal chunk; callers can
+     * therefore distinguish a real multi-chunk stream from compatibility mode without inventing
+     * client-side tokenization.
+     */
+    default Flux<ProviderStreamChunk> stream(ProviderRequest request) {
+        return Flux.defer(() -> Flux.just(ProviderStreamChunk.from(invoke(request))));
+    }
+
+    /**
      * Provider-specific invocation input. This type is never supplied by an API caller.
      *
-     * @author wangli
+     * @author zyj
      */
     record ProviderRequest(
             URI baseUrl,
@@ -45,7 +60,7 @@ public interface ModelProviderClient {
     /**
      * Provider response normalized before audit and workflow handling.
      *
-     * @author wangli
+     * @author zyj
      */
     record ProviderResponse(
             String responseId,
@@ -70,13 +85,46 @@ public interface ModelProviderClient {
         }
 
         public ProviderResponse(String responseId, String publicText, ModelGateway.Usage usage,
-                ModelGateway.FinishReason finishReason) {
+                                ModelGateway.FinishReason finishReason) {
             this(responseId, publicText, "", usage, finishReason, java.util.List.of());
         }
 
         public ProviderResponse(String responseId, String publicText, ModelGateway.Usage usage,
-                ModelGateway.FinishReason finishReason, java.util.List<ModelGateway.ToolCall> toolCalls) {
+                                ModelGateway.FinishReason finishReason, java.util.List<ModelGateway.ToolCall> toolCalls) {
             this(responseId, publicText, "", usage, finishReason, toolCalls);
+        }
+    }
+
+    /**
+     * One public provider delta or the terminal metadata/tool-call chunk.
+     */
+    record ProviderStreamChunk(
+            String responseId,
+            String publicTextDelta,
+            ModelGateway.Usage usage,
+            ModelGateway.FinishReason finishReason,
+            java.util.List<ModelGateway.ToolCall> toolCalls,
+            boolean terminal) {
+
+        public ProviderStreamChunk {
+            if (responseId == null || responseId.isBlank()) {
+                throw new IllegalArgumentException("responseId must not be blank");
+            }
+            publicTextDelta = publicTextDelta == null ? "" : publicTextDelta;
+            usage = usage == null ? new ModelGateway.Usage(0, 0, 0) : usage;
+            finishReason = finishReason == null ? ModelGateway.FinishReason.UNKNOWN : finishReason;
+            toolCalls = toolCalls == null ? java.util.List.of() : java.util.List.copyOf(toolCalls);
+        }
+
+        static ProviderStreamChunk from(ProviderResponse response) {
+            Objects.requireNonNull(response, "response must not be null");
+            return new ProviderStreamChunk(
+                    response.responseId(),
+                    response.publicText(),
+                    response.usage(),
+                    response.finishReason(),
+                    response.toolCalls(),
+                    true);
         }
     }
 }

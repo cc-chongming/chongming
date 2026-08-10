@@ -1,5 +1,7 @@
 /**
  * [AIREVIEW-PLAN-012#1.3] Thin REST client for the public review API.
+ * [AIREVIEW-PLAN-023#2] Loads safe repository identifiers from the active backend configuration.
+ * [AIREVIEW-PLAN-023#3] Launches a draft requirement through one idempotent orchestration command.
  * Request and response values deliberately remain plain objects so API fixtures can exercise them directly.
  */
 
@@ -72,6 +74,10 @@ async function fetchAllPlans(reviewId) {
 }
 
 export const reviewApi = {
+    listRepositories() {
+        return request('/api/repositories');
+    },
+
     getDashboard() {
         return request('/api/dashboard');
     },
@@ -99,6 +105,39 @@ export const reviewApi = {
     submitRequirement(requirementId, { reviewId, expectedVersion }) {
         return request(`/api/requirements/${requirementId}/submit`, {
             method: 'POST', ...jsonBody({ reviewId, expectedVersion })
+        });
+    },
+
+    launchRequirementReview(requirementId, {
+        requirementFile,
+        repositoryPath,
+        branch,
+        commit,
+        submitter,
+        publicTasks,
+        changeReason,
+        initialMessage,
+        expectedVersion,
+        idempotencyKey,
+        traceId
+    }) {
+        const form = new FormData();
+        form.append('requirementFile', requirementFile);
+        form.append('repositoryPath', repositoryPath);
+        if (branch) form.append('branch', branch);
+        if (commit) form.append('commit', commit);
+        form.append('submitter', submitter);
+        form.append('publicTasks', JSON.stringify(publicTasks));
+        form.append('changeReason', changeReason);
+        form.append('initialMessage', initialMessage);
+        form.append('expectedVersion', String(expectedVersion));
+        return request(`/api/requirements/${requirementId}/reviews`, {
+            method: 'POST',
+            body: form,
+            headers: {
+                'Idempotency-Key': idempotencyKey,
+                ...(traceId ? { 'X-Trace-Id': traceId } : {})
+            }
         });
     },
 

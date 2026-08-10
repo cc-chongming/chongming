@@ -10,6 +10,7 @@ import HumanReviewPanel from '../components/HumanReviewPanel.vue';
 import ReviewLifecyclePanel from '../components/ReviewLifecyclePanel.vue';
 import PlanPanel from '../components/PlanPanel.vue';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
 
@@ -20,6 +21,13 @@ const runtimeTrace = createRuntimeTraceStore();
 const commandBusy = ref(false);
 const commandMessage = ref('');
 let loadGeneration = 0;
+// [AIREVIEW-PLAN-023#6.3] Summary.gate becomes the human result after finalization,
+// so recover the earlier AI draft from the replayed GATE_DRAFTED fact when needed.
+const aiGateDraft = computed(() => resolveAiGateDraft(
+    state.summary?.gate ?? null,
+    state.humanGateVersions,
+    store.events.value
+));
 const roundtableRoles = computed(() => {
     const roles = new Map(store.roles.value.map((role) => [role.role, role]));
     roles.set('DIRECTOR', roles.get('DIRECTOR') ?? { role: 'DIRECTOR', type: '主持中' });
@@ -191,6 +199,9 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                     :review-id="reviewId"
                     :items="state.humanItems"
                     :gate-versions="state.humanGateVersions"
+                    :gate-draft="aiGateDraft"
+                    :debates="state.debates"
+                    :claims="state.claims"
                     :review-version="state.summary?.reviewVersion ?? null"
                     @changed="async () => { await store.refreshHumanData(); await store.refreshReports(); await store.refreshNotifications(); }"
                     @error="showError"

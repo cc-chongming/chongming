@@ -8,21 +8,26 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RuntimeTraceStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.agui.event.AguiEvent;
+
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+
 import org.junit.jupiter.api.Test;
 
 /**
- * [AIREVIEW-PLAN-022#7.1] Verifies durable runtime trace persistence, restart replay, sequence
+ * [AIREVIEW-PLAN-022#7.1][AIREVIEW-PLAN-023#8] Verifies durable runtime trace persistence, restart replay, sequence
  * continuation, retention trimming, and the auxiliary-runtime guard.
  *
- * @author wangli
+ * @author zyj
  */
 class ReviewRuntimeTraceRegistryTests {
 
@@ -119,11 +124,62 @@ class ReviewRuntimeTraceRegistryTests {
                 new AguiEvent.TextMessageStart("thread", "run", "m-1", "assistant")))
                 .isEqualTo("TEXT_MESSAGE_START:m-1");
         assertThat(ReviewRuntimeTraceRegistry.deriveEventId(
+                new AguiEvent.TextMessageContent("thread", "run", "m-1", "delta")))
+                .isNull();
+        assertThat(ReviewRuntimeTraceRegistry.deriveEventId(
                 new AguiEvent.ToolCallResult("thread", "run", "call-1", "summary", "tool", "reply-1")))
                 .isEqualTo("TOOL_CALL_RESULT:call-1");
         assertThat(ReviewRuntimeTraceRegistry.deriveEventId(
                 new AguiEvent.Custom("thread", "run", "chongming.tool-call.v1", Map.of())))
                 .isNull();
+        assertThat(ReviewRuntimeTraceRegistry.deriveEventId(
+                runtimeId(1),
+                7,
+                new AguiEvent.TextMessageStart("thread", "run", "m-1", "assistant")))
+                .isEqualTo(runtimeId(1) + ":TEXT_MESSAGE_START:m-1");
+    }
+
+    @Test
+    void repeatedRunBoundariesKeepDistinctStableIdsAndReplayAfterRestart() {
+        FakeTraceStore store = new FakeTraceStore();
+        ReviewRuntimeTraceRegistry first = registry(store, 1000);
+        String runtimeId = runtimeId(1);
+        List<AguiEvent> boundaries = List.of(
+                start(),
+                new AguiEvent.RunFinished("thread-1", "run-1"),
+                start(),
+                new AguiEvent.RunFinished("thread-1", "run-1"));
+
+        boundaries.forEach(event -> first.publish(runtimeId, event));
+        awaitTrue(() -> store.appendAttempts.get() == boundaries.size());
+
+        List<RuntimeTraceStore.RuntimeTraceRow> rows = store.findAfter(runtimeId, 0, 100);
+        assertThat(rows).hasSize(4);
+        assertThat(rows).extracting(RuntimeTraceStore.RuntimeTraceRow::eventId)
+                .doesNotHaveDuplicates()
+                .allSatisfy(eventId -> assertThat(eventId).contains(runtimeId));
+        assertThat(store.eventIdCollisions.get()).isZero();
+
+        ReviewRuntimeTraceRegistry restarted = registry(store, 1000);
+        assertThat(restarted.replayHistory(runtimeId, 0)).containsExactlyElementsOf(boundaries);
+    }
+
+    @Test
+    void serializesPersistencePerRuntimeEvenWhenWritesAreSlow() {
+        FakeTraceStore store = new FakeTraceStore();
+        store.writeDelayMillis = 15;
+        ReviewRuntimeTraceRegistry registry = registry(store, 100);
+        String runtimeId = runtimeId(1);
+
+        for (int i = 1; i <= 20; i++) {
+            registry.publish(runtimeId, text("m-" + i));
+        }
+        awaitTrue(() -> store.appendAttempts.get() == 20);
+
+        assertThat(store.maxConcurrentAppends.get()).isEqualTo(1);
+        assertThat(store.findAfter(runtimeId, 0, 100))
+                .extracting(RuntimeTraceStore.RuntimeTraceRow::sequence)
+                .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, 20).boxed().toList());
     }
 
     private static ReviewRuntimeTraceRegistry registry(FakeTraceStore store, int maxEvents) {
@@ -170,9 +226,15 @@ class ReviewRuntimeTraceRegistryTests {
 
         final Map<String, TreeMap<Long, RuntimeTraceRow>> rowsByRuntime = new ConcurrentHashMap<>();
         final AtomicBoolean failWrites = new AtomicBoolean();
+        final Set<String> eventIds = new HashSet<>();
+        final AtomicInteger eventIdCollisions = new AtomicInteger();
+        final AtomicInteger appendAttempts = new AtomicInteger();
+        final AtomicInteger concurrentAppends = new AtomicInteger();
+        final AtomicInteger maxConcurrentAppends = new AtomicInteger();
+        volatile long writeDelayMillis;
 
         @Override
-        public synchronized void append(
+        public void append(
                 String runtimeId,
                 long sequence,
                 String eventId,
@@ -180,11 +242,30 @@ class ReviewRuntimeTraceRegistryTests {
                 String payloadJson,
                 ReviewId reviewId,
                 int attemptNo) {
-            if (failWrites.get()) {
-                throw new RuntimeException("simulated write failure");
+            int active = concurrentAppends.incrementAndGet();
+            maxConcurrentAppends.accumulateAndGet(active, Math::max);
+            try {
+                if (writeDelayMillis > 0) {
+                    Thread.sleep(writeDelayMillis);
+                }
+                if (failWrites.get()) {
+                    throw new RuntimeException("simulated write failure");
+                }
+                synchronized (this) {
+                    if (eventId != null && !eventIds.add(eventId)) {
+                        eventIdCollisions.incrementAndGet();
+                        return;
+                    }
+                    rowsByRuntime.computeIfAbsent(runtimeId, ignored -> new TreeMap<>())
+                            .put(sequence, new RuntimeTraceRow(sequence, eventId, eventType, payloadJson));
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("simulated write interrupted", interrupted);
+            } finally {
+                concurrentAppends.decrementAndGet();
+                appendAttempts.incrementAndGet();
             }
-            rowsByRuntime.computeIfAbsent(runtimeId, ignored -> new TreeMap<>())
-                    .put(sequence, new RuntimeTraceRow(sequence, eventId, eventType, payloadJson));
         }
 
         @Override
@@ -209,7 +290,10 @@ class ReviewRuntimeTraceRegistryTests {
                 return;
             }
             while (rows.size() > keep) {
-                rows.pollFirstEntry();
+                RuntimeTraceRow removed = rows.pollFirstEntry().getValue();
+                if (removed.eventId() != null) {
+                    eventIds.remove(removed.eventId());
+                }
             }
         }
     }

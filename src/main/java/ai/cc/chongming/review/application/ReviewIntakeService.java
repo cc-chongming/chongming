@@ -29,9 +29,9 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 /**
- * [AIREVIEW-PLAN-011#1.2] Creates immutable requirement snapshots and applies deterministic intake idempotency.
+ * [AIREVIEW-PLAN-011#1.2][AIREVIEW-PLAN-023#3] Creates immutable requirement snapshots and honors fenced intake cancellation.
  *
- * @author wangli
+ * @author zyj
  */
 @Service
 public class ReviewIntakeService {
@@ -137,6 +137,7 @@ public class ReviewIntakeService {
                         snapshot, markdown, request.cancellation());
                 ReviewIntakeResult created = new ReviewIntakeResult(snapshot, workspaceSnapshot, false);
                 if (existing == null) {
+                    request.cancellation().checkCancelled();
                     try {
                         persistReviewRoot(snapshot, key);
                     } catch (DuplicateKeyException exception) {

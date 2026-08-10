@@ -11,6 +11,7 @@ import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
@@ -33,15 +34,16 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 /**
- * [AIREVIEW-PLAN-010#1.6] AgentScope 2.0.0 adapter that owns Harness lifecycle while keeping project governance outside AgentScope.
+ * [AIREVIEW-PLAN-010#1.6][AIREVIEW-PLAN-023#5] AgentScope 2.0.0 adapter that owns Harness lifecycle while keeping project governance outside AgentScope.
  *
- * @author wangli
+ * @author zyj
  */
 @Component
 public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
@@ -187,6 +189,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 return Mono.empty();
             }
             AtomicBoolean degraded = new AtomicBoolean();
+            AtomicReference<ContextScoutConclusion> conclusion = new AtomicReference<>();
             ScoutInitToolBudget nativeToolBudget = new ScoutInitToolBudget(agentScopeProperties.scoutMaxToolCalls());
             Mono<Void> execution;
             try {
@@ -203,7 +206,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                             if (event instanceof AgentResultEvent result && result.getResult() != null) {
                                 String visibleResult = result.getResult().getTextContent();
                                 if (visibleResult != null && !visibleResult.isBlank()) {
-                                    contextScoutHarnessFactory.recordResult(context, workspace, visibleResult);
+                                    conclusion.set(contextScoutHarnessFactory.recordResult(context, workspace, visibleResult));
                                 }
                             }
                             emitRawObservation(
@@ -224,6 +227,9 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 if (state.cancelled()) {
                     return;
                 }
+                if (!degraded.get() && conclusion.get() != null) {
+                    recordScoutCompletion(state, conclusion.get());
+                }
                 state.emit(
                         degraded.get() ? AgentRuntimeEventType.DEGRADED : AgentRuntimeEventType.MESSAGE_SENT,
                         "CONTEXT_SCOUT",
@@ -239,6 +245,37 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         degraded.set(true);
         recordScoutDegradation(state, failure);
         return Mono.empty();
+    }
+
+    /** Publishes the lightweight success fact only after the durable conclusion store has accepted it. */
+    private void recordScoutCompletion(RuntimeState state, ContextScoutConclusion conclusion) {
+        if (reviewRegistry == null) {
+            return;
+        }
+        reviewRegistry.find(state.context().reviewId()).ifPresent(review -> {
+            synchronized (review) {
+                if (state.cancelled()
+                        || review.attemptNo() != state.context().attemptNo()
+                        || review.stage().isTerminal()) {
+                    return;
+                }
+                eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                        review,
+                        ReviewEventType.CONTEXT_SCOUT_COMPLETED,
+                        RoleType.DIRECTOR,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of(
+                                "status", "COMPLETED",
+                                "schemaVersion", Integer.toString(conclusion.schemaVersion()),
+                                "publicSummary", conclusion.summary(),
+                                "conclusionRef", conclusion.reference())));
+            }
+        });
     }
 
     /**
@@ -409,7 +446,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 state.director().agent().interrupt();
                 state.roles().values().forEach(role -> role.agent().interrupt());
             } finally {
-                publishLifecycle(state, RoleType.DIRECTOR, state.context().directorLabel(), "CANCELLED");
+                publishLifecycleForRuntimeActors(state, "CANCELLED");
                 state.emit(AgentRuntimeEventType.CANCELLED, state.context().directorLabel(), "cancelled");
             }
         }).then(close(runtimeId));
@@ -431,7 +468,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                 }
                 roleSubagentFactory.release(state.context());
                 activeRuntimeByReview.remove(state.context().reviewId().value().toString(), runtimeId);
-                publishLifecycle(state, RoleType.DIRECTOR, state.context().directorLabel(), "CLOSED");
+                publishLifecycleForRuntimeActors(state, "CLOSED");
                 state.events().tryEmitComplete();
             }
         });
@@ -679,10 +716,15 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
     private void publishLifecycle(RuntimeState state, RoleType roleType, String agentId, String lifecycle) {
         if (runtimeTraceRegistry != null && agUiEventMapper != null) {
-            runtimeTraceRegistry.publish(
-                    state.context().runtimeId(),
-                    agUiEventMapper.lifecycle(state.context(), roleType, agentId, lifecycle));
+            agUiEventMapper.lifecycle(state.context(), roleType, agentId, lifecycle)
+                    .forEach(event -> runtimeTraceRegistry.publish(state.context().runtimeId(), event));
         }
+    }
+
+    private void publishLifecycleForRuntimeActors(RuntimeState state, String lifecycle) {
+        publishLifecycle(state, RoleType.DIRECTOR, state.context().directorLabel(), lifecycle);
+        state.roles().values().forEach(role ->
+                publishLifecycle(state, role.roleType(), role.label(), lifecycle));
     }
 
     private RuntimeState state(String runtimeId) {

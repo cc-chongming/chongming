@@ -1,7 +1,10 @@
 <script setup>
-import { reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
+import RepositorySelect from '../components/RepositorySelect.vue';
+
+// [AIREVIEW-PLAN-023#2] Repository input is constrained to the active backend configuration.
 
 const router = useRouter();
 const file = ref(null);
@@ -10,6 +13,8 @@ const submitting = ref(false);
 const error = ref('');
 const savedDraftId = ref(null);
 const reusedReviewId = ref(null);
+const repositoryState = ref('loading');
+const configuredRepositoryIds = ref([]);
 const form = reactive({
     title: '', description: '', assigneeId: '', repositoryPath: '', priority: 'P1', branch: 'main', commit: '', submitter: 'demo-reviewer',
     publicTasks: '核对需求范围、验收标准与实现风险', changeReason: '初始评审计划', initialMessage: '请根据公开计划开始需求评审.', remark: ''
@@ -20,6 +25,36 @@ function onFileChange(event) { file.value = event.target.files?.[0] ?? null; }
 function openFilePicker() { fileInput.value?.click(); }
 function fileSize() { return file.value ? `${(file.value.size / 1024).toFixed(1)} KB` : ''; }
 function idempotencyKey() { return globalThis.crypto?.randomUUID?.() ?? `requirement-start-${Date.now()}`; }
+const repositorySubmissionBlocked = computed(() => ['loading', 'empty'].includes(repositoryState.value));
+
+async function refreshRepositoryAvailability() {
+    repositoryState.value = 'loading';
+    try {
+        const repositories = await reviewApi.listRepositories();
+        configuredRepositoryIds.value = Array.isArray(repositories)
+            ? repositories.map((repository) => repository?.id).filter(Boolean)
+            : [];
+        repositoryState.value = configuredRepositoryIds.value.length ? 'ready' : 'empty';
+    } catch {
+        configuredRepositoryIds.value = [];
+        repositoryState.value = 'error';
+    }
+}
+
+async function ensureConfiguredRepository() {
+    if (repositoryState.value !== 'ready') await refreshRepositoryAvailability();
+    if (!configuredRepositoryIds.value.length) {
+        error.value = repositoryState.value === 'empty'
+            ? '当前没有可用仓库，暂不能保存或提交需求。'
+            : '仓库配置读取失败，请重试。';
+        return false;
+    }
+    if (!configuredRepositoryIds.value.includes(form.repositoryPath.trim())) {
+        error.value = '请选择当前配置中可用的仓库。';
+        return false;
+    }
+    return true;
+}
 
 async function submit() {
     error.value = '';
@@ -29,6 +64,7 @@ async function submit() {
     if (!form.title.trim() || !form.repositoryPath.trim() || !form.submitter.trim() || !tasks().length) { error.value = '请填写需求标题、仓库、提交人和至少一项公开计划。'; return; }
     submitting.value = true;
     try {
+        if (!await ensureConfiguredRepository()) return;
         const requirement = await reviewApi.createRequirement({
             title: form.title.trim(), description: form.description, assigneeId: form.assigneeId, repositoryPath: form.repositoryPath.trim(), priority: form.priority
         });
@@ -57,9 +93,10 @@ async function submit() {
 
 async function saveDraft() {
     error.value = '';
-    if (!form.title.trim()) { error.value = '请先填写需求标题。'; return; }
+    if (!form.title.trim() || !form.repositoryPath.trim()) { error.value = '请先填写需求标题并选择仓库。'; return; }
     submitting.value = true;
     try {
+        if (!await ensureConfiguredRepository()) return;
         const requirement = await reviewApi.createRequirement({
             title: form.title.trim(), description: form.description, assigneeId: form.assigneeId, repositoryPath: form.repositoryPath.trim(), priority: form.priority
         });
@@ -68,6 +105,8 @@ async function saveDraft() {
         error.value = formatApiError(requestError);
     } finally { submitting.value = false; }
 }
+
+onMounted(refreshRepositoryAvailability);
 </script>
 
 <template>
@@ -75,6 +114,7 @@ async function saveDraft() {
         <header class="platform-page-header"><div><p class="eyebrow">New Requirement</p><h1>新建需求</h1><p class="muted">创建需求聚合并绑定一次 AI 对抗评审。</p></div></header>
         <form class="create-wrap" @submit.prevent="submit">
             <p v-if="error" class="error-banner" role="alert">{{ error }} <RouterLink v-if="savedDraftId" :to="`/requirements/${savedDraftId}`">查看已保存草稿</RouterLink><RouterLink v-if="reusedReviewId" :to="`/reviews/${reusedReviewId}/live`">查看既有评审</RouterLink></p>
+            <p v-if="repositoryState === 'empty'" class="error-banner" role="status">当前没有可用仓库，暂不能保存或提交需求。</p>
             <div class="create-note"><span aria-hidden="true">ℹ</span> 提交后，Director AI 将自动分析需求内容并选择合适的参与角色进行对抗评审。</div>
             <div class="card"><div class="card-bd">
                 <div class="form-field"><label>需求名称</label><input v-model="form.title" required maxlength="256" placeholder="简短描述需求内容" /></div>
@@ -88,7 +128,7 @@ async function saveDraft() {
                     <input ref="fileInput" type="file" accept=".md,text/markdown" class="uz-input" @change="onFileChange" />
                 </div>
                 <div class="form-row">
-                    <div class="form-field"><label>目标仓库</label><input v-model="form.repositoryPath" required placeholder="服务端白名单中的仓库路径或标识" /></div>
+                    <div class="form-field"><RepositorySelect v-model="form.repositoryPath" required /></div>
                     <div class="form-field"><label>分支</label><input v-model="form.branch" placeholder="main" /></div>
                 </div>
                 <div class="form-row">
@@ -109,8 +149,8 @@ async function saveDraft() {
             </details>
 
             <div class="form-actions">
-                <button class="button secondary" type="button" :disabled="submitting" @click="saveDraft">保存草稿</button>
-                <button class="button" type="submit" :disabled="submitting">{{ submitting ? '正在创建与启动…' : '提交并启动评审 →' }}</button>
+                <button class="button secondary" type="button" :disabled="submitting || repositorySubmissionBlocked" @click="saveDraft">保存草稿</button>
+                <button class="button" type="submit" :disabled="submitting || repositorySubmissionBlocked">{{ submitting ? '正在创建与启动…' : '提交并启动评审 →' }}</button>
             </div>
         </form>
     </section>
