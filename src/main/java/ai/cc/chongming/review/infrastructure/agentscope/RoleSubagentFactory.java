@@ -341,7 +341,7 @@ public class RoleSubagentFactory {
             tools.addAll(reviewRepositoryToolFactory.readTools(runtimeContext, roleType, allowedToolNames));
         }
         if (reviewRoleToolFactory != null && reviewDebateToolFactory != null && reviewRepositoryToolFactory != null) {
-            assertToolContract(roleType, allowedToolNames, tools);
+            assertToolContract(runtimeContext, roleType, allowedToolNames, tools);
         }
         tools.forEach(toolkit::registerAgentTool);
         return toolkit;
@@ -356,17 +356,43 @@ public class RoleSubagentFactory {
                 .forEach(target::add);
     }
 
+    /**
+     * [AIREVIEW-PLAN-024] Read tools that are intentionally withdrawn when a role's effective
+     * fileRef grant set is empty (方案2); the registered set is then a documented subset of the
+     * declared RolePack set and the affected checkpoints must be submitted as UNKNOWN.
+     */
+    private static final java.util.Set<String> READ_TOOLS_WITHDRAWN_ON_EMPTY_GRANTS =
+            java.util.Set.of("readLines", "getFileMetadata");
+
     private void assertToolContract(
+            ReviewRuntimeContext runtimeContext,
             RoleType roleType,
             java.util.Set<String> declared,
             List<io.agentscope.core.tool.AgentTool> tools) {
         java.util.Set<String> registered = tools.stream()
                 .map(io.agentscope.core.tool.AgentTool::getName)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        if (!registered.equals(declared)) {
-            throw new IllegalStateException("RolePack tool contract mismatch for " + roleType
-                    + ": declared=" + declared + ", registered=" + registered);
+        java.util.Set<String> undeclared = new java.util.LinkedHashSet<>(registered);
+        undeclared.removeAll(declared);
+        if (!undeclared.isEmpty()) {
+            throw new IllegalStateException("RolePack tool contract violated for " + roleType
+                    + ": registered tools are not declared in the RolePack: " + undeclared
+                    + ", declared=" + declared);
         }
+        java.util.Set<String> missing = new java.util.LinkedHashSet<>(declared);
+        missing.removeAll(registered);
+        if (missing.isEmpty()) {
+            return;
+        }
+        if (READ_TOOLS_WITHDRAWN_ON_EMPTY_GRANTS.containsAll(missing)
+                && reviewRepositoryToolFactory.roleFileGrants(runtimeContext, roleType).isEmpty()) {
+            // Empty grant set: read tools are withdrawn by design, not a contract violation.
+            return;
+        }
+        throw new IllegalStateException("RolePack tool contract mismatch for " + roleType
+                + ": declared=" + declared + ", registered=" + registered
+                + "; missing tools are only acceptable when read tools are withdrawn"
+                + " because the role has no granted repository files");
     }
 
     /** Releases attempt-local snapshot and public-context references after runtime cancellation. */
