@@ -1,5 +1,6 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.application.AssessmentService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.application.ReviewContextAssembler;
 import ai.cc.chongming.review.config.AgentScopeProperties;
@@ -36,13 +37,14 @@ public class RoleSubagentFactory {
     private final ReviewDebateToolFactory reviewDebateToolFactory;
     private final ReviewRepositoryToolFactory reviewRepositoryToolFactory;
     private final ReviewContextAssembler reviewContextAssembler;
+    private final AssessmentService assessmentService;
 
     public RoleSubagentFactory(
             RolePackRegistry rolePackRegistry,
             ModelGateway modelGateway,
             AgentScopeProperties agentScopeProperties,
             ReviewWorkspaceLayout workspaceLayout) {
-        this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, null, null, null, null);
+        this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, null, null, null, null, null);
     }
 
     public RoleSubagentFactory(
@@ -53,7 +55,7 @@ public class RoleSubagentFactory {
             ReviewRoleToolFactory reviewRoleToolFactory,
             ReviewDebateToolFactory reviewDebateToolFactory) {
         this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, reviewRoleToolFactory,
-                reviewDebateToolFactory, null, null);
+                reviewDebateToolFactory, null, null, null);
     }
 
     public RoleSubagentFactory(
@@ -65,7 +67,7 @@ public class RoleSubagentFactory {
             ReviewDebateToolFactory reviewDebateToolFactory,
             ReviewRepositoryToolFactory reviewRepositoryToolFactory) {
         this(rolePackRegistry, modelGateway, agentScopeProperties, workspaceLayout, reviewRoleToolFactory,
-                reviewDebateToolFactory, reviewRepositoryToolFactory, null);
+                reviewDebateToolFactory, reviewRepositoryToolFactory, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -77,7 +79,8 @@ public class RoleSubagentFactory {
             ReviewRoleToolFactory reviewRoleToolFactory,
             ReviewDebateToolFactory reviewDebateToolFactory,
             ReviewRepositoryToolFactory reviewRepositoryToolFactory,
-            ReviewContextAssembler reviewContextAssembler) {
+            ReviewContextAssembler reviewContextAssembler,
+            AssessmentService assessmentService) {
         this.rolePackRegistry = Objects.requireNonNull(rolePackRegistry, "rolePackRegistry must not be null");
         this.modelGateway = Objects.requireNonNull(modelGateway, "modelGateway must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
@@ -86,6 +89,7 @@ public class RoleSubagentFactory {
         this.reviewDebateToolFactory = reviewDebateToolFactory;
         this.reviewRepositoryToolFactory = reviewRepositoryToolFactory;
         this.reviewContextAssembler = reviewContextAssembler;
+        this.assessmentService = assessmentService;
     }
 
     /**
@@ -161,13 +165,23 @@ public class RoleSubagentFactory {
         if (!rolePack.allowedTools().contains("complete_initial_review")) {
             throw new IllegalArgumentException("role does not require initial-review completion: " + rolePack.roleType());
         }
-        java.util.Set<String> finalizationTools = java.util.Set.of("complete_initial_review");
+        // [AIREVIEW-PLAN-024#方案1] The finalizer only exposes the assessment submissions that are
+        // still missing; persisted checkpoints never reappear in the makeup toolset or prompt.
+        List<String> missingCheckpointKeys = assessmentService == null
+                ? List.of()
+                : assessmentService.missingRequiredCheckpointKeys(
+                        runtimeContext.reviewId(), runtimeContext.attemptNo(), rolePack.roleType());
+        java.util.Set<String> finalizationTools = new java.util.LinkedHashSet<>();
+        if (!missingCheckpointKeys.isEmpty() && rolePack.allowedTools().contains("submit_assessment")) {
+            finalizationTools.add("submit_assessment");
+        }
+        finalizationTools.add("complete_initial_review");
         String publicContext = reviewRepositoryToolFactory == null
                 ? ""
                 : reviewContextAssembler == null
                         ? reviewRepositoryToolFactory.sharedProjectContext(runtimeContext).publicText(rolePack.roleType())
                         : reviewRepositoryToolFactory.rolePublicContext(runtimeContext, rolePack, reviewContextAssembler);
-        String prompt = finalizationPrompt(rolePack, publicContext);
+        String prompt = finalizationPrompt(rolePack, missingCheckpointKeys, publicContext);
         Toolkit toolkit = reviewToolkit(runtimeContext, rolePack.roleType(), finalizationTools);
         ScoutToolTraceCollector toolTraceCollector = new ScoutToolTraceCollector();
         HarnessAgent.Builder builder = HarnessAgent.builder()
@@ -228,7 +242,12 @@ public class RoleSubagentFactory {
                 : "Do not call listFiles because it is not authorized for this role; use the supplied project overview and targeted searchText or readLines "
                         + "only when repository evidence is necessary ";
         String completionGuidance = rolePack.allowedTools().contains("complete_initial_review")
-                ? "Submit every finding with submit_claim, then always call complete_initial_review, including when there are no findings. "
+                ? "For every checkpoint of your checklist submit exactly one assessment with submit_assessment: "
+                        + "when the authorized evidence is sufficient, proactively submit CONFIRMED; when the evidence you need is outside "
+                        + "this role's authorized scope, submit UNKNOWN and state the missing authorized evidence; never write "
+                        + "'file not read' as 'feature does not exist'. Submit a submit_claim only when you confirm a risk gap or form a "
+                        + "debatable proposition. After every checkpoint assessment is submitted, always call complete_initial_review, "
+                        + "including when there are no findings. "
                 : "Submit only the evidence and formal actions authorized for this role; do not claim that an unavailable completion tool was called. ";
         String checklistGuidance = rolePack.checklist().isEmpty()
                 ? ""
@@ -241,7 +260,8 @@ public class RoleSubagentFactory {
                         + ". ";
         String iterationGuidance = rolePack.allowedTools().contains("complete_initial_review")
                 ? "Your maximum is " + rolePack.maxIterations() + " model turns. Spend at most the first twelve turns "
-                        + "on repository investigation; reserve the remaining turns for submit_claim and complete_initial_review. "
+                        + "on repository investigation; reserve the remaining turns for submit_assessment, submit_claim and "
+                        + "complete_initial_review. "
                         + "When the evidence is sufficient or the investigation budget is reached, stop repository reads immediately. "
                 : "";
         return "You are the " + rolePack.roleType().name() + " review role. "
@@ -291,10 +311,16 @@ public class RoleSubagentFactory {
         };
     }
 
-    private String finalizationPrompt(RolePack rolePack, String publicContext) {
+    private String finalizationPrompt(RolePack rolePack, List<String> missingCheckpointKeys, String publicContext) {
+        String makeupGuidance = missingCheckpointKeys.isEmpty()
+                ? "All checkpoint assessments are already persisted; do not resubmit them. "
+                : "The following checkpoints still lack an assessment and must be submitted via submit_assessment before completion: "
+                        + String.join(", ", missingCheckpointKeys)
+                        + ". Do not resubmit checkpoints that are already persisted; never write 'file not read' as 'feature does not exist'. ";
         return "You are the " + rolePack.roleType().name() + " review role in protocol-finalization mode. "
                 + "The bounded investigation phase has ended. Do not investigate, read files, debate, request context, or submit new Claims. "
-                + "Your only authorized action is complete_initial_review. Call it now with a concise public summary, including when there are no findings. "
+                + makeupGuidance
+                + "Then call complete_initial_review with a concise supplemental summary, including when there are no findings. "
                 + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
                 + publicContext;
     }

@@ -578,7 +578,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         RoleSubagentFactory.RoleFinalizerRuntime finalizer =
                 roleSubagentFactory.createInitialReviewFinalizer(state.context(), roleRuntime);
         return finalizer.agent().streamEvents(
-                        "调查轮次已结束。现在仅执行协议收尾：提交已有发现并调用 complete_initial_review。",
+                        "调查轮次已结束。现在仅执行协议收尾：先用 submit_assessment 补齐尚缺的检查点结论"
+                                + "（已持久化的检查点不要重复提交），再调用 complete_initial_review。",
                         agentContext(state.context(), sessionId))
                 .doOnNext(event -> emitRawObservation(
                         state, event, roleType, roleRuntime.label() + "-finalizer", sessionId, stage,

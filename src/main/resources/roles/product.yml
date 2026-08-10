@@ -28,6 +28,7 @@ checklist:
     instruction: Identify business, compliance or experience risks introduced by the requirement.
     required: false
 allowedTools:
+  - submit_assessment
   - submit_claim
   - complete_initial_review
   - list_persisted_debate_topics

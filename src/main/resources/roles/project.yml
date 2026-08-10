@@ -28,6 +28,7 @@ checklist:
     instruction: Identify schedule or coordination risks that could block delivery of this requirement.
     required: false
 allowedTools:
+  - submit_assessment
   - submit_claim
   - complete_initial_review
   - list_persisted_debate_topics

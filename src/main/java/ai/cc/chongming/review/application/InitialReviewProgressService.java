@@ -24,14 +24,25 @@ public class InitialReviewProgressService {
     private final ReviewProtocolGuard protocolGuard;
     private final ReviewStateMachine stateMachine;
     private final ReviewEventPublisher eventPublisher;
+    private final AssessmentService assessmentService;
 
     public InitialReviewProgressService(
             ReviewProtocolGuard protocolGuard,
             ReviewStateMachine stateMachine,
             ReviewEventPublisher eventPublisher) {
+        this(protocolGuard, stateMachine, eventPublisher, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public InitialReviewProgressService(
+            ReviewProtocolGuard protocolGuard,
+            ReviewStateMachine stateMachine,
+            ReviewEventPublisher eventPublisher,
+            AssessmentService assessmentService) {
         this.protocolGuard = Objects.requireNonNull(protocolGuard, "protocolGuard must not be null");
         this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.assessmentService = assessmentService;
     }
 
     /**
@@ -62,6 +73,7 @@ public class InitialReviewProgressService {
                 return new CompletionResult(true, review.stage());
             }
             requireActiveInitialReviewer(review, actorRole);
+            requireAssessmentCoverage(review, actorRole);
             review.recordCommand(metadata, "initial-review-complete:" + actorRole.name());
             boolean newlyCompleted = !isCompleted(review, actorRole);
             review.completeInitialReview(actorRole);
@@ -137,6 +149,24 @@ public class InitialReviewProgressService {
                     null, null, null, null, 50, Map.of("completedBy", actorRole.name())));
         }
         return new CompletionResult(!newlyCompleted, review.stage());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案1] Completion guard: every required checkpoint of the role must own
+     * exactly one current assessment before the initial review can complete. A free-text
+     * publicSummary can never bypass this check; the missing stable keys are returned so the role
+     * can resubmit exactly what is absent.
+     */
+    private void requireAssessmentCoverage(Review review, RoleType actorRole) {
+        if (assessmentService == null) {
+            return;
+        }
+        java.util.List<String> missingKeys = assessmentService.missingRequiredCheckpointKeys(
+                review.id(), review.attemptNo(), actorRole);
+        if (!missingKeys.isEmpty()) {
+            throw new ReviewDomainException(ReviewErrorCode.ASSESSMENT_COVERAGE_INCOMPLETE,
+                    "required checkpoint assessments missing for " + actorRole + ": " + missingKeys);
+        }
     }
 
     private void requireActiveInitialReviewer(Review review, RoleType actorRole) {

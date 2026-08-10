@@ -388,7 +388,7 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/domain/model/ReviewAssessment.java` | 0 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/domain/repository/ReviewAssessmentStore.java` | 0 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/assessment/InMemoryReviewAssessmentStore.java` | 0 | ✅ 已完成 |
-| `src/main/java/ai/cc/chongming/review/application/AssessmentService.java` | 1 | ⏳ 待实施 |
+| `src/main/java/ai/cc/chongming/review/application/AssessmentService.java` | 1 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrant.java` | 2 | ⏳ 待实施 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrantSet.java` | 2 | ⏳ 待实施 |
 | `src/main/java/ai/cc/chongming/review/domain/model/ReviewDispatchCommand.java` | 3 | ⏳ 待实施 |
@@ -402,7 +402,7 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStore.java` | 5 | ⏳ 待实施 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewDispatchPersistenceMapper.java` | 5 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/assessment/ReviewAssessmentContractTests.java` | 0 | ✅ 已完成 |
-| `src/test/java/ai/cc/chongming/review/application/AssessmentServiceTests.java` | 1 | ⏳ 待实施 |
+| `src/test/java/ai/cc/chongming/review/application/AssessmentServiceTests.java` | 1 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/agentscope/RepositoryFileGrantTests.java` | 2 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/application/ReviewDispatchServiceTests.java` | 3 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/agentscope/ReviewWorkflowDispatcherTests.java` | 3 | ⏳ 待实施 |
@@ -418,9 +418,9 @@ readLines(fileRef, startLine, lineCount?)
 |---|---:|---|
 | `src/main/java/ai/cc/chongming/review/domain/model/ReviewTypes.java` | 0 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/domain/role/RolePack.java`、`RolePackRegistry.java` | 0 | ✅ 已完成 |
-| `src/main/resources/roles/product.yml`、`project.yml`、`frontend.yml`、`backend.yml` | 0-1 | ✅ 方案0 已完成（方案1 待续） |
-| `RoleSubagentFactory.java`、`ReviewRoleToolFactory.java`、`AgentScopeReviewRuntimeAdapter.java` | 1 | ⏳ 待实施 |
-| `InitialReviewProgressService.java` | 1 | ⏳ 待实施 |
+| `src/main/resources/roles/product.yml`、`project.yml`、`frontend.yml`、`backend.yml` | 0-1 | ✅ 已完成（方案0 checklist；方案1 allowedTools 追加 submit_assessment） |
+| `RoleSubagentFactory.java`、`ReviewRoleToolFactory.java`、`AgentScopeReviewRuntimeAdapter.java` | 1 | ✅ 已完成 |
+| `InitialReviewProgressService.java` | 1 | ✅ 已完成 |
 | `ReviewContextAssembler.java`、`ReviewRepositoryToolFactory.java` | 2 | ⏳ 待实施 |
 | `RepositoryToolContext.java`、`ReadOnlyRepositoryTools.java`、`RepositorySearchIndex.java` | 2 | ⏳ 待实施 |
 | `ReviewDirectorHarnessFactory.java`、`ReviewWorkflowDispatcher.java` | 3 | ⏳ 待实施 |
@@ -506,10 +506,15 @@ readLines(fileRef, startLine, lineCount?)
 | 2026-08-10 | 修正 `readLines` 根因假设，采用角色授权 fileRef、动态工具注册和失败不扣预算。 |
 | 2026-08-10 | 明确本地完整会话日志与本地明文调试密钥是接受的调试约定，不作为缺陷移除。 |
 | 2026-08-10 | 方案0 完成：冻结五态 `AssessmentStatus` 与 `ReviewAssessment`、批量幂等 `ReviewAssessmentStore`、内存实现；`RolePack.checklist` 升级为稳定 `Checkpoint` 契约，四个核心角色各 6 检查点（5 required）。 |
+| 2026-08-10 | 方案1 完成：新增 `AssessmentService`（服务端注入身份+幂等+checklist 归属校验+缺失查询+派生完成摘要）与 `submit_assessment` 工具；`complete_initial_review` 前置 `ASSESSMENT_COVERAGE_INCOMPLETE` 覆盖守卫；publicSummary 由持久化 Assessment/Claim 服务端派生；Finalizer 只补交缺失检查点；定向测试 47/47 通过（AssessmentServiceTests、InitialReviewProgressServiceTests、RoleSubagentIsolationTests、AgentScopeReviewRuntimeAdapterTests、RolePackContractTests、ReviewAssessmentContractTests）。 |
 
 ## 偏差记录
 
 - 2026-08-10：迁移文件由 `V17__create_review_assessment_and_dispatch_tables.sql` 改为 `V19__create_review_assessment_and_dispatch_tables.sql`。原因：V17（`context_scout_conclusion`）与 V18（`requirement_review_launch_command`）已被 PLAN-023 占用且 Flyway 迁移历史不可变；影响：Flyway 版本序列顺延至 V19；替代方案：重命名 PLAN-023 迁移——拒绝（迁移历史不可变）。
 - 2026-08-10（方案0）：`RolePack.checklist` 由 `List<String>` 升级为 `List<Checkpoint>` 后，两处消费方做了必要的编译期适配——`RoleSubagentFactory.rolePrompt` 改为按 `checkpointKey (instruction)` 渲染检查点文案、`ReviewContextAssemblerTests` 的 RolePack 夹具改用 `Checkpoint`。原因：检查点类型升级为稳定契约是方案0 既定目标；影响：仅适配读取方式，未改变方案1 对这两处的语义职责；替代方案：保留 `List<String>` 另加并行字段——拒绝（会造成双源不一致）。
+- 2026-08-10（方案1）：`RolePackRegistry` 工具白名单追加 `submit_assessment`，`ReviewErrorCode` 新增 `ASSESSMENT_COVERAGE_INCOMPLETE`。原因：yml 的 allowedTools 校验与完成守卫错误码是方案1 的强制配套改动，但方案1 文件清单未列出这两个文件；影响：仅新增白名单条目与枚举值，不改变既有语义；替代方案：绕过白名单校验——拒绝（会削弱角色包契约校验）。
+- 2026-08-10（方案1）：publicSummary 服务端派生实现落在 `AssessmentService.derivedCompletionSummary` + `ReviewRoleToolFactory.CompleteInitialReviewTool`，`AgentScopeReviewRuntimeAdapter` 仅同步 Finalizer 提示文案。原因：任务要求 Adapter 改动保持最小、不重构编排枢纽；影响：派生摘要经 complete_initial_review 命令进入 ROLE_COMPLETED 事件，与计划“由已持久化事实派生”一致；替代方案：在 Adapter 内拦截并改写 publicSummary——拒绝（侵入编排枢纽且产生双事实来源）。
+- 2026-08-10（方案1）：`application-test.yml` 显式设置 `review.persistence.enabled: false`。原因：`AssessmentService` 强依赖 `ReviewAssessmentStore` bean，而 MyBatis 实现属方案5，application.yml 默认 `enabled=true` 会导致全上下文测试缺 bean；影响：测试上下文统一走内存实现，同时免除 Flyway 连接占位数据库；替代方案：`AssessmentService` 可选注入——拒绝（弱化覆盖守卫语义）。
+- 2026-08-10（方案1）：`InitialReviewProgressService`、`RoleSubagentFactory`、`ReviewRoleToolFactory` 采用“新增 `@Autowired` 全参构造器 + 旧构造器委托”扩展注入 `AssessmentService`。原因：保持既有测试夹具与非 Spring 调用点兼容；影响：`AssessmentService` 缺省时守卫与 Finalizer 补缺降级为无操作（生产装配始终注入）；替代方案：直接修改原构造器签名——拒绝（破坏既有调用点）。
 
 实施过程中任何接口、文件、状态机或验收标准调整，都必须先记录原因、影响与替代方案，再修改对应方案状态。

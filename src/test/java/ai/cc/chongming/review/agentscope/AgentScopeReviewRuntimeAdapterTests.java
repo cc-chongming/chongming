@@ -1,5 +1,8 @@
 package ai.cc.chongming.review.agentscope;
 
+import ai.cc.chongming.review.application.AssessmentService;
+import ai.cc.chongming.review.application.ClaimService;
+import ai.cc.chongming.review.application.EvidenceLedgerService;
 import ai.cc.chongming.review.application.IntakeCancellation;
 import ai.cc.chongming.review.application.InitialReviewProgressService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
@@ -11,6 +14,7 @@ import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
 import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewTypes.AssessmentStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
@@ -24,9 +28,12 @@ import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeStartRequest
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeReviewRuntimeAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.ContextScoutHarnessFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewDirectorHarnessFactory;
+import ai.cc.chongming.review.infrastructure.agentscope.ReviewRoleToolFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkspaceLayout;
 import ai.cc.chongming.review.infrastructure.agentscope.RoleSubagentFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ScoutToolTraceCollector;
+import ai.cc.chongming.review.infrastructure.assessment.InMemoryReviewAssessmentStore;
+import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.event.AgentResultEvent;
@@ -524,6 +531,104 @@ class AgentScopeReviewRuntimeAdapterTests {
                 null,
                 scoutFactory,
                 events::add);
+    }
+
+    @Test
+    void completesInitialReviewOnlyAfterAllRequiredAssessmentsAreSubmitted() {
+        ReviewRuntimeContext context = context(1);
+        // The stage transition requires every core role to have finished its initial review, so the
+        // other three core roles are pre-activated as already completed while PRODUCT runs the
+        // assessment submission flow under test.
+        List<RoleActivation> coreActivations = new ArrayList<>();
+        for (RoleType coreRole : List.of(
+                RoleType.PRODUCT, RoleType.PROJECT, RoleType.FRONTEND, RoleType.BACKEND)) {
+            coreActivations.add(new RoleActivation(
+                    coreRole, context.roleLabel(coreRole), coreRole != RoleType.PRODUCT));
+        }
+        Review review = Review.restore(context.reviewId(), ReviewStage.INITIAL_REVIEW, context.attemptNo(), 0,
+                coreActivations,
+                Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        ai.cc.chongming.review.domain.role.RolePackRegistry rolePackRegistry =
+                new ai.cc.chongming.review.domain.role.RolePackRegistry(
+                        new org.springframework.core.io.support.PathMatchingResourcePatternResolver());
+        InMemoryReviewAssessmentStore assessmentStore = new InMemoryReviewAssessmentStore();
+        AssessmentService assessmentService = new AssessmentService(assessmentStore, rolePackRegistry);
+        InitialReviewProgressService progressService = new InitialReviewProgressService(
+                new ReviewProtocolGuard(), new ReviewStateMachine(), events::add, assessmentService);
+        InMemoryReviewDebateStore debateStore = new InMemoryReviewDebateStore();
+        ClaimService claimService = new ClaimService(
+                Mockito.mock(EvidenceLedgerService.class), debateStore, new ReviewProtocolGuard());
+        ReviewRoleToolFactory roleToolFactory = new ReviewRoleToolFactory(
+                registry, claimService, progressService, assessmentService, debateStore);
+        ReviewProperties reviewProperties = new ReviewProperties(temporaryDirectory.toString(), 8, 2);
+        ReviewWorkspaceLayout workspaceLayout = new ReviewWorkspaceLayout(
+                reviewProperties, new com.fasterxml.jackson.databind.ObjectMapper());
+        AgentScopeProperties properties = new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString());
+        List<String> requiredKeys = List.of("product.requirement_completeness", "product.acceptance_criteria",
+                "product.user_value", "product.scope_boundary", "product.testability");
+        List<ModelGateway.ModelResponse> script = new ArrayList<>();
+        // The role first tries to complete without any assessment: the coverage guard must reject it.
+        script.add(toolCallResponse("call-complete-early", "complete_initial_review",
+                Map.of("publicSummary", "试图用摘要绕过覆盖检查")));
+        for (int index = 0; index < requiredKeys.size(); index++) {
+            script.add(toolCallResponse("call-assessment-" + index, "submit_assessment", Map.of(
+                    "checkpointKey", requiredKeys.get(index),
+                    "status", "CONFIRMED",
+                    "summary", "已确认 " + requiredKeys.get(index))));
+        }
+        script.add(toolCallResponse("call-complete-final", "complete_initial_review",
+                Map.of("publicSummary", "PRODUCT 初审完成")));
+        script.add(new ModelGateway.ModelResponse(
+                "response-stop", "test-model", "初审已完成。", new ModelGateway.Usage(1, 1, 2),
+                ModelGateway.FinishReason.STOP, Duration.ofMillis(5), 1, "trace-001"));
+        AtomicInteger turns = new AtomicInteger();
+        ModelGateway gateway = (request, cancellation) -> Mono.just(
+                script.get(Math.min(turns.getAndIncrement(), script.size() - 1)));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<io.agentscope.harness.agent.DistributedStore> storeProvider = Mockito.mock(ObjectProvider.class);
+        AgentScopeReviewRuntimeAdapter adapter = new AgentScopeReviewRuntimeAdapter(
+                new ReviewDirectorHarnessFactory(workspaceLayout, gateway, properties, storeProvider),
+                new RoleSubagentFactory(rolePackRegistry, gateway, properties, workspaceLayout,
+                        roleToolFactory, null, null, null, assessmentService),
+                new AgentEventAdapter(),
+                registry,
+                progressService,
+                null,
+                null,
+                null,
+                events::add);
+
+        adapter.start(startRequest(context)).block();
+        adapter.registerRole(new AgentRuntimeRoleRequest(
+                context.runtimeId(), context, RoleType.PRODUCT, context.roleLabel(RoleType.PRODUCT),
+                context.roleSessionId(RoleType.PRODUCT))).block();
+
+        adapter.send(context.runtimeId(), context.roleLabel(RoleType.PRODUCT), "请开始本次初审。").block();
+
+        // The early completion was rejected; the role only completed after all required CONFIRMED
+        // assessments were persisted, and the public summary was derived server-side.
+        assertThat(review.stage()).isEqualTo(ReviewStage.CONFLICT_DETECTION);
+        assertThat(review.roleActivations()).filteredOn(activation -> activation.roleType() == RoleType.PRODUCT)
+                .singleElement()
+                .satisfies(activation -> assertThat(activation.initialReviewCompleted()).isTrue());
+        assertThat(assessmentStore.findByReview(review.id(), context.attemptNo(), RoleType.PRODUCT))
+                .hasSize(5)
+                .allSatisfy(assessment -> assertThat(assessment.status()).isEqualTo(AssessmentStatus.CONFIRMED));
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .containsExactly(ReviewEventType.ROLE_COMPLETED, ReviewEventType.INITIAL_REVIEW_COMPLETED);
+        assertThat(events.getFirst().payload().get("summary").toString())
+                .contains("CONFIRMED=5")
+                .contains("product.user_value：CONFIRMED");
+    }
+
+    private ModelGateway.ModelResponse toolCallResponse(String callId, String toolName, Map<String, Object> input) {
+        return new ModelGateway.ModelResponse(
+                "response-" + callId, "test-model", "", new ModelGateway.Usage(1, 1, 2),
+                ModelGateway.FinishReason.TOOL_CALL, Duration.ofMillis(5), 1,
+                List.of(new ModelGateway.ToolCall(callId, toolName, input)), "trace-001");
     }
 
     private AgentRuntimeStartRequest startRequest(ReviewRuntimeContext context) {

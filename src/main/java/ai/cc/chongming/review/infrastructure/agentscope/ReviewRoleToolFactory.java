@@ -1,9 +1,12 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.application.AssessmentService;
 import ai.cc.chongming.review.application.ClaimService;
 import ai.cc.chongming.review.application.InitialReviewProgressService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.AgentTool;
@@ -19,8 +22,9 @@ import reactor.core.publisher.Mono;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-009#1.4] Creates review-bound write tools. The model supplies only public
- * fields; review identity, actor identity, version, and idempotency are server controlled.
+ * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案1] Creates review-bound write tools. The model
+ * supplies only public fields; review identity, actor identity, version, and idempotency are
+ * server controlled.
  *
  * @author wangli
  */
@@ -30,14 +34,20 @@ public class ReviewRoleToolFactory {
     private final ReviewRegistry reviewRegistry;
     private final ClaimService claimService;
     private final InitialReviewProgressService progressService;
+    private final AssessmentService assessmentService;
+    private final ReviewDebateStore debateStore;
 
     public ReviewRoleToolFactory(
             ReviewRegistry reviewRegistry,
             ClaimService claimService,
-            InitialReviewProgressService progressService) {
+            InitialReviewProgressService progressService,
+            AssessmentService assessmentService,
+            ReviewDebateStore debateStore) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.claimService = Objects.requireNonNull(claimService, "claimService must not be null");
         this.progressService = Objects.requireNonNull(progressService, "progressService must not be null");
+        this.assessmentService = Objects.requireNonNull(assessmentService, "assessmentService must not be null");
+        this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
     }
 
     public List<AgentTool> initialReviewTools(ReviewRuntimeContext context, RoleType roleType) {
@@ -45,7 +55,75 @@ public class ReviewRoleToolFactory {
         if (roleType == RoleType.DIRECTOR || roleType == RoleType.JUDGE) {
             throw new IllegalArgumentException("only review roles may receive initial-review tools");
         }
-        return List.of(new SubmitClaimTool(context, roleType), new CompleteInitialReviewTool(context, roleType));
+        return List.of(
+                new SubmitAssessmentTool(context, roleType),
+                new SubmitClaimTool(context, roleType),
+                new CompleteInitialReviewTool(context, roleType));
+    }
+
+    private final class SubmitAssessmentTool implements AgentTool {
+        private final ReviewRuntimeContext context;
+        private final RoleType roleType;
+
+        private SubmitAssessmentTool(ReviewRuntimeContext context, RoleType roleType) {
+            this.context = context;
+            this.roleType = roleType;
+        }
+
+        @Override
+        public String getName() {
+            return "submit_assessment";
+        }
+
+        @Override
+        public String getDescription() {
+            return "Submit one structured checkpoint assessment. Every checkpoint of your checklist needs exactly one conclusion: "
+                    + "CONFIRMED when authorized evidence is sufficient, PARTIAL when only partly satisfied, GAP when a confirmed gap exists, "
+                    + "UNKNOWN when the required evidence is outside your authorized scope, NOT_APPLICABLE when the checkpoint does not apply. "
+                    + "UNKNOWN must name the missing authorized evidence in reasonSummary; never write 'file not read' as 'feature does not exist'. "
+                    + "Role identity, review, attempt, version and idempotency are injected by the server.";
+        }
+
+        @Override
+        public Map<String, Object> getParameters() {
+            return Map.of(
+                    "type", "object",
+                    "properties", Map.of(
+                            "checkpointKey", stringSchema("Stable checkpoint key from this role's checklist"),
+                            "status", enumSchema("CONFIRMED", "PARTIAL", "GAP", "UNKNOWN", "NOT_APPLICABLE"),
+                            "summary", stringSchema("Public checkpoint conclusion"),
+                            "reasonSummary", stringSchema("Required for PARTIAL, GAP and UNKNOWN: the unmet part, the gap, or the missing authorized evidence"),
+                            "evidenceIds", Map.of("type", "array", "items", Map.of("type", "string"))),
+                    "required", List.of("checkpointKey", "status", "summary"),
+                    "additionalProperties", false);
+        }
+
+        @Override
+        public Boolean getStrict() {
+            return true;
+        }
+
+        @Override
+        public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+            return Mono.fromSupplier(() -> {
+                Review review = requireReview(context);
+                synchronized (review) {
+                    Map<String, Object> input = param.getInput();
+                    AssessmentService.AssessmentSubmission submission = new AssessmentService.AssessmentSubmission(
+                            metadata(review, roleType, param), roleType,
+                            requiredText(input, "checkpointKey"),
+                            AssessmentStatus.valueOf(requiredText(input, "status")),
+                            requiredText(input, "summary"),
+                            optionalText(input, "reasonSummary"),
+                            evidenceIds(input.get("evidenceIds")));
+                    AssessmentService.AssessmentSubmissionResult result = assessmentService.submit(review, submission);
+                    return ToolResultBlock.text("assessmentSaved=true; checkpointKey="
+                            + result.assessment().checkpointKey() + "; status=" + result.assessment().status()
+                            + "; replayed=" + result.replayed());
+                }
+            }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
+                    "assessmentSubmissionRejected: " + rejectionReason(exception))));
+        }
     }
 
     private final class SubmitClaimTool implements AgentTool {
@@ -64,7 +142,8 @@ public class ReviewRoleToolFactory {
 
         @Override
         public String getDescription() {
-            return "Submit one public, auditable review claim. Call once for every finding, then call complete_initial_review.";
+            return "Submit one public, auditable review claim. Call only when you confirm a risk gap or form a debatable proposition; "
+                    + "positive checkpoint conclusions belong to submit_assessment instead.";
         }
 
         @Override
@@ -121,7 +200,9 @@ public class ReviewRoleToolFactory {
 
         @Override
         public String getDescription() {
-            return "Explicitly finish this role's first review after all claims have been submitted, including when there are no findings.";
+            return "Explicitly finish this role's first review after every checkpoint assessment has been submitted via submit_assessment. "
+                    + "The server rejects completion while required checkpoints are missing; publicSummary is only supplemental because the "
+                    + "public summary is derived server-side from persisted assessments and claims.";
         }
 
         @Override
@@ -141,9 +222,16 @@ public class ReviewRoleToolFactory {
             return Mono.fromSupplier(() -> {
                 Review review = requireReview(context);
                 synchronized (review) {
-                    InitialReviewProgressService.CompletionResult result = progressService.completeWithoutClaim(
-                            review, metadata(review, roleType, param), roleType,
+                    // [AIREVIEW-PLAN-024#方案1] The public completion summary is assembled from
+                    // persisted assessments and claims; the model text is supplemental only.
+                    List<Claim> roleClaims = debateStore.findClaims(review.id()).stream()
+                            .filter(claim -> claim.roleType() == roleType)
+                            .toList();
+                    String derivedSummary = assessmentService.derivedCompletionSummary(
+                            review.id(), review.attemptNo(), roleType, roleClaims,
                             requiredText(param.getInput(), "publicSummary"));
+                    InitialReviewProgressService.CompletionResult result = progressService.completeWithoutClaim(
+                            review, metadata(review, roleType, param), roleType, derivedSummary);
                     return ToolResultBlock.text("initialReviewCompleted=true; stage=" + result.stage() + "; replayed=" + result.replayed());
                 }
             }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
@@ -189,6 +277,21 @@ public class ReviewRoleToolFactory {
             throw new IllegalArgumentException(field + " is required");
         }
         return value.toString();
+    }
+
+    private static String optionalText(Map<String, Object> input, String field) {
+        Object value = input.get(field);
+        if (value == null || value.toString().isBlank()) {
+            return null;
+        }
+        return value.toString();
+    }
+
+    private static String rejectionReason(Throwable failure) {
+        if (failure instanceof ai.cc.chongming.review.domain.exception.ReviewDomainException domain) {
+            return domain.errorCode().name() + ": " + domain.getMessage();
+        }
+        return failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
     }
 
     private static Map<String, Object> stringSchema(String description) {

@@ -1,5 +1,9 @@
 review:
   workspace-root: ${java.io.tmpdir}/chongming-test-workspace
+  # [AIREVIEW-PLAN-024#方案1] Keep the test context on in-memory stores: the MyBatis
+  # ReviewAssessmentStore lands with 方案5, so full-context tests must not require it.
+  persistence:
+    enabled: false
   max-agents: 8
   max-debate-rounds: 2
   agentscope:

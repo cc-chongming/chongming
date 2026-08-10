@@ -33,6 +33,7 @@ public class RolePackRegistry {
             "readLines",
             "getFileMetadata",
             "submitEvidence",
+            "submit_assessment",
             "submit_claim",
             "complete_initial_review",
             "list_persisted_debate_topics",

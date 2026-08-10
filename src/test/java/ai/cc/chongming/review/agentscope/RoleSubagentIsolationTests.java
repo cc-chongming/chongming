@@ -48,7 +48,7 @@ class RoleSubagentIsolationTests {
         assertThat(product.sessionId()).isEqualTo(context.roleSessionId(RoleType.PRODUCT));
         assertThat(product.workspace()).isNotEqualTo(workspaceLayout.open(context).attempt());
         assertThat(product.rolePack().allowedTools())
-                .contains("searchText", "submit_claim", "complete_initial_review")
+                .contains("searchText", "submit_assessment", "submit_claim", "complete_initial_review")
                 .doesNotContain("submitEvidence");
         assertThatThrownBy(() -> factory.create(context, workspaceLayout.open(context), RoleType.DIRECTOR))
                 .isInstanceOf(IllegalArgumentException.class)

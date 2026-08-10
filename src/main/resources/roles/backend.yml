@@ -28,6 +28,7 @@ checklist:
     instruction: Identify throughput, latency or resource usage risks introduced by the change.
     required: false
 allowedTools:
+  - submit_assessment
   - submit_claim
   - complete_initial_review
   - list_persisted_debate_topics
