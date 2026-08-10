@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 /**
@@ -231,7 +232,13 @@ public class RoleSubagentFactory {
                 : "Submit only the evidence and formal actions authorized for this role; do not claim that an unavailable completion tool was called. ";
         String checklistGuidance = rolePack.checklist().isEmpty()
                 ? ""
-                : "You must explicitly cover these review checkpoints: " + String.join("; ", rolePack.checklist()) + ". ";
+                : "You must explicitly cover these review checkpoints: "
+                        + rolePack.checklist().stream()
+                                .map(checkpoint -> checkpoint.hasStableKey()
+                                        ? checkpoint.checkpointKey() + " (" + checkpoint.instruction() + ")"
+                                        : checkpoint.instruction())
+                                .collect(Collectors.joining("; "))
+                        + ". ";
         String iterationGuidance = rolePack.allowedTools().contains("complete_initial_review")
                 ? "Your maximum is " + rolePack.maxIterations() + " model turns. Spend at most the first twelve turns "
                         + "on repository investigation; reserve the remaining turns for submit_claim and complete_initial_review. "

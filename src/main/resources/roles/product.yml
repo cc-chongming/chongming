@@ -9,8 +9,24 @@ contextSelectors:
   - scout-overview
   - role-scope
 checklist:
-  - Check value and user impact.
-  - Check acceptance criteria and scope gaps.
+  - checkpointKey: product.requirement_completeness
+    instruction: Verify the requirement states complete goals, user journeys, inputs, outputs and explicit out-of-scope boundaries.
+    required: true
+  - checkpointKey: product.acceptance_criteria
+    instruction: Verify every promised behavior has observable, testable acceptance criteria.
+    required: true
+  - checkpointKey: product.user_value
+    instruction: Verify the change delivers concrete user value and identify users or flows negatively affected.
+    required: true
+  - checkpointKey: product.scope_boundary
+    instruction: Verify the scope is bounded, free of hidden expansions, and consistent with existing product behavior.
+    required: true
+  - checkpointKey: product.testability
+    instruction: Verify the requirement can be validated end to end and name anything that blocks verification.
+    required: true
+  - checkpointKey: product.business_risk
+    instruction: Identify business, compliance or experience risks introduced by the requirement.
+    required: false
 allowedTools:
   - submit_claim
   - complete_initial_review

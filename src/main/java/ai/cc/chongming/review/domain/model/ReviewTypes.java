@@ -109,6 +109,27 @@ public final class ReviewTypes {
     }
 
     /**
+     * [AIREVIEW-PLAN-024#方案0] Five frozen statuses for a checkpoint assessment conclusion.
+     *
+     * @author wangli
+     */
+    public enum AssessmentStatus {
+        CONFIRMED,
+        PARTIAL,
+        GAP,
+        UNKNOWN,
+        NOT_APPLICABLE;
+
+        /**
+         * PARTIAL must explain the unmet part, GAP must explain the gap, and UNKNOWN must name the
+         * missing authorized evidence; "not seen" must never be written as "not implemented".
+         */
+        public boolean requiresReasonSummary() {
+            return this == PARTIAL || this == GAP || this == UNKNOWN;
+        }
+    }
+
+    /**
      * @author wangli
      */
     public enum ClaimSeverity {

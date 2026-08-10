@@ -11,6 +11,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
 import ai.cc.chongming.review.domain.role.RolePack;
+import ai.cc.chongming.review.domain.role.RolePack.Checkpoint;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -74,7 +75,7 @@ class ReviewContextAssemblerTests {
                 List.of("Always"),
                 "backend-v1",
                 Set.of("requirement-snapshot", "public-claims"),
-                List.of("Check API"),
+                List.of(new Checkpoint("backend.api_contract", "Check API", true)),
                 Set.of("searchText"),
                 Kind.ROLE_ASSESSMENT,
                 "role-reviewer",

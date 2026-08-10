@@ -9,8 +9,24 @@ contextSelectors:
   - scout-overview
   - role-scope
 checklist:
-  - Check user interaction and UI state coverage.
-  - Check client contracts and error handling.
+  - checkpointKey: frontend.interaction_flow
+    instruction: Verify the user interaction flows described by the requirement are complete, consistent and navigable.
+    required: true
+  - checkpointKey: frontend.ui_state_coverage
+    instruction: Verify loading, empty, error and edge states of the affected UI are defined and covered.
+    required: true
+  - checkpointKey: frontend.api_contract
+    instruction: Verify the client-side contracts with backend interfaces match the requirement in shape, field and lifecycle.
+    required: true
+  - checkpointKey: frontend.error_handling
+    instruction: Verify client-side failure handling, retry and user feedback are specified for reachable failure paths.
+    required: true
+  - checkpointKey: frontend.accessibility
+    instruction: Verify accessibility and responsive behavior expectations for the affected pages are addressed.
+    required: true
+  - checkpointKey: frontend.client_risk
+    instruction: Identify browser compatibility, performance or state management risks introduced on the client side.
+    required: false
 allowedTools:
   - submit_claim
   - complete_initial_review

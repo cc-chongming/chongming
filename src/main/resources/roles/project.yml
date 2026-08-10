@@ -9,8 +9,24 @@ contextSelectors:
   - scout-overview
   - role-scope
 checklist:
-  - Check dependencies and delivery sequencing.
-  - Check ownership and acceptance risk.
+  - checkpointKey: project.delivery_scope
+    instruction: Verify the delivery scope is clearly decomposed into implementable work items with visible boundaries.
+    required: true
+  - checkpointKey: project.dependency_risk
+    instruction: Verify external, cross-team and upstream dependencies are identified and their availability risk is assessed.
+    required: true
+  - checkpointKey: project.milestone_feasibility
+    instruction: Verify milestones, sequencing and effort estimates are feasible for the stated deadline.
+    required: true
+  - checkpointKey: project.ownership_readiness
+    instruction: Verify ownership, review responsibilities and acceptance process are assignable and unambiguous.
+    required: true
+  - checkpointKey: project.rollout_and_rollback
+    instruction: Verify rollout steps, feature flags or rollback paths exist for risky changes.
+    required: true
+  - checkpointKey: project.schedule_risk
+    instruction: Identify schedule or coordination risks that could block delivery of this requirement.
+    required: false
 allowedTools:
   - submit_claim
   - complete_initial_review

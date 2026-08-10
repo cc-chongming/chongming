@@ -2,8 +2,11 @@ package ai.cc.chongming.review.domain.role;
 
 import ai.cc.chongming.review.domain.gateway.StructuredOutputs.Kind;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.role.RolePack.Checkpoint;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -106,7 +109,7 @@ public class RolePackRegistry {
                 textList(values, "activationRules"),
                 text(values, "promptVersion"),
                 Set.copyOf(textList(values, "contextSelectors")),
-                textList(values, "checklist"),
+                checkpoints(values, resource.getFilename()),
                 Set.copyOf(textList(values, "allowedTools")),
                 Kind.valueOf(text(values, "outputKind").toUpperCase(Locale.ROOT)),
                 text(values, "modelProfile"),
@@ -115,7 +118,79 @@ public class RolePackRegistry {
         if (!ALLOWED_TOOL_NAMES.containsAll(rolePack.allowedTools())) {
             throw new IllegalArgumentException("RolePack requests a non-whitelisted tool: " + rolePack.roleType());
         }
+        requireCheckpointContract(rolePack, resource.getFilename());
         return rolePack;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案0] Parses checklist entries in both shapes: structured
+     * {@code checkpointKey + instruction + required} entries and legacy plain-text entries, which are
+     * kept as checkpoints without a stable key during the compatibility transition.
+     */
+    private List<Checkpoint> checkpoints(Map<String, Object> values, String filename) {
+        Object value = values.get("checklist");
+        if (!(value instanceof List<?> list) || list.isEmpty()) {
+            throw new IllegalArgumentException("RolePack checklist must be a non-empty list: " + filename);
+        }
+        Set<String> keys = new HashSet<>();
+        List<Checkpoint> checkpoints = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof String text) {
+                if (text.isBlank()) {
+                    throw new IllegalArgumentException("RolePack checklist contains blank value: " + filename);
+                }
+                checkpoints.add(new Checkpoint(null, text, false));
+            } else if (item instanceof Map<?, ?> entry) {
+                Checkpoint checkpoint = checkpoint(entry, filename);
+                if (!keys.add(checkpoint.checkpointKey())) {
+                    throw new IllegalArgumentException(
+                            "RolePack checklist contains duplicate checkpointKey " + checkpoint.checkpointKey()
+                                    + ": " + filename);
+                }
+                checkpoints.add(checkpoint);
+            } else {
+                throw new IllegalArgumentException(
+                        "RolePack checklist entry must be text or a checkpoint map: " + filename);
+            }
+        }
+        return List.copyOf(checkpoints);
+    }
+
+    private Checkpoint checkpoint(Map<?, ?> entry, String filename) {
+        Object key = entry.get("checkpointKey");
+        Object instruction = entry.get("instruction");
+        if (!(key instanceof String keyText) || keyText.isBlank()) {
+            throw new IllegalArgumentException("RolePack checkpoint must declare checkpointKey: " + filename);
+        }
+        if (!(instruction instanceof String instructionText) || instructionText.isBlank()) {
+            throw new IllegalArgumentException(
+                    "RolePack checkpoint " + keyText + " must declare instruction: " + filename);
+        }
+        Object required = entry.get("required");
+        boolean requiredFlag = required instanceof Boolean flag && flag;
+        return new Checkpoint(keyText, instructionText, requiredFlag);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案0] The four core roles must expose only stable-key checkpoints and at
+     * least one required checkpoint; legacy text entries remain allowed for optional roles.
+     */
+    private void requireCheckpointContract(RolePack rolePack, String filename) {
+        if (!rolePack.roleType().isCore()) {
+            return;
+        }
+        for (Checkpoint checkpoint : rolePack.checklist()) {
+            if (!checkpoint.hasStableKey()) {
+                throw new IllegalArgumentException(
+                        "Core role " + rolePack.roleType() + " checklist entry lacks a stable checkpointKey: "
+                                + filename);
+            }
+        }
+        if (rolePack.checklist().stream().noneMatch(Checkpoint::required)) {
+            throw new IllegalArgumentException(
+                    "Core role " + rolePack.roleType() + " must declare at least one required checkpoint: "
+                            + filename);
+        }
     }
 
     private String text(Map<String, Object> values, String key) {

@@ -9,8 +9,24 @@ contextSelectors:
   - scout-overview
   - role-scope
 checklist:
-  - Check API and data consistency constraints.
-  - Check failure handling and operability.
+  - checkpointKey: backend.api_contract
+    instruction: Verify the service interfaces, request and response contracts and error codes match the requirement.
+    required: true
+  - checkpointKey: backend.data_consistency
+    instruction: Verify data model changes, constraints, migrations and transaction boundaries keep data consistent.
+    required: true
+  - checkpointKey: backend.failure_handling
+    instruction: Verify timeout, retry, idempotency and degradation behavior are defined for reachable failure paths.
+    required: true
+  - checkpointKey: backend.security_compliance
+    instruction: Verify authentication, authorization, input validation and sensitive data handling are addressed.
+    required: true
+  - checkpointKey: backend.operability
+    instruction: Verify logging, monitoring, configuration and rollout operability for the affected services.
+    required: true
+  - checkpointKey: backend.performance_risk
+    instruction: Identify throughput, latency or resource usage risks introduced by the change.
+    required: false
 allowedTools:
   - submit_claim
   - complete_initial_review
