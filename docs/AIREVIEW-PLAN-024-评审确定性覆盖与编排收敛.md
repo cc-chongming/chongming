@@ -389,8 +389,8 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/domain/repository/ReviewAssessmentStore.java` | 0 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/assessment/InMemoryReviewAssessmentStore.java` | 0 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/application/AssessmentService.java` | 1 | ✅ 已完成 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrant.java` | 2 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrantSet.java` | 2 | ⏳ 待实施 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrant.java` | 2 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/agentscope/tool/RepositoryFileGrantSet.java` | 2 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/domain/model/ReviewDispatchCommand.java` | 3 | ⏳ 待实施 |
 | `src/main/java/ai/cc/chongming/review/domain/repository/ReviewDispatchStore.java` | 3 | ⏳ 待实施 |
 | `src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java` | 3 | ⏳ 待实施 |
@@ -403,7 +403,7 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewDispatchPersistenceMapper.java` | 5 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/assessment/ReviewAssessmentContractTests.java` | 0 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/AssessmentServiceTests.java` | 1 | ✅ 已完成 |
-| `src/test/java/ai/cc/chongming/review/agentscope/RepositoryFileGrantTests.java` | 2 | ⏳ 待实施 |
+| `src/test/java/ai/cc/chongming/review/agentscope/RepositoryFileGrantTests.java` | 2 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/ReviewDispatchServiceTests.java` | 3 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/agentscope/ReviewWorkflowDispatcherTests.java` | 3 | ⏳ 待实施 |
 | `src/test/java/ai/cc/chongming/review/application/ConflictDetectionServiceTests.java` | 4 | ⏳ 待实施 |
@@ -421,8 +421,8 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/resources/roles/product.yml`、`project.yml`、`frontend.yml`、`backend.yml` | 0-1 | ✅ 已完成（方案0 checklist；方案1 allowedTools 追加 submit_assessment） |
 | `RoleSubagentFactory.java`、`ReviewRoleToolFactory.java`、`AgentScopeReviewRuntimeAdapter.java` | 1 | ✅ 已完成 |
 | `InitialReviewProgressService.java` | 1 | ✅ 已完成 |
-| `ReviewContextAssembler.java`、`ReviewRepositoryToolFactory.java` | 2 | ⏳ 待实施 |
-| `RepositoryToolContext.java`、`ReadOnlyRepositoryTools.java`、`RepositorySearchIndex.java` | 2 | ⏳ 待实施 |
+| `ReviewContextAssembler.java`、`ReviewRepositoryToolFactory.java` | 2 | ✅ 方案2 已完成 |
+| `RepositoryToolContext.java`、`ReadOnlyRepositoryTools.java`、`RepositorySearchIndex.java` | 2 | ✅ 方案2 已完成 |
 | `ReviewDirectorHarnessFactory.java`、`ReviewWorkflowDispatcher.java` | 3 | ⏳ 待实施 |
 | `ReviewDebateToolFactory.java`、`DebateToolCommands.java` | 3-4 | ⏳ 待实施 |
 | `ConflictDetector.java`、`DebateService.java`、`DebateStateMachine.java` | 4 | ⏳ 待实施 |
@@ -506,12 +506,17 @@ readLines(fileRef, startLine, lineCount?)
 | 2026-08-10 | 修正 `readLines` 根因假设，采用角色授权 fileRef、动态工具注册和失败不扣预算。 |
 | 2026-08-10 | 明确本地完整会话日志与本地明文调试密钥是接受的调试约定，不作为缺陷移除。 |
 | 2026-08-10 | 方案0 完成：冻结五态 `AssessmentStatus` 与 `ReviewAssessment`、批量幂等 `ReviewAssessmentStore`、内存实现；`RolePack.checklist` 升级为稳定 `Checkpoint` 契约，四个核心角色各 6 检查点（5 required）。 |
+| 2026-08-10 | 方案2 完成：新增 `RepositoryFileGrant`/`RepositoryFileGrantSet`（SecureRandom 不可猜测 fileRef，服务端绑定 reviewId+attemptNo+roleType+snapshotCommit+normalizedPath，HashMap O(1) 解析）；`ReviewContextAssembler` 一次性计算 `effectiveReadableFiles = snapshotFiles ∩ rolePathPolicy ∩ reviewRelevantFiles` 并按角色构建授权集，Scout 证据路径按角色 scope 过滤后才进入角色上下文；`readLines`/`getFileMetadata` 只接受 fileRef，`listFiles`/`searchText`/`findSymbol` 结果只返回授权 fileRef；校验顺序为参数形状 → fileRef 授权/快照归属 → 预算扣减 → 读取，拒绝/越权/缺失不扣预算；空授权集动态不注册读取工具并提示 UNKNOWN；新增错误码 `FILE_REF_NOT_GRANTED`、`FILE_NOT_IN_SNAPSHOT`、`INVALID_LINE_RANGE`、`READ_BUDGET_EXHAUSTED`（前三者标注不可重试），相同工具+参数+错误码在单角色运行级短路；服务端路径归一化保留为纵深防护。定向测试 RepositoryFileGrantTests/ReviewContextAssemblerTests/ReviewRepositoryToolFactoryTests 及 RepositoryToolFacadeTests/RepositorySearchIndexTests/RepositoryReadBudgetTests/RepositoryBoundaryGuardTests 全部通过。 |
 | 2026-08-10 | 方案1 完成：新增 `AssessmentService`（服务端注入身份+幂等+checklist 归属校验+缺失查询+派生完成摘要）与 `submit_assessment` 工具；`complete_initial_review` 前置 `ASSESSMENT_COVERAGE_INCOMPLETE` 覆盖守卫；publicSummary 由持久化 Assessment/Claim 服务端派生；Finalizer 只补交缺失检查点；定向测试 47/47 通过（AssessmentServiceTests、InitialReviewProgressServiceTests、RoleSubagentIsolationTests、AgentScopeReviewRuntimeAdapterTests、RolePackContractTests、ReviewAssessmentContractTests）。 |
 
 ## 偏差记录
 
 - 2026-08-10：迁移文件由 `V17__create_review_assessment_and_dispatch_tables.sql` 改为 `V19__create_review_assessment_and_dispatch_tables.sql`。原因：V17（`context_scout_conclusion`）与 V18（`requirement_review_launch_command`）已被 PLAN-023 占用且 Flyway 迁移历史不可变；影响：Flyway 版本序列顺延至 V19；替代方案：重命名 PLAN-023 迁移——拒绝（迁移历史不可变）。
 - 2026-08-10（方案0）：`RolePack.checklist` 由 `List<String>` 升级为 `List<Checkpoint>` 后，两处消费方做了必要的编译期适配——`RoleSubagentFactory.rolePrompt` 改为按 `checkpointKey (instruction)` 渲染检查点文案、`ReviewContextAssemblerTests` 的 RolePack 夹具改用 `Checkpoint`。原因：检查点类型升级为稳定契约是方案0 既定目标；影响：仅适配读取方式，未改变方案1 对这两处的语义职责；替代方案：保留 `List<String>` 另加并行字段——拒绝（会造成双源不一致）。
+- 2026-08-10（方案2）：四个统一错误码新增在 `RepositoryAccessException.Code`（仓库读取既有错误码体系），其中 `READ_BUDGET_EXHAUSTED` 与既有 `REPOSITORY_READ_BUDGET_EXHAUSTED` 并存，工具层对两者输出同一 `READ_BUDGET_EXHAUSTED` 提示。原因：仓库工具错误一直由该枚举承载；影响：无对外接口变化；替代方案：另建工具错误枚举——拒绝（双源错误码易漂移）。
+- 2026-08-10（方案2）：空授权集动态移除 `readLines`/`getFileMetadata` 后，`RoleSubagentFactory.assertToolContract` 仍按“注册集合等于声明集合”严格断言，会在运行期对空授权角色抛错；该文件属方案1 范围（本任务不修改），需方案1 在动态工具注册适配中同步放宽该断言。原因：方案1/2 并行且文件归属分离；影响：仅空授权角色首次建工具包时触发，编译与定向测试不受影响；替代方案：本任务直接修改 `RoleSubagentFactory`——拒绝（越界到方案1 并行文件）。
+- 2026-08-10（方案2）：`SharedProjectContext.publicText` 不再渲染 `sampleFiles` 文件路径（原实现把全仓样例文件展示给所有角色，会暴露越权路径），角色上下文只渲染本角色 fileRef；`sampleFiles` 字段保留供 Scout 基线工作区内部使用。原因：不变量2（未授权文件路径不得出现在角色上下文）；影响：无 assembler 的回退路径角色提示中不再出现任何仓库文件路径；替代方案：按角色过滤 sampleFiles——拒绝（角色仍会看到路径而非 fileRef，与方案2 契约冲突）。
+- 2026-08-10（方案2）：`ReadOnlyRepositoryTools`/`EvidenceTools` 保留服务端路径入参 API 作为纵深防护层；模型侧取证接口已全部切换为 fileRef，`EvidenceTools` 的证据提交路径适配不在本任务范围。原因：任务范围限定为仓库读取工具链与上下文装配；影响：证据提交仍由服务端校验快照归属；替代方案：同步改造证据工具——拒绝（越界，留待后续计划）。
 - 2026-08-10（方案1）：`RolePackRegistry` 工具白名单追加 `submit_assessment`，`ReviewErrorCode` 新增 `ASSESSMENT_COVERAGE_INCOMPLETE`。原因：yml 的 allowedTools 校验与完成守卫错误码是方案1 的强制配套改动，但方案1 文件清单未列出这两个文件；影响：仅新增白名单条目与枚举值，不改变既有语义；替代方案：绕过白名单校验——拒绝（会削弱角色包契约校验）。
 - 2026-08-10（方案1）：publicSummary 服务端派生实现落在 `AssessmentService.derivedCompletionSummary` + `ReviewRoleToolFactory.CompleteInitialReviewTool`，`AgentScopeReviewRuntimeAdapter` 仅同步 Finalizer 提示文案。原因：任务要求 Adapter 改动保持最小、不重构编排枢纽；影响：派生摘要经 complete_initial_review 命令进入 ROLE_COMPLETED 事件，与计划“由已持久化事实派生”一致；替代方案：在 Adapter 内拦截并改写 publicSummary——拒绝（侵入编排枢纽且产生双事实来源）。
 - 2026-08-10（方案1）：`application-test.yml` 显式设置 `review.persistence.enabled: false`。原因：`AssessmentService` 强依赖 `ReviewAssessmentStore` bean，而 MyBatis 实现属方案5，application.yml 默认 `enabled=true` 会导致全上下文测试缺 bean；影响：测试上下文统一走内存实现，同时免除 Flyway 连接占位数据库；替代方案：`AssessmentService` 可选注入——拒绝（弱化覆盖守卫语义）。

@@ -12,6 +12,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
 import ai.cc.chongming.review.domain.role.RolePack;
 import ai.cc.chongming.review.domain.role.RolePack.Checkpoint;
+import ai.cc.chongming.review.infrastructure.agentscope.tool.RepositoryFileGrantSet;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -68,6 +70,100 @@ class ReviewContextAssemblerTests {
     }
 
     @Test
+    void hidesScoutEvidencePathsOutsideTheRoleScopedAuthorization() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ContextScoutConclusion conclusion = new ContextScoutConclusion(
+                reviewId,
+                1,
+                1,
+                "overview",
+                List.of("src/main"),
+                List.of("ReviewQueryService"),
+                List.of("constraint"),
+                List.of("risk"),
+                List.of("src/main/java/App.java", "frontend/app.js"),
+                Map.of("BACKEND", List.of("src/main/")),
+                "{}",
+                Instant.parse("2026-08-10T08:00:00Z"));
+        ReviewContextAssembler assembler = new ReviewContextAssembler(storeOf(reviewId, conclusion));
+
+        ContextFact backendFact = assembler.contextScoutFact(reviewId, 1, RoleType.BACKEND).orElseThrow();
+        assertThat(backendFact.publicText())
+                .contains("src/main/java/App.java")
+                .doesNotContain("frontend/app.js");
+
+        ContextFact frontendFact = assembler.contextScoutFact(reviewId, 1, RoleType.FRONTEND).orElseThrow();
+        assertThat(frontendFact.publicText())
+                .doesNotContain("frontend/app.js")
+                .doesNotContain("src/main/java/App.java");
+    }
+
+    @Test
+    void computesEffectiveReadableFilesAsAOneShotSetIntersection() {
+        ReviewContextAssembler assembler = new ReviewContextAssembler();
+        List<String> snapshotFiles = List.of(
+                "docs/spec.md", "src/main/java/App.java", "frontend/app.js", "README.md");
+        Predicate<String> backendPolicy = path -> path.startsWith("src/main/") || path.equals("README.md");
+        Predicate<String> reviewRelevance = path -> path.equals("src/main/java/App.java") || path.equals("docs/spec.md");
+
+        Set<String> effective = assembler.effectiveReadableFiles(snapshotFiles, backendPolicy, reviewRelevance);
+
+        assertThat(effective).containsExactlyInAnyOrder("src/main/java/App.java");
+        assertThat(assembler.effectiveReadableFiles(snapshotFiles, backendPolicy, null))
+                .containsExactlyInAnyOrder("src/main/java/App.java", "README.md");
+        assertThat(assembler.effectiveReadableFiles(snapshotFiles, backendPolicy, path -> false)).isEmpty();
+    }
+
+    @Test
+    void derivesReviewRelevanceFromThePersistedScoutConclusion() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ContextScoutConclusion conclusion = new ContextScoutConclusion(
+                reviewId,
+                2,
+                1,
+                "summary",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("src/main/java/Query.java"),
+                Map.of("BACKEND", List.of("src/main/")),
+                "{}",
+                Instant.parse("2026-08-10T08:00:00Z"));
+        ReviewContextAssembler assembler = new ReviewContextAssembler(storeOf(reviewId, conclusion));
+
+        Predicate<String> backendRelevance = assembler.reviewRelevancePredicate(reviewId, 2, RoleType.BACKEND);
+        assertThat(backendRelevance).isNotNull();
+        assertThat(backendRelevance.test("src/main/java/Query.java")).isTrue();
+        assertThat(backendRelevance.test("src/main/java/Other.java")).isTrue();
+        assertThat(backendRelevance.test("frontend/app.js")).isFalse();
+
+        assertThat(assembler.reviewRelevancePredicate(reviewId, 3, RoleType.BACKEND)).isNull();
+        assertThat(new ReviewContextAssembler().reviewRelevancePredicate(reviewId, 2, RoleType.BACKEND)).isNull();
+    }
+
+    @Test
+    void buildsRoleFileGrantsBoundToRoleAttemptAndSnapshotCommit() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewContextAssembler assembler = new ReviewContextAssembler();
+
+        RepositoryFileGrantSet grants = assembler.fileGrants(
+                reviewId, 1, RoleType.BACKEND, "c".repeat(40),
+                Set.of("src/main/java/App.java", "src/main/java/Other.java"));
+
+        assertThat(grants.size()).isEqualTo(2);
+        assertThat(grants.grants())
+                .allSatisfy(grant -> {
+                    assertThat(grant.reviewId()).isEqualTo(reviewId);
+                    assertThat(grant.attemptNo()).isEqualTo(1);
+                    assertThat(grant.roleType()).isEqualTo(RoleType.BACKEND);
+                    assertThat(grant.snapshotCommit()).isEqualTo("c".repeat(40));
+                    assertThat(grants.resolve(grant.fileRef())).contains(grant);
+                });
+        assertThat(assembler.fileGrants(reviewId, 1, RoleType.FRONTEND, "c".repeat(40), Set.of()).isEmpty()).isTrue();
+    }
+
+    @Test
     void keepsCriticalAndAllowedFactsWhenTheContextBudgetIsExceeded() {
         RolePack rolePack = new RolePack(
                 RoleType.BACKEND,
@@ -98,5 +194,19 @@ class ReviewContextAssemblerTests {
 
     private ContextFact fact(String id, String selector, Priority priority, boolean disputed, String text) {
         return new ContextFact(id, selector, priority, disputed, Instant.parse("2026-07-16T00:00:00Z"), text);
+    }
+
+    private ContextScoutConclusionStore storeOf(ReviewId reviewId, ContextScoutConclusion conclusion) {
+        return new ContextScoutConclusionStore() {
+            @Override
+            public void save(ContextScoutConclusion ignored) {
+            }
+
+            @Override
+            public Optional<ContextScoutConclusion> find(ReviewId id, int attemptNo) {
+                return reviewId.equals(id) && attemptNo == conclusion.attemptNo()
+                        ? Optional.of(conclusion) : Optional.empty();
+            }
+        };
     }
 }

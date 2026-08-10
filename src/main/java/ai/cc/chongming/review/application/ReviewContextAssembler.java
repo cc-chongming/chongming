@@ -5,12 +5,19 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
 import ai.cc.chongming.review.domain.role.RolePack;
+import ai.cc.chongming.review.infrastructure.agentscope.tool.RepositoryFileGrant;
+import ai.cc.chongming.review.infrastructure.agentscope.tool.RepositoryFileGrantSet;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -82,6 +89,83 @@ public class ReviewContextAssembler {
         }
         return new AssembledContext(
                 request.reviewId(), request.rolePack().roleType(), List.copyOf(selected), usedCharacters, truncated);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Computes {@code effectiveReadableFiles = snapshotFiles ∩ rolePathPolicy ∩
+     * reviewRelevantFiles} in a single pass over the snapshot file set. No per-file lookup, query or
+     * nested scan is performed; a missing {@code reviewRelevance} predicate (no Scout conclusion)
+     * leaves the intersection limited to the role path policy.
+     *
+     * @param snapshotFiles normalized paths frozen in the review snapshot
+     * @param rolePathPolicy static RolePack path policy
+     * @param reviewRelevance review-relevance predicate from the persisted Scout conclusion, or null
+     * @return the role's effective readable files, deterministically ordered
+     */
+    public Set<String> effectiveReadableFiles(
+            Collection<String> snapshotFiles,
+            Predicate<String> rolePathPolicy,
+            Predicate<String> reviewRelevance) {
+        Objects.requireNonNull(snapshotFiles, "snapshotFiles must not be null");
+        Objects.requireNonNull(rolePathPolicy, "rolePathPolicy must not be null");
+        Set<String> effective = new LinkedHashSet<>();
+        for (String file : snapshotFiles) {
+            if (file == null || file.isBlank()) {
+                continue;
+            }
+            String normalized = file.replace('\\', '/');
+            if (!rolePathPolicy.test(normalized)) {
+                continue;
+            }
+            if (reviewRelevance != null && !reviewRelevance.test(normalized)) {
+                continue;
+            }
+            effective.add(normalized);
+        }
+        return Set.copyOf(effective);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Derives the review-relevance predicate from the persisted Scout
+     * conclusion: a file is relevant when it appears in the Scout evidence paths or lives beneath a
+     * Scout-declared scope for this role. Returns {@code null} when no conclusion constrains this
+     * attempt, in which case relevance imposes no additional restriction.
+     */
+    public Predicate<String> reviewRelevancePredicate(ReviewId reviewId, int attemptNo, RoleType roleType) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(roleType, "roleType must not be null");
+        if (attemptNo < 1 || conclusionStore == null) {
+            return null;
+        }
+        return conclusionStore.find(reviewId, attemptNo)
+                .map(conclusion -> reviewRelevance(conclusion, roleType))
+                .orElse(null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Builds the role's unguessable fileRef grant set from its effective
+     * readable files; every grant is bound to review, attempt, role and snapshot commit.
+     */
+    public RepositoryFileGrantSet fileGrants(
+            ReviewId reviewId,
+            int attemptNo,
+            RoleType roleType,
+            String snapshotCommit,
+            Collection<String> effectiveFiles) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Objects.requireNonNull(roleType, "roleType must not be null");
+        Objects.requireNonNull(effectiveFiles, "effectiveFiles must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        if (snapshotCommit == null || snapshotCommit.isBlank()) {
+            throw new IllegalArgumentException("snapshotCommit must not be blank");
+        }
+        List<RepositoryFileGrant> grants = new ArrayList<>();
+        for (String file : effectiveFiles) {
+            grants.add(RepositoryFileGrant.issue(reviewId, attemptNo, roleType, snapshotCommit, file));
+        }
+        return RepositoryFileGrantSet.of(grants);
     }
 
     /**
@@ -158,9 +242,37 @@ public class ReviewContextAssembler {
         addSection(sections, "Entry points", conclusion.entryPoints());
         addSection(sections, "Constraints", conclusion.constraints());
         addSection(sections, "Risks", conclusion.risks());
-        addSection(sections, "Evidence paths", conclusion.evidencePaths());
+        addSection(sections, "Evidence paths", scopedEvidencePaths(conclusion, roleType));
         addSection(sections, "Authorized role scope", conclusion.roleScopes().getOrDefault(roleType.name(), List.of()));
         return String.join("\n", sections);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Only evidence paths inside the Scout-declared scope of this role are
+     * rendered into role context, so ungranted file paths never reach a role prompt.
+     */
+    private static List<String> scopedEvidencePaths(ContextScoutConclusion conclusion, RoleType roleType) {
+        List<String> scopes = conclusion.roleScopes().getOrDefault(roleType.name(), List.of());
+        if (scopes.isEmpty()) {
+            return List.of();
+        }
+        return conclusion.evidencePaths().stream()
+                .filter(path -> matchesAnyScope(path, scopes))
+                .toList();
+    }
+
+    private static boolean matchesAnyScope(String path, List<String> scopes) {
+        String normalized = path.replace('\\', '/');
+        return scopes.stream().anyMatch(scope -> !scope.isEmpty()
+                && (normalized.equals(scope)
+                        || normalized.startsWith(scope)
+                        || (scope.endsWith("/") && normalized.contains("/" + scope))));
+    }
+
+    private static Predicate<String> reviewRelevance(ContextScoutConclusion conclusion, RoleType roleType) {
+        Set<String> relevantFiles = new HashSet<>(conclusion.evidencePaths());
+        List<String> roleScopes = conclusion.roleScopes().getOrDefault(roleType.name(), List.of());
+        return path -> relevantFiles.contains(path) || matchesAnyScope(path, roleScopes);
     }
 
     private static void addSection(List<String> sections, String label, List<String> values) {

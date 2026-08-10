@@ -73,6 +73,32 @@ public class RepositorySearchIndex {
     }
 
     /**
+     * [AIREVIEW-PLAN-024] Lists every exposed snapshot file path in one walk so grant computation
+     * can run as a one-shot set intersection instead of per-file lookups.
+     *
+     * @param snapshot frozen repository snapshot
+     * @param cancellation cancellation signal
+     * @return normalized snapshot-relative paths of all exposed files
+     */
+    public List<String> snapshotFiles(RepositorySnapshot snapshot, IntakeCancellation cancellation) {
+        Objects.requireNonNull(cancellation, "cancellation must not be null");
+        Path root = requireSnapshotRoot(snapshot);
+        List<String> result = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(root)) {
+            files.filter(path -> !path.equals(root))
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> isExposedFile(root, path, cancellation))
+                    .forEach(path -> {
+                        cancellation.checkCancelled();
+                        result.add(toRelativePath(root, path));
+                    });
+        } catch (IOException exception) {
+            throw new RepositoryAccessException(Code.SNAPSHOT_FAILED, "Snapshot files cannot be listed", exception);
+        }
+        return List.copyOf(result);
+    }
+
+    /**
      * Searches frozen text files line by line and stops once the response budget is reached.
      *
      * @param snapshot frozen repository snapshot
@@ -157,7 +183,8 @@ public class RepositorySearchIndex {
             int lineCount,
             IntakeCancellation cancellation) {
         if (startLine < 1 || lineCount < 1 || lineCount > MAX_READ_LINE_COUNT) {
-            throw new IllegalArgumentException("Requested source-line range is outside the allowed budget");
+            throw new RepositoryAccessException(
+                    Code.INVALID_LINE_RANGE, "Requested source-line range is outside the allowed budget");
         }
         Path file = resolveSnapshotFile(snapshot, relativePath);
         List<SourceLine> result = new ArrayList<>();

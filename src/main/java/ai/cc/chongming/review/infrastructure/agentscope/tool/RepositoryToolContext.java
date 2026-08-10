@@ -9,6 +9,10 @@ import java.util.Set;
 /**
  * Server-issued identity and frozen-snapshot scope required by every repository tool call.
  *
+ * <p>[AIREVIEW-PLAN-024] Since role agents now address files only through granted
+ * {@code fileRef} tokens, the prefix policy here acts as server-side defense in depth and as the
+ * one-shot policy predicate used while computing each role's effective readable files.
+ *
  * @author wangli
  */
 public record RepositoryToolContext(
@@ -45,13 +49,33 @@ public record RepositoryToolContext(
      * Exact file prefixes (README.md, pom.xml) remain root-anchored.
      */
     public boolean allows(String relativePath) {
-        String safePath = normalizeRelativePath(relativePath);
-        return allowedPathPrefixes.stream().anyMatch(prefix -> prefix.isEmpty()
+        return allows(allowedPathPrefixes, relativePath);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Static policy predicate shared by grant computation and tool-time
+     * defense in depth. Unsafe paths are rejected with {@code false} instead of an exception so
+     * the predicate can be applied over an entire snapshot file set in one pass.
+     */
+    public static boolean allows(Set<String> allowedPathPrefixes, String relativePath) {
+        Set<String> prefixes = allowedPathPrefixes == null || allowedPathPrefixes.isEmpty()
+                ? Set.of("") : allowedPathPrefixes;
+        String safePath;
+        try {
+            safePath = normalize(relativePath);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+        return prefixes.stream().anyMatch(prefix -> prefix.isEmpty()
                 || safePath.equals(prefix)
                 || (prefix.endsWith("/") && (safePath.startsWith(prefix) || safePath.contains("/" + prefix))));
     }
 
     public String normalizeRelativePath(String relativePath) {
+        return normalize(relativePath);
+    }
+
+    private static String normalize(String relativePath) {
         if (relativePath == null || relativePath.isBlank()) {
             throw new IllegalArgumentException("snapshot-relative path is required");
         }

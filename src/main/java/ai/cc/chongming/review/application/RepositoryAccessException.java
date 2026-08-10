@@ -39,6 +39,14 @@ public class RepositoryAccessException extends RuntimeException {
         SYMLINK_NOT_ALLOWED,
         REPOSITORY_READ_BUDGET_EXHAUSTED,
         SNAPSHOT_ALREADY_EXISTS,
-        SNAPSHOT_FAILED
+        SNAPSHOT_FAILED,
+        /** [AIREVIEW-PLAN-024] The requested fileRef is not granted to this role; not retryable. */
+        FILE_REF_NOT_GRANTED,
+        /** [AIREVIEW-PLAN-024] The fileRef does not belong to the current review snapshot; not retryable. */
+        FILE_NOT_IN_SNAPSHOT,
+        /** [AIREVIEW-PLAN-024] The requested line range is invalid; not retryable. */
+        INVALID_LINE_RANGE,
+        /** [AIREVIEW-PLAN-024] The role's repository read budget is exhausted. */
+        READ_BUDGET_EXHAUSTED
     }
 }

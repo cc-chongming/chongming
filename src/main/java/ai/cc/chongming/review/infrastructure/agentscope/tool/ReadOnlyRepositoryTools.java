@@ -7,10 +7,15 @@ import ai.cc.chongming.review.infrastructure.repository.RepositorySearchIndex.So
 import ai.cc.chongming.review.infrastructure.repository.RepositorySearchIndex.TextMatch;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 import org.springframework.stereotype.Component;
 
 /**
  * Server-side facade for the repository tools exposed to AgentScope role agents.
+ *
+ * <p>[AIREVIEW-PLAN-024] Model-facing access is fileRef-based and resolved by
+ * {@code ReviewRepositoryToolFactory}; the path-accepting methods here remain the server-side
+ * defense-in-depth layer and additionally serve grant computation and evidence verification.
  *
  * @author wangli
  */
@@ -27,8 +32,17 @@ public class ReadOnlyRepositoryTools {
      * Lists only files already frozen beneath the caller's review snapshot.
      */
     public List<FileMetadata> listFiles(RepositoryToolContext context, int limit, IntakeCancellation cancellation) {
+        return listFiles(context, limit, cancellation, ignored -> true);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Lists granted files only; the grant scope narrows the role prefix policy.
+     */
+    public List<FileMetadata> listFiles(
+            RepositoryToolContext context, int limit, IntakeCancellation cancellation, Predicate<String> grantScope) {
         RepositoryToolContext safeContext = requireContext(context);
-        return searchIndex.listFiles(safeContext.snapshot(), limit, requireCancellation(cancellation), safeContext::allows);
+        return searchIndex.listFiles(
+                safeContext.snapshot(), limit, requireCancellation(cancellation), combinedScope(safeContext, grantScope));
     }
 
     /**
@@ -40,9 +54,23 @@ public class ReadOnlyRepositoryTools {
             boolean regularExpression,
             int limit,
             IntakeCancellation cancellation) {
+        return searchText(context, query, regularExpression, limit, cancellation, ignored -> true);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Searches granted files only; the grant scope narrows the role prefix policy.
+     */
+    public List<TextMatch> searchText(
+            RepositoryToolContext context,
+            String query,
+            boolean regularExpression,
+            int limit,
+            IntakeCancellation cancellation,
+            Predicate<String> grantScope) {
         RepositoryToolContext safeContext = requireContext(context);
         return searchIndex.searchText(
-                safeContext.snapshot(), query, regularExpression, limit, requireCancellation(cancellation), safeContext::allows);
+                safeContext.snapshot(), query, regularExpression, limit, requireCancellation(cancellation),
+                combinedScope(safeContext, grantScope));
     }
 
     /**
@@ -50,8 +78,31 @@ public class ReadOnlyRepositoryTools {
      */
     public List<TextMatch> findSymbol(
             RepositoryToolContext context, String symbol, int limit, IntakeCancellation cancellation) {
+        return findSymbol(context, symbol, limit, cancellation, ignored -> true);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Finds symbol candidates in granted files only.
+     */
+    public List<TextMatch> findSymbol(
+            RepositoryToolContext context,
+            String symbol,
+            int limit,
+            IntakeCancellation cancellation,
+            Predicate<String> grantScope) {
         RepositoryToolContext safeContext = requireContext(context);
-        return searchIndex.findSymbol(safeContext.snapshot(), symbol, limit, requireCancellation(cancellation), safeContext::allows);
+        return searchIndex.findSymbol(
+                safeContext.snapshot(), symbol, limit, requireCancellation(cancellation),
+                combinedScope(safeContext, grantScope));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] Lists every exposed snapshot path once so grant computation can run as a
+     * one-shot set intersection; prefix scoping is intentionally not applied here.
+     */
+    public List<String> snapshotFiles(RepositoryToolContext context, IntakeCancellation cancellation) {
+        RepositoryToolContext safeContext = requireContext(context);
+        return searchIndex.snapshotFiles(safeContext.snapshot(), requireCancellation(cancellation));
     }
 
     /**
@@ -86,6 +137,11 @@ public class ReadOnlyRepositoryTools {
 
     private RepositoryToolContext requireContext(RepositoryToolContext context) {
         return Objects.requireNonNull(context, "context must not be null");
+    }
+
+    private Predicate<String> combinedScope(RepositoryToolContext context, Predicate<String> grantScope) {
+        Predicate<String> scope = Objects.requireNonNull(grantScope, "grantScope must not be null");
+        return path -> context.allows(path) && scope.test(path);
     }
 
     private IntakeCancellation requireCancellation(IntakeCancellation cancellation) {
