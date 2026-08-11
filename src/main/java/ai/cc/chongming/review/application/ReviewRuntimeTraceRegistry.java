@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,7 +29,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * [AIREVIEW-PLAN-017#4.2][AIREVIEW-PLAN-022#5.3][AIREVIEW-PLAN-023#8] Bounded AG-UI runtime trace per review attempt.
+ * [AIREVIEW-PLAN-017#4.2][AIREVIEW-PLAN-022#5.3][AIREVIEW-PLAN-023#8][AIREVIEW-PLAN-024#6]
+ * Bounded AG-UI runtime trace per review attempt.
  *
  * <p>Since PLAN-022 the registry can durably persist the main review runtime
  * ({@code review-{reviewId}-attempt-{attemptNo}}) and lazily rehydrate it after a restart.
@@ -36,12 +38,31 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * review run or the real-time SSE stream. When no {@link RuntimeTraceStore} is configured the
  * registry degrades to the original pure in-memory behavior.
  *
+ * <p>Since PLAN-024 the registry also records per-attempt observability metrics: five
+ * independent failure categories ({@link RuntimeFailureCategory}) and named stage metrics such
+ * as stage duration, role first-token time, tool success/failure counts, Assessment coverage
+ * completion time, dispatch wait time and effective actions per round. Metrics are emitted as
+ * custom AG-UI events, so they reuse the existing durable trace pipeline unchanged; hydrated
+ * traces rebuild their counters from persisted events and missing fields read as defaults.
+ *
  * @author zyj
  */
 @Component
 public class ReviewRuntimeTraceRegistry {
 
     private static final int DEFAULT_MAX_EVENTS_PER_RUNTIME = 1000;
+
+    /** Custom event names carrying PLAN-024 observability metrics. */
+    static final String FAILURE_METRIC_EVENT_NAME = "chongming.runtime-metrics.failure.v1";
+    static final String STAGE_METRIC_EVENT_NAME = "chongming.runtime-metrics.v1";
+
+    /** Well-known stage metric names recorded for a review attempt. */
+    public static final String METRIC_STAGE_DURATION = "stage-duration";
+    public static final String METRIC_ROLE_FIRST_TOKEN = "role-first-token";
+    public static final String METRIC_TOOL_CALLS = "tool-calls";
+    public static final String METRIC_ASSESSMENT_COVERAGE_COMPLETED = "assessment-coverage-completed";
+    public static final String METRIC_DISPATCH_WAIT = "dispatch-wait";
+    public static final String METRIC_ROUND_EFFECTIVE_ACTIONS = "round-effective-actions";
 
     /**
      * Matches exactly the main attempt runtime {@code review-{uuid}-attempt-{n}}. Auxiliary
@@ -138,6 +159,75 @@ public class ReviewRuntimeTraceRegistry {
     }
 
     /**
+     * [AIREVIEW-PLAN-024#6] Counts one failure under an independent category and publishes it as
+     * a durable custom event. The five categories are never merged into a generic degradation
+     * bucket.
+     *
+     * @param runtimeId runtime that observed the failure
+     * @param category  independent failure category
+     * @param details   optional credential-free diagnostic fields
+     */
+    public void recordFailure(String runtimeId, RuntimeFailureCategory category, Map<String, Object> details) {
+        Objects.requireNonNull(category, "category must not be null");
+        RuntimeTrace trace = resolveTrace(runtimeId);
+        long count = trace.incrementFailure(category);
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("category", category.name());
+        value.put("count", count);
+        if (details != null && !details.isEmpty()) {
+            value.put("details", new LinkedHashMap<>(details));
+        }
+        trace.publish(new AguiEvent.Custom(runtimeId, "runtime-metrics", FAILURE_METRIC_EVENT_NAME, value));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#6] Records one named stage metric (stage duration, role first-token
+     * time, tool success/failure counts, Assessment coverage completion time, dispatch wait time,
+     * effective actions per round) as a durable custom event, keeping the latest value per name.
+     *
+     * @param runtimeId  runtime that observed the metric
+     * @param metricName one of the well-known metric names or a caller-defined stable name
+     * @param values     credential-free metric fields
+     */
+    public void recordMetric(String runtimeId, String metricName, Map<String, Object> values) {
+        if (metricName == null || metricName.isBlank()) {
+            throw new IllegalArgumentException("metricName must not be blank");
+        }
+        RuntimeTrace trace = resolveTrace(runtimeId);
+        Map<String, Object> safeValues = values == null ? Map.of() : Map.copyOf(values);
+        trace.storeMetric(metricName, safeValues);
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("metric", metricName);
+        value.putAll(safeValues);
+        trace.publish(new AguiEvent.Custom(runtimeId, "runtime-metrics", STAGE_METRIC_EVENT_NAME, value));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#6] Returns the current metric view of a runtime. All five failure
+     * categories are always present (missing counts read as zero) and hydrated runtimes rebuild
+     * their view from persisted events, keeping older traces without metrics fully compatible.
+     */
+    public RuntimeMetricsSnapshot metricsSnapshot(String runtimeId) {
+        return resolveTrace(runtimeId).metricsSnapshot();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#6] Per-attempt observability view: independent failure counts plus the
+     * latest recorded value of each named stage metric.
+     *
+     * @author wangli
+     */
+    public record RuntimeMetricsSnapshot(
+            Map<RuntimeFailureCategory, Long> failureCounts,
+            Map<String, Map<String, Object>> metrics) {
+
+        public RuntimeMetricsSnapshot {
+            failureCounts = Map.copyOf(failureCounts);
+            metrics = Map.copyOf(metrics);
+        }
+    }
+
+    /**
      * Resolves the trace for a runtime, lazily rehydrating a persisted main runtime when the
      * process no longer holds it in memory (for example after a restart).
      */
@@ -168,7 +258,11 @@ public class ReviewRuntimeTraceRegistry {
             List<StampedEvent> kept = persisted.size() > maxEvents
                     ? List.copyOf(persisted.subList(persisted.size() - maxEvents, persisted.size()))
                     : persisted;
-            return new RuntimeTrace(runtimeId, persistedMax, kept);
+            RuntimeTrace trace = new RuntimeTrace(runtimeId, persistedMax, kept);
+            // [AIREVIEW-PLAN-024#6] Rebuild metric counters from persisted custom events; traces
+            // recorded before PLAN-024 simply contribute nothing and read as defaults.
+            kept.forEach(stamped -> trace.applyMetricsEvent(stamped.event()));
+            return trace;
         } catch (RuntimeException exception) {
             LOGGER.warn("RUNTIME_TRACE_HYDRATE_FAILED runtimeId={} error={}",
                     runtimeId, exception.getMessage());
@@ -277,6 +371,8 @@ public class ReviewRuntimeTraceRegistry {
         private final List<StampedEvent> events = new ArrayList<>();
         private final Map<UUID, Subscription> subscriptions = new ConcurrentHashMap<>();
         private final Deque<StampedEvent> pendingPersistence = new ArrayDeque<>();
+        private final Map<String, AtomicLong> failureCounts = new ConcurrentHashMap<>();
+        private final Map<String, Map<String, Object>> latestMetrics = new ConcurrentHashMap<>();
         private boolean persistenceDraining;
 
         private RuntimeTrace(String runtimeId, long initialSequence, List<StampedEvent> initialEvents) {
@@ -383,6 +479,63 @@ public class ReviewRuntimeTraceRegistry {
                         .filter(event -> event.sequence() > afterSequence)
                         .map(StampedEvent::event)
                         .toList();
+            }
+        }
+
+        /**
+         * [AIREVIEW-PLAN-024#6] Increments one independent failure counter.
+         */
+        private long incrementFailure(RuntimeFailureCategory category) {
+            return failureCounts.computeIfAbsent(category.name(), ignored -> new AtomicLong()).incrementAndGet();
+        }
+
+        /**
+         * [AIREVIEW-PLAN-024#6] Keeps the latest value of a named stage metric.
+         */
+        private void storeMetric(String metricName, Map<String, Object> values) {
+            latestMetrics.put(metricName, Map.copyOf(values));
+        }
+
+        private RuntimeMetricsSnapshot metricsSnapshot() {
+            Map<RuntimeFailureCategory, Long> counts = new LinkedHashMap<>();
+            for (RuntimeFailureCategory category : RuntimeFailureCategory.values()) {
+                AtomicLong count = failureCounts.get(category.name());
+                counts.put(category, count == null ? 0L : count.get());
+            }
+            return new RuntimeMetricsSnapshot(counts, new LinkedHashMap<>(latestMetrics));
+        }
+
+        /**
+         * [AIREVIEW-PLAN-024#6] Replays one persisted metric event into the in-memory counters.
+         * Unknown categories or missing fields are skipped so older payloads stay compatible.
+         */
+        private void applyMetricsEvent(AguiEvent event) {
+            if (!(event instanceof AguiEvent.Custom custom) || !(custom.value() instanceof Map<?, ?> rawValue)) {
+                return;
+            }
+            Map<?, ?> value = rawValue;
+            if (FAILURE_METRIC_EVENT_NAME.equals(custom.name())) {
+                Object category = value.get("category");
+                if (category == null) {
+                    return;
+                }
+                try {
+                    incrementFailure(RuntimeFailureCategory.valueOf(category.toString()));
+                } catch (IllegalArgumentException ignored) {
+                    // Unknown category from a future payload version: keep counting defaults.
+                }
+            } else if (STAGE_METRIC_EVENT_NAME.equals(custom.name())) {
+                Object metricName = value.get("metric");
+                if (metricName == null) {
+                    return;
+                }
+                Map<String, Object> fields = new LinkedHashMap<>();
+                value.forEach((key, fieldValue) -> {
+                    if (!"metric".equals(key)) {
+                        fields.put(String.valueOf(key), fieldValue);
+                    }
+                });
+                latestMetrics.put(metricName.toString(), Map.copyOf(fields));
             }
         }
 

@@ -3,6 +3,7 @@ package ai.cc.chongming.review.config;
 import java.net.URI;
 import jakarta.validation.constraints.AssertTrue;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 
@@ -18,7 +19,20 @@ public record ModelGatewayProperties(
         URI baseUrl,
         String modelName,
         String apiKey,
-        boolean logConversation) {
+        boolean logConversation,
+        CircuitBreaker circuitBreaker) {
+
+    @ConstructorBinding
+    public ModelGatewayProperties {
+        circuitBreaker = circuitBreaker == null ? new CircuitBreaker(null, null) : circuitBreaker;
+    }
+
+    /**
+     * Backward-compatible constructor for call sites that predate the circuit breaker settings.
+     */
+    public ModelGatewayProperties(boolean enabled, URI baseUrl, String modelName, String apiKey, boolean logConversation) {
+        this(enabled, baseUrl, modelName, apiKey, logConversation, new CircuitBreaker(null, null));
+    }
 
     /**
      * Validates required model settings only when model calls are enabled.
@@ -30,5 +44,30 @@ public record ModelGatewayProperties(
         return !enabled
                 || (baseUrl != null
                 && StringUtils.hasText(apiKey));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#6] Attempt-scoped breaker policy. After {@code failureThreshold}
+     * consecutive transient failures the same profile routes directly to its fallback for the rest
+     * of the review attempt; every {@code probeInterval} routed calls one half-open probe is sent
+     * to the primary. A threshold of zero disables the breaker.
+     *
+     * @author wangli
+     */
+    public record CircuitBreaker(Integer failureThreshold, Integer probeInterval) {
+
+        public static final int DEFAULT_FAILURE_THRESHOLD = 2;
+        public static final int DEFAULT_PROBE_INTERVAL = 3;
+
+        public CircuitBreaker {
+            failureThreshold = failureThreshold == null ? DEFAULT_FAILURE_THRESHOLD : failureThreshold;
+            probeInterval = probeInterval == null ? DEFAULT_PROBE_INTERVAL : probeInterval;
+            if (failureThreshold < 0) {
+                throw new IllegalArgumentException("circuit breaker failureThreshold must not be negative");
+            }
+            if (probeInterval < 1) {
+                throw new IllegalArgumentException("circuit breaker probeInterval must be positive");
+            }
+        }
     }
 }

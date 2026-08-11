@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -31,7 +32,7 @@ import reactor.core.publisher.Flux;
 /**
  * Tests deterministic commercial-gateway behavior without contacting a real model provider.
  * <p>
- * [AIREVIEW-PLAN-023#8]
+ * [AIREVIEW-PLAN-023#8][AIREVIEW-PLAN-024#6]
  *
  * @author zyj
  */
@@ -246,8 +247,114 @@ class ModelGatewayContractTests {
         assertThat(calls).hasValue(1);
     }
 
+    @Test
+    void routesStraightToFallbackAfterConsecutiveFailuresTripAttemptBreaker() {
+        List<String> invokedProfiles = new CopyOnWriteArrayList<>();
+        ModelProviderClient provider = providerRequest -> {
+            invokedProfiles.add(providerRequest.profile().profileId());
+            if ("scout".equals(providerRequest.profile().profileId())) {
+                throw new ModelGatewayException(Code.MODEL_CALL_TIMEOUT, "primary timed out");
+            }
+            return new ModelProviderClient.ProviderResponse(
+                    "fallback-response",
+                    "{\"summary\":\"fallback\"}",
+                    new ModelGateway.Usage(1, 1, 2),
+                    ModelGateway.FinishReason.STOP);
+        };
+        ModelCallAuditService audit = new ModelCallAuditService();
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                breakerProperties(2, 100), fallbackProfileRegistry(), provider, audit);
+
+        for (int call = 0; call < 3; call++) {
+            ModelGateway.ModelResponse response =
+                    gateway.generate(scoutRequest("trace-breaker"), IntakeCancellation.neverCancelled()).block();
+            assertThat(response.modelName()).isEqualTo("fallback-model");
+        }
+
+        // Calls 1 and 2 try the primary and fail over; call 3 is breaker-routed and never
+        // contacts the primary again within the same attempt.
+        assertThat(invokedProfiles)
+                .containsExactly("scout", "scout-fallback", "scout", "scout-fallback", "scout-fallback");
+        assertThat(audit.findByReview(responseRequestReviewId()))
+                .anySatisfy(entry -> {
+                    assertThat(entry.profileId()).isEqualTo("scout");
+                    assertThat(entry.failureCode()).isEqualTo(Code.MODEL_CALL_TIMEOUT.name());
+                    assertThat(entry.attempts()).isZero();
+                });
+    }
+
+    @Test
+    void breakerDoesNotTripAcrossReviewAttempts() {
+        List<String> invokedProfiles = new CopyOnWriteArrayList<>();
+        ModelProviderClient provider = providerRequest -> {
+            invokedProfiles.add(providerRequest.profile().profileId());
+            if ("scout".equals(providerRequest.profile().profileId())) {
+                throw new ModelGatewayException(Code.MODEL_CALL_TIMEOUT, "primary timed out");
+            }
+            return new ModelProviderClient.ProviderResponse(
+                    "fallback-response",
+                    "{\"summary\":\"fallback\"}",
+                    new ModelGateway.Usage(1, 1, 2),
+                    ModelGateway.FinishReason.STOP);
+        };
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                breakerProperties(1, 100), fallbackProfileRegistry(), provider, new ModelCallAuditService());
+
+        gateway.generate(scoutRequest("trace-attempt-1"), IntakeCancellation.neverCancelled()).block();
+        // A different attempt trace id starts from a fresh breaker: the primary is probed again.
+        gateway.generate(scoutRequest("trace-attempt-2"), IntakeCancellation.neverCancelled()).block();
+
+        assertThat(invokedProfiles)
+                .containsExactly("scout", "scout-fallback", "scout", "scout-fallback");
+    }
+
+    @Test
+    void halfOpenProbeRecoversBreakerWhenPrimaryRecovers() {
+        List<String> invokedProfiles = new CopyOnWriteArrayList<>();
+        AtomicInteger scoutCalls = new AtomicInteger();
+        ModelProviderClient provider = providerRequest -> {
+            invokedProfiles.add(providerRequest.profile().profileId());
+            if ("scout".equals(providerRequest.profile().profileId()) && scoutCalls.incrementAndGet() == 1) {
+                throw new ModelGatewayException(Code.MODEL_CALL_TIMEOUT, "primary timed out");
+            }
+            return new ModelProviderClient.ProviderResponse(
+                    "primary-response",
+                    "{\"summary\":\"recovered\"}",
+                    new ModelGateway.Usage(1, 1, 2),
+                    ModelGateway.FinishReason.STOP);
+        };
+        CommercialModelGateway gateway = new CommercialModelGateway(
+                breakerProperties(1, 2), fallbackProfileRegistry(), provider, new ModelCallAuditService());
+
+        // Call 1: primary fails and opens the breaker; fail over to the fallback.
+        gateway.generate(scoutRequest("trace-probe"), IntakeCancellation.neverCancelled()).block();
+        // Call 2: breaker open, routed straight to the fallback (1 of 2 routed calls).
+        gateway.generate(scoutRequest("trace-probe"), IntakeCancellation.neverCancelled()).block();
+        // Call 3: half-open probe hits the recovered primary and closes the breaker.
+        ModelGateway.ModelResponse probeResponse =
+                gateway.generate(scoutRequest("trace-probe"), IntakeCancellation.neverCancelled()).block();
+        // Call 4: breaker closed again, the primary is used directly.
+        ModelGateway.ModelResponse recoveredResponse =
+                gateway.generate(scoutRequest("trace-probe"), IntakeCancellation.neverCancelled()).block();
+
+        assertThat(invokedProfiles)
+                .containsExactly("scout", "scout-fallback", "scout-fallback", "scout", "scout");
+        assertThat(probeResponse.modelName()).isEqualTo("primary-model");
+        assertThat(recoveredResponse.modelName()).isEqualTo("primary-model");
+    }
+
     private ModelGatewayProperties enabledProperties() {
         return new ModelGatewayProperties(true, URI.create("https://example.invalid/v1"), "placeholder", "test-key", false);
+    }
+
+    private ModelGatewayProperties breakerProperties(int failureThreshold, int probeInterval) {
+        return new ModelGatewayProperties(
+                true,
+                URI.create("https://example.invalid/v1"),
+                "placeholder",
+                "test-key",
+                false,
+                new ModelGatewayProperties.CircuitBreaker(failureThreshold, probeInterval));
     }
 
     private ModelProfileRegistry profileRegistry(int maxRetries) {
@@ -300,6 +407,10 @@ class ModelGatewayContractTests {
     }
 
     private ModelGateway.ModelRequest scoutRequest() {
+        return scoutRequest("trace-fallback");
+    }
+
+    private ModelGateway.ModelRequest scoutRequest(String traceId) {
         return new ModelGateway.ModelRequest(
                 responseRequestReviewId(),
                 RoleType.DIRECTOR,
@@ -308,7 +419,7 @@ class ModelGatewayContractTests {
                 "Inspect the repository.",
                 "Public context.",
                 Set.of("list_files"),
-                "trace-fallback");
+                traceId);
     }
 
     private ModelGateway.ModelRequest request() {

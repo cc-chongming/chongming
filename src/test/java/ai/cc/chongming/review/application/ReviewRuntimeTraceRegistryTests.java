@@ -24,8 +24,9 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 
 /**
- * [AIREVIEW-PLAN-022#7.1][AIREVIEW-PLAN-023#8] Verifies durable runtime trace persistence, restart replay, sequence
- * continuation, retention trimming, and the auxiliary-runtime guard.
+ * [AIREVIEW-PLAN-022#7.1][AIREVIEW-PLAN-023#8][AIREVIEW-PLAN-024#6] Verifies durable runtime trace persistence,
+ * restart replay, sequence continuation, retention trimming, the auxiliary-runtime guard, and the
+ * PLAN-024 observability metrics (five independent failure categories plus stage metrics).
  *
  * @author zyj
  */
@@ -180,6 +181,86 @@ class ReviewRuntimeTraceRegistryTests {
         assertThat(store.findAfter(runtimeId, 0, 100))
                 .extracting(RuntimeTraceStore.RuntimeTraceRow::sequence)
                 .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, 20).boxed().toList());
+    }
+
+    @Test
+    void countsFiveFailureCategoriesIndependentlyInsteadOfOneDegradationBucket() {
+        ReviewRuntimeTraceRegistry registry = registry(new FakeTraceStore(), 1000);
+        String runtimeId = runtimeId(1);
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.MODEL_TIMEOUT, Map.of("profile", "role-reviewer"));
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.MODEL_TIMEOUT, null);
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.NON_JSON_RESPONSE, Map.of());
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.TOOL_PARAMETER_REJECTED, Map.of("tool", "readLines"));
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.REPOSITORY_ACCESS_DENIED, Map.of("errorCode", "FILE_REF_NOT_GRANTED"));
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.READ_BUDGET_EXHAUSTED, Map.of("role", "BACKEND"));
+
+        ReviewRuntimeTraceRegistry.RuntimeMetricsSnapshot snapshot = registry.metricsSnapshot(runtimeId);
+
+        assertThat(snapshot.failureCounts())
+                .hasSize(5)
+                .containsEntry(RuntimeFailureCategory.MODEL_TIMEOUT, 2L)
+                .containsEntry(RuntimeFailureCategory.NON_JSON_RESPONSE, 1L)
+                .containsEntry(RuntimeFailureCategory.TOOL_PARAMETER_REJECTED, 1L)
+                .containsEntry(RuntimeFailureCategory.REPOSITORY_ACCESS_DENIED, 1L)
+                .containsEntry(RuntimeFailureCategory.READ_BUDGET_EXHAUSTED, 1L);
+        // Every recorded failure is also durable and replayable as its own custom event.
+        assertThat(registry.replayHistory(runtimeId, 0)).hasSize(6);
+    }
+
+    @Test
+    void recordsStageMetricsAndRebuildsThemAfterRestart() {
+        FakeTraceStore store = new FakeTraceStore();
+        ReviewRuntimeTraceRegistry registry = registry(store, 1000);
+        String runtimeId = runtimeId(1);
+        registry.recordMetric(runtimeId, ReviewRuntimeTraceRegistry.METRIC_STAGE_DURATION,
+                Map.of("stage", "INITIAL_REVIEW", "durationMillis", 12345));
+        registry.recordMetric(runtimeId, ReviewRuntimeTraceRegistry.METRIC_ROLE_FIRST_TOKEN,
+                Map.of("role", "BACKEND", "firstTokenMillis", 800));
+        registry.recordMetric(runtimeId, ReviewRuntimeTraceRegistry.METRIC_TOOL_CALLS,
+                Map.of("role", "BACKEND", "succeeded", 9, "failed", 2));
+        registry.recordMetric(runtimeId, ReviewRuntimeTraceRegistry.METRIC_ASSESSMENT_COVERAGE_COMPLETED,
+                Map.of("role", "BACKEND", "atSequence", 42));
+        registry.recordMetric(runtimeId, ReviewRuntimeTraceRegistry.METRIC_DISPATCH_WAIT,
+                Map.of("topicId", "topic-1", "waitMillis", 300));
+        registry.recordMetric(runtimeId, ReviewRuntimeTraceRegistry.METRIC_ROUND_EFFECTIVE_ACTIONS,
+                Map.of("round", 1, "effectiveActions", 4));
+        registry.recordFailure(runtimeId, RuntimeFailureCategory.MODEL_TIMEOUT, Map.of());
+        awaitTrue(() -> store.appendAttempts.get() >= 7);
+
+        ReviewRuntimeTraceRegistry restarted = registry(store, 1000);
+        ReviewRuntimeTraceRegistry.RuntimeMetricsSnapshot snapshot = restarted.metricsSnapshot(runtimeId);
+
+        assertThat(snapshot.metrics()).containsKeys(
+                ReviewRuntimeTraceRegistry.METRIC_STAGE_DURATION,
+                ReviewRuntimeTraceRegistry.METRIC_ROLE_FIRST_TOKEN,
+                ReviewRuntimeTraceRegistry.METRIC_TOOL_CALLS,
+                ReviewRuntimeTraceRegistry.METRIC_ASSESSMENT_COVERAGE_COMPLETED,
+                ReviewRuntimeTraceRegistry.METRIC_DISPATCH_WAIT,
+                ReviewRuntimeTraceRegistry.METRIC_ROUND_EFFECTIVE_ACTIONS);
+        assertThat(snapshot.metrics().get(ReviewRuntimeTraceRegistry.METRIC_STAGE_DURATION))
+                .containsEntry("stage", "INITIAL_REVIEW");
+        assertThat(snapshot.metrics().get(ReviewRuntimeTraceRegistry.METRIC_TOOL_CALLS))
+                .containsEntry("succeeded", 9)
+                .containsEntry("failed", 2);
+        assertThat(snapshot.failureCounts()).containsEntry(RuntimeFailureCategory.MODEL_TIMEOUT, 1L);
+    }
+
+    @Test
+    void metricsDefaultToZeroForTracesRecordedBeforePlan024() {
+        FakeTraceStore store = new FakeTraceStore();
+        ReviewRuntimeTraceRegistry first = registry(store, 1000);
+        String runtimeId = runtimeId(1);
+        // Legacy payload only: no metric events exist in the persisted trace.
+        first.publish(runtimeId, text("m-1"));
+        awaitTrue(() -> store.maxSequence(runtimeId) == 1);
+
+        ReviewRuntimeTraceRegistry restarted = registry(store, 1000);
+        ReviewRuntimeTraceRegistry.RuntimeMetricsSnapshot snapshot = restarted.metricsSnapshot(runtimeId);
+
+        assertThat(snapshot.failureCounts()).hasSize(5);
+        assertThat(snapshot.failureCounts().values()).containsOnly(0L);
+        assertThat(snapshot.metrics()).isEmpty();
+        assertThat(restarted.replayHistory(runtimeId, 0)).hasSize(1);
     }
 
     private static ReviewRuntimeTraceRegistry registry(FakeTraceStore store, int maxEvents) {

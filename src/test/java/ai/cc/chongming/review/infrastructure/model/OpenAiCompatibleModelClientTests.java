@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Tests OpenAI-compatible request and response normalization using a local JDK HTTP server.
  * <p>
- * [AIREVIEW-PLAN-023#8]
+ * [AIREVIEW-PLAN-023#8][AIREVIEW-PLAN-024#6]
  *
  * @author zyj
  */
@@ -56,6 +56,16 @@ class OpenAiCompatibleModelClientTests {
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(responseStatus.get(), response.length);
             exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/v1/slow/chat/completions", exchange -> {
+            try {
+                // Outlasts the short profile timeout so the client classifies the wait.
+                Thread.sleep(2_000);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.sendResponseHeaders(200, -1);
             exchange.close();
         });
         server.start();
@@ -222,6 +232,31 @@ class OpenAiCompatibleModelClientTests {
                 .isInstanceOf(ModelGatewayException.class)
                 .satisfies(exception -> assertThat(((ModelGatewayException) exception).code())
                         .isEqualTo(ModelGatewayException.Code.MODEL_RESPONSE_INVALID));
+    }
+
+    @Test
+    void classifiesRequestTimeoutAsModelCallTimeoutSoBreakerAndMetricsCanCountIt() {
+        OpenAiCompatibleModelClient client = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new ObjectMapper());
+        ModelProviderClient.ProviderRequest slowRequest = new ModelProviderClient.ProviderRequest(
+                URI.create("http://localhost:" + server.getAddress().getPort() + "/v1/slow"),
+                "safe-test-key",
+                new ModelProfile("role-reviewer", Provider.OPENAI_COMPATIBLE, "test-model", 0.2d,
+                        Duration.ofMillis(250), 128, new RetryPolicy(0, Duration.ZERO), null),
+                new ModelGateway.ModelRequest(
+                        new ReviewId(UUID.randomUUID()),
+                        RoleType.BACKEND,
+                        "role-reviewer",
+                        "backend-v1",
+                        "Return JSON only.",
+                        "Public context only.",
+                        Set.of("searchText"),
+                        "trace-timeout"),
+                false);
+
+        assertThatThrownBy(() -> client.invoke(slowRequest))
+                .isInstanceOf(ModelGatewayException.class)
+                .satisfies(exception -> assertThat(((ModelGatewayException) exception).code())
+                        .isEqualTo(ModelGatewayException.Code.MODEL_CALL_TIMEOUT));
     }
 
     @Test

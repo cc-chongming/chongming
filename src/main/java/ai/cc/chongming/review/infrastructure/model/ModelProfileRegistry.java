@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -61,6 +62,22 @@ public class ModelProfileRegistry {
      */
     public Map<String, ModelProfile> profiles() {
         return profiles;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#6] Resolves the configured fallback profile of a primary profile. Used by
+     * both the single-failure fallback path and the attempt-scoped circuit breaker so a tripped
+     * profile can only ever be routed to a registered, validated fallback.
+     *
+     * @param profile primary profile that may declare a fallback
+     * @return resolved fallback profile, or empty when none is configured
+     */
+    public Optional<ModelProfile> fallbackProfile(ModelProfile profile) {
+        Objects.requireNonNull(profile, "profile must not be null");
+        if (profile.fallbackProfileId() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(requireProfile(profile.fallbackProfileId()));
     }
 
     private ModelProfile toProfile(String profileId, ModelProfilesProperties.ProfileDefinition definition) {

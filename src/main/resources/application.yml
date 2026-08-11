@@ -93,7 +93,9 @@ review:
         timeout: PT30S
         max-tokens: 65536
         retry:
-          max-retries: 2
+          # [AIREVIEW-PLAN-024#6] A single retry caps the worst-case wait at ~60s instead of ~90s
+          # for one role; repeated failures are then short-circuited by the attempt-scoped breaker.
+          max-retries: 1
           initial-backoff: PT0.2S
         fallback-profile: fallback
       judge:
@@ -116,6 +118,14 @@ review:
         retry:
           max-retries: 0
           initial-backoff: PT0.2S
+    # [AIREVIEW-PLAN-024#6] Attempt-scoped circuit breaker keyed by provider/model/profile. After
+    # failure-threshold consecutive transient failures, later same-profile calls in the same review
+    # attempt route straight to the configured fallback; every probe-interval routed calls one
+    # half-open probe is sent to the primary so a recovered provider can close the breaker. The
+    # breaker never persists across reviews or attempts. Set failure-threshold to 0 to disable.
+    circuit-breaker:
+      failure-threshold: ${REVIEW_MODEL_CIRCUIT_BREAKER_FAILURE_THRESHOLD:2}
+      probe-interval: ${REVIEW_MODEL_CIRCUIT_BREAKER_PROBE_INTERVAL:3}
   persistence:
     # Disabled by default. Override these placeholders in the deployment environment.
     enabled: ${REVIEW_PERSISTENCE_ENABLED:true}
