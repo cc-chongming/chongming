@@ -67,6 +67,19 @@ class ReviewReportServiceTests {
                 "PRODUCT", "incremental-sync-core", "P1", "SUPPORT",
                 "增量同步必须上线。", "全量方案已到瓶颈。", "SUBMITTED",
                 List.of(UUID.fromString("50000000-0000-0000-0000-000000000001")))));
+        // [AIREVIEW-PLAN-024#方案5] five-status assessment facts are store projections; entries are
+        // intentionally unsorted here so the report's stable role+checkpointKey ordering is verified.
+        when(queryService.findAssessmentViews(reviewId, 1)).thenReturn(List.of(
+                assessmentView("FRONTEND", "incremental_render", "CONFIRMED", "前端增量渲染无问题。", null,
+                        List.of(UUID.fromString("60000000-0000-0000-0000-000000000001"))),
+                assessmentView("BACKEND", "token_expiry_policy", "CONFIRMED", "令牌过期策略已实现。", null, List.of()),
+                assessmentView("BACKEND", "audit_log_coverage", "GAP", "审计日志存在缺口。", "敏感操作未覆盖。", List.of()),
+                assessmentView("PRODUCT", "requirement_traceability", "PARTIAL", "追踪部分缺失。", "两条需求无追踪号。", List.of()),
+                assessmentView("FRONTEND", "snapshot_grant_scope", "UNKNOWN", "无法确认快照授权范围。",
+                        "当前评审快照未授予前端文件。", List.of()),
+                assessmentView("PROJECT", "milestone_plan", "NOT_APPLICABLE", "里程碑计划不适用。", null, List.of())));
+        when(queryService.findAssessmentCoverage(reviewId, 1)).thenReturn(new ReviewQueryService.AssessmentCoverageView(
+                24, 20, 2, 1, 1, 1, 1, List.of("SECURITY:secret_rotation")));
         service = new ReviewReportService(
                 reportStore,
                 queryService,
@@ -99,6 +112,37 @@ class ReviewReportServiceTests {
     }
 
     @Test
+    void rendersFiveAssessmentSectionsWithStoreDerivedCounters() throws java.io.IOException {
+        ReviewReport report = service.generate(review);
+
+        ReviewReportService.ReportContent content = new ObjectMapper()
+                .readValue(report.contentJson(), ReviewReportService.ReportContent.class);
+        ReviewReportService.AssessmentReportView sections = content.assessments();
+        assertEquals(24, sections.required());
+        assertEquals(20, sections.covered());
+        assertEquals(2, sections.confirmed());
+        assertEquals(1, sections.partial());
+        assertEquals(1, sections.gap());
+        assertEquals(1, sections.unknown());
+        assertEquals(1, sections.notApplicable());
+        assertEquals(List.of("SECURITY:secret_rotation"), sections.uncoveredCheckpoints());
+        assertEquals(List.of("BACKEND:token_expiry_policy", "FRONTEND:incremental_render"),
+                sections.confirmedEntries().stream()
+                        .map(entry -> entry.role() + ":" + entry.checkpointKey()).toList());
+        assertEquals("审计日志存在缺口。", sections.gapEntries().get(0).summary());
+        assertEquals("无法确认快照授权范围。", sections.unknownEntries().get(0).summary());
+        assertTrue(report.markdown().contains("## 检查点结论"));
+        assertTrue(report.markdown().contains(
+                "required=24, confirmed=2, partial=1, gap=1, unknown=1, notApplicable=1"));
+        assertTrue(report.markdown().contains("未覆盖 required 检查点: SECURITY:secret_rotation"));
+        assertTrue(report.markdown().contains("确定结论（CONFIRMED：2）"));
+        assertTrue(report.markdown().contains("部分满足（PARTIAL：1）"));
+        assertTrue(report.markdown().contains("风险缺口（GAP：1）"));
+        assertTrue(report.markdown().contains("证据不足（UNKNOWN：1）"));
+        assertTrue(report.markdown().contains("不适用（NOT_APPLICABLE：1）"));
+    }
+
+    @Test
     void finalGateEventTriggersBestEffortReportGeneration() {
         ReviewEvent event = ReviewEvent.committed(10L, new ReviewEventDraft(
                 reviewId, 1, ReviewEventType.HUMAN_GATE_FINALIZED, ReviewStage.NOTIFYING, RoleType.DIRECTOR,
@@ -107,6 +151,13 @@ class ReviewReportServiceTests {
         service.onCommitted(event);
 
         assertTrue(reportStore.findLatest(reviewId).isPresent());
+    }
+
+    private ReviewQueryService.AssessmentView assessmentView(
+            String role, String checkpointKey, String status, String summary,
+            String reasonSummary, List<UUID> evidenceIds) {
+        return new ReviewQueryService.AssessmentView(
+                role, checkpointKey, status, summary, reasonSummary, evidenceIds, "2026-07-16 15:00:00");
     }
 
     private String normalizeNewlines(String value) {

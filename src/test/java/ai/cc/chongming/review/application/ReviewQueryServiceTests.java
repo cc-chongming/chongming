@@ -6,6 +6,8 @@ import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewAssessment;
+import ai.cc.chongming.review.domain.model.ReviewTypes.AssessmentStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
@@ -15,17 +17,23 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
+import ai.cc.chongming.review.domain.repository.ReviewAssessmentStore;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.domain.repository.ReviewRepositories;
+import ai.cc.chongming.review.domain.role.RolePack;
+import ai.cc.chongming.review.domain.role.RolePackRegistry;
+import ai.cc.chongming.review.infrastructure.assessment.InMemoryReviewAssessmentStore;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -229,6 +237,141 @@ class ReviewQueryServiceTests {
         assertThat(summary.activatedRoles()).containsExactly(
                 new ReviewQueryService.RoleActivationView("PRODUCT", "product-reviewer", true));
         assertThat(summary.contextScout().publicSummary()).isEqualTo("重启后恢复的 Scout 结论");
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] The workbench projection exposes every persisted five-status
+     * assessment sorted by role + checkpointKey together with the server-side coverage summary.
+     */
+    @Test
+    void projectsFiveStatusAssessmentsWithServerSideCoverageSummary() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Review review = Review.restore(reviewId, ReviewStage.INITIAL_REVIEW, 1, 3L, List.of(), Map.of());
+        ReviewRegistry reviewRegistry = mock(ReviewRegistry.class);
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.of(review));
+        RolePackRegistry rolePackRegistry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+        InMemoryReviewAssessmentStore assessmentStore = new InMemoryReviewAssessmentStore();
+
+        List<ReviewAssessment> batch = new ArrayList<>();
+        int requiredCount = 0;
+        List<Map.Entry<RoleType, RolePack.Checkpoint>> optionalSlots = new ArrayList<>();
+        for (RolePack rolePack : rolePackRegistry.all()) {
+            if (!rolePack.roleType().isCore()) {
+                continue;
+            }
+            for (RolePack.Checkpoint checkpoint : rolePack.checklist()) {
+                if (checkpoint.required() && checkpoint.hasStableKey()) {
+                    batch.add(assessment(reviewId, rolePack.roleType(), checkpoint.checkpointKey(),
+                            AssessmentStatus.CONFIRMED, null));
+                    requiredCount++;
+                } else if (checkpoint.hasStableKey()) {
+                    optionalSlots.add(Map.entry(rolePack.roleType(), checkpoint));
+                }
+            }
+        }
+        assertThat(optionalSlots).hasSizeGreaterThanOrEqualTo(4);
+        batch.add(assessment(reviewId, optionalSlots.get(0).getKey(),
+                optionalSlots.get(0).getValue().checkpointKey(), AssessmentStatus.GAP, "缺口需要处置。"));
+        batch.add(assessment(reviewId, optionalSlots.get(1).getKey(),
+                optionalSlots.get(1).getValue().checkpointKey(), AssessmentStatus.UNKNOWN, "缺少授权证据。"));
+        batch.add(assessment(reviewId, optionalSlots.get(2).getKey(),
+                optionalSlots.get(2).getValue().checkpointKey(), AssessmentStatus.PARTIAL, "部分满足。"));
+        batch.add(assessment(reviewId, optionalSlots.get(3).getKey(),
+                optionalSlots.get(3).getValue().checkpointKey(), AssessmentStatus.NOT_APPLICABLE, null));
+        assessmentStore.saveBatch(reviewId, 1, batch);
+
+        ReviewQueryService service = queryServiceWithAssessments(reviewRegistry, assessmentStore, rolePackRegistry);
+
+        ReviewQueryService.AssessmentsView view = service.findAssessments(reviewId);
+        assertThat(view.attempt()).isEqualTo(1);
+        ReviewQueryService.AssessmentCoverageView coverage = view.coverage();
+        assertThat(coverage.required()).isEqualTo(requiredCount);
+        assertThat(coverage.covered()).isEqualTo(requiredCount);
+        assertThat(coverage.confirmed()).isEqualTo(requiredCount);
+        assertThat(coverage.gap()).isEqualTo(1);
+        assertThat(coverage.unknown()).isEqualTo(1);
+        assertThat(coverage.partial()).isEqualTo(1);
+        assertThat(coverage.notApplicable()).isEqualTo(1);
+        assertThat(coverage.uncoveredCheckpoints()).isEmpty();
+
+        List<String> expectedOrder = batch.stream()
+                .map(value -> value.roleType().name() + ":" + value.checkpointKey())
+                .sorted()
+                .toList();
+        assertThat(view.assessments())
+                .extracting(value -> value.role() + ":" + value.checkpointKey())
+                .containsExactlyElementsOf(expectedOrder);
+        assertThat(view.assessments())
+                .extracting(ReviewQueryService.AssessmentView::status)
+                .contains(AssessmentStatus.CONFIRMED.name(), AssessmentStatus.PARTIAL.name(),
+                        AssessmentStatus.GAP.name(), AssessmentStatus.UNKNOWN.name(),
+                        AssessmentStatus.NOT_APPLICABLE.name());
+        ReviewQueryService.AssessmentView gap = view.assessments().stream()
+                .filter(value -> "GAP".equals(value.status())).findFirst().orElseThrow();
+        assertThat(gap.summary()).isEqualTo("检查点结论摘要。");
+        assertThat(gap.reasonSummary()).isEqualTo("缺口需要处置。");
+    }
+
+    @Test
+    void returnsEmptyAssessmentProjectionBeforeAnyAttemptExists() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewRegistry reviewRegistry = mock(ReviewRegistry.class);
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.empty());
+        ReviewEventStore eventStore = mock(ReviewEventStore.class);
+        when(eventStore.findLatest(reviewId)).thenReturn(Optional.empty());
+        ReviewQueryService service = new ReviewQueryService(
+                eventStore,
+                mock(ReviewDebateStore.class),
+                mock(EvidenceLedgerService.class),
+                mock(HumanGateDecisionStore.class),
+                reviewRegistry,
+                mock(ObjectProvider.class),
+                mock(ContextScoutConclusionStore.class),
+                providerOf(new InMemoryReviewAssessmentStore()),
+                providerOf(new RolePackRegistry(new PathMatchingResourcePatternResolver())));
+
+        ReviewQueryService.AssessmentsView view = service.findAssessments(reviewId);
+
+        assertThat(view.attempt()).isNull();
+        assertThat(view.assessments()).isEmpty();
+        assertThat(view.coverage().required()).isZero();
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> ObjectProvider<T> providerOf(T value) {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(value);
+        return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private ReviewQueryService queryServiceWithAssessments(
+            ReviewRegistry reviewRegistry,
+            ReviewAssessmentStore assessmentStore,
+            RolePackRegistry rolePackRegistry) {
+        ObjectProvider<ReviewRepositories> repositoriesProvider = mock(ObjectProvider.class);
+        return new ReviewQueryService(
+                mock(ReviewEventStore.class),
+                mock(ReviewDebateStore.class),
+                mock(EvidenceLedgerService.class),
+                mock(HumanGateDecisionStore.class),
+                reviewRegistry,
+                repositoriesProvider,
+                mock(ContextScoutConclusionStore.class),
+                providerOf(assessmentStore),
+                providerOf(rolePackRegistry));
+    }
+
+    private ReviewAssessment assessment(
+            ReviewId reviewId,
+            RoleType roleType,
+            String checkpointKey,
+            AssessmentStatus status,
+            String reasonSummary) {
+        return new ReviewAssessment(reviewId, 1, roleType, checkpointKey, status, "检查点结论摘要。",
+                reasonSummary, List.of(),
+                ReviewAssessment.idempotencyKeyFor(reviewId, 1, roleType, checkpointKey),
+                Instant.parse("2026-08-10T09:00:00Z"));
     }
 
     private ReviewEvent event(

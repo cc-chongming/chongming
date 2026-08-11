@@ -7,12 +7,17 @@ import ai.cc.chongming.review.domain.gate.GatePolicy;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.GateDecision;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewAssessment;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
+import ai.cc.chongming.review.domain.repository.ReviewAssessmentStore;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
+import ai.cc.chongming.review.domain.role.RolePack;
+import ai.cc.chongming.review.domain.role.RolePackRegistry;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -30,16 +35,31 @@ public class JudgeService {
     private final ReviewDebateStore debateStore;
     private final GatePolicy gatePolicy;
     private final ReviewEventPublisher eventPublisher;
+    private final ReviewAssessmentStore assessmentStore;
+    private final RolePackRegistry rolePackRegistry;
 
     public JudgeService(ReviewDebateStore debateStore) {
-        this(debateStore, new GatePolicy(), ReviewEventPublisher.noop());
+        this(debateStore, new GatePolicy(), ReviewEventPublisher.noop(), null, null);
+    }
+
+    public JudgeService(ReviewDebateStore debateStore, GatePolicy gatePolicy, ReviewEventPublisher eventPublisher) {
+        this(debateStore, gatePolicy, eventPublisher, null, null);
     }
 
     @Autowired
-    public JudgeService(ReviewDebateStore debateStore, GatePolicy gatePolicy, ReviewEventPublisher eventPublisher) {
+    public JudgeService(
+            ReviewDebateStore debateStore,
+            GatePolicy gatePolicy,
+            ReviewEventPublisher eventPublisher,
+            ReviewAssessmentStore assessmentStore,
+            RolePackRegistry rolePackRegistry) {
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.gatePolicy = Objects.requireNonNull(gatePolicy, "gatePolicy must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        // assessmentStore/rolePackRegistry may be null in legacy test fixtures; the Gate then falls
+        // back to the pre-方案5 claim/judge-only conservative draft.
+        this.assessmentStore = assessmentStore;
+        this.rolePackRegistry = rolePackRegistry;
     }
 
     /** Saves one Judge conclusion for a terminal topic and returns an idempotent replay when applicable. */
@@ -111,7 +131,14 @@ debateStore.saveJudgeDecision(review.id(), decision);
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "every terminal debate topic requires a Judge decision before Gate drafting");
         }
-        GateDecision draft = gatePolicy.draft(review.id(), debateStore.findClaims(review.id()), decisions);
+        // [AIREVIEW-PLAN-024#方案5] one batch assessment query + RolePack-derived required set;
+        // no per-checkpoint database access.
+        List<ReviewAssessment> assessments = assessmentStore == null
+                ? List.of()
+                : assessmentStore.findByReview(review.id(), review.attemptNo());
+        GateDecision draft = gatePolicy.draft(
+                review.id(), assessments, debateStore.findClaims(review.id()), decisions,
+                requiredCheckpointSet());
         debateStore.saveGateDraft(draft);
         boolean awaitingHumanDecision = review.stage() == ReviewStage.JUDGING;
         if (awaitingHumanDecision) {
@@ -145,6 +172,28 @@ debateStore.saveJudgeDecision(review.id(), decision);
                     java.util.Map.of("reason", draft.publicReasonSummary())));
         }
         return draft;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Derives the required (role, checkpointKey) set from the four core
+     * RolePack checklist contracts; the Gate consumes it to verify positive coverage.
+     */
+    private Set<GatePolicy.RequiredCheckpoint> requiredCheckpointSet() {
+        if (rolePackRegistry == null) {
+            return Set.of();
+        }
+        Set<GatePolicy.RequiredCheckpoint> required = new java.util.LinkedHashSet<>();
+        for (RolePack rolePack : rolePackRegistry.all()) {
+            if (!rolePack.roleType().isCore()) {
+                continue;
+            }
+            for (RolePack.Checkpoint checkpoint : rolePack.checklist()) {
+                if (checkpoint.required() && checkpoint.hasStableKey()) {
+                    required.add(new GatePolicy.RequiredCheckpoint(rolePack.roleType(), checkpoint.checkpointKey()));
+                }
+            }
+        }
+        return Set.copyOf(required);
     }
 
     private void validateTopicClaims(DebateTopic topic, List<ClaimId> claimIds) {

@@ -74,7 +74,9 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "chongming_agentscope_workspace",
                     "runtime_trace_event",
                     "context_scout_conclusion",
-                    "requirement_review_launch_command");
+                    "requirement_review_launch_command",
+                    "review_assessment",
+                    "review_dispatch_command");
             Map<String, String> expectedLongTextColumns = Map.of(
                     "review_plan.plan_json", "LONGTEXT",
                     "repository_snapshot.manifest_json", "LONGTEXT",
@@ -99,6 +101,16 @@ class ReviewPersistenceMigrationIntegrationTests {
                     .containsExactly("OCCURRED_AT");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_event", "idx_review_event_recent_activity"))
                     .containsExactly("EVENT_SEQUENCE", "OCCURRED_AT", "REVIEW_ID");
+            // [AIREVIEW-PLAN-024#方案5] assessment identity is the (review, attempt, role, checkpoint)
+            // composite primary key; dispatch commands are unique on command_id plus idempotency_key.
+            assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "review_assessment"))
+                    .containsExactly("REVIEW_ID", "ATTEMPT_NO", "ROLE_TYPE", "CHECKPOINT_KEY");
+            assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command"))
+                    .containsExactly("COMMAND_ID");
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_assessment", "idx_review_assessment_attempt"))
+                    .containsExactly("REVIEW_ID", "ATTEMPT_NO");
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command", "uk_review_dispatch_idempotency"))
+                    .containsExactly("IDEMPOTENCY_KEY");
         }
     }
 

@@ -50,6 +50,7 @@ public class ReviewReportService implements ReviewEventListener {
     private final ReviewRegistry reviewRegistry;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ConflictDetectionService conflictDetectionService;
 
     @Autowired
     public ReviewReportService(
@@ -58,8 +59,21 @@ public class ReviewReportService implements ReviewEventListener {
             HumanReviewItemStore itemStore,
             HumanGateDecisionStore decisionStore,
             ReviewRegistry reviewRegistry,
+            ObjectMapper objectMapper,
+            ConflictDetectionService conflictDetectionService) {
+        this(reportStore, queryService, itemStore, decisionStore, reviewRegistry, objectMapper,
+                Clock.systemUTC(), conflictDetectionService);
+    }
+
+    public ReviewReportService(
+            ReviewReportStore reportStore,
+            ReviewQueryService queryService,
+            HumanReviewItemStore itemStore,
+            HumanGateDecisionStore decisionStore,
+            ReviewRegistry reviewRegistry,
             ObjectMapper objectMapper) {
-        this(reportStore, queryService, itemStore, decisionStore, reviewRegistry, objectMapper, Clock.systemUTC());
+        this(reportStore, queryService, itemStore, decisionStore, reviewRegistry, objectMapper,
+                Clock.systemUTC(), null);
     }
 
     public ReviewReportService(
@@ -70,6 +84,18 @@ public class ReviewReportService implements ReviewEventListener {
             ReviewRegistry reviewRegistry,
             ObjectMapper objectMapper,
             Clock clock) {
+        this(reportStore, queryService, itemStore, decisionStore, reviewRegistry, objectMapper, clock, null);
+    }
+
+    public ReviewReportService(
+            ReviewReportStore reportStore,
+            ReviewQueryService queryService,
+            HumanReviewItemStore itemStore,
+            HumanGateDecisionStore decisionStore,
+            ReviewRegistry reviewRegistry,
+            ObjectMapper objectMapper,
+            Clock clock,
+            ConflictDetectionService conflictDetectionService) {
         this.reportStore = Objects.requireNonNull(reportStore, "reportStore must not be null");
         this.queryService = Objects.requireNonNull(queryService, "queryService must not be null");
         this.itemStore = Objects.requireNonNull(itemStore, "itemStore must not be null");
@@ -77,6 +103,9 @@ public class ReviewReportService implements ReviewEventListener {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        // nullable for legacy test fixtures; production wiring always injects the service so every
+        // report counter is derived from store queries instead of model text.
+        this.conflictDetectionService = conflictDetectionService;
     }
 
     /**
@@ -92,6 +121,13 @@ public class ReviewReportService implements ReviewEventListener {
         List<ReviewQueryService.DebateView> debates = queryService.findDebates(review.id());
         List<ReviewQueryService.ClaimView> claims = queryService.findClaims(review.id());
         claims = claims == null ? List.of() : List.copyOf(claims);
+        // [AIREVIEW-PLAN-024#方案5] five-status assessment sections and debate metrics are derived
+        // entirely from store queries; models never hand-write these counters.
+        AssessmentReportView assessmentSections =
+                buildAssessmentSections(review.id(), review.attemptNo());
+        DebateMetricsView debateMetrics = conflictDetectionService == null
+                ? null
+                : toDebateMetricsView(conflictDetectionService.debateMetrics(review));
         ReportContent content = new ReportContent(
                 summary,
                 findAllPlans(review.id()),
@@ -100,6 +136,8 @@ public class ReviewReportService implements ReviewEventListener {
                                 activation.roleType().name(), activation.agentLabel(), activation.initialReviewCompleted()))
                         .toList(),
                 claims,
+                assessmentSections,
+                debateMetrics,
                 debates,
                 humanItems.stream().map(this::toHumanItemView).toList(),
                 decisionStore.findVersions(review.id()).stream().map(this::toGateView).toList(),
@@ -159,6 +197,58 @@ public class ReviewReportService implements ReviewEventListener {
             cursor = page.nextAfterSequence();
         }
         throw new IllegalStateException("review plan history exceeds report pagination budget");
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Groups the persisted five-status assessments into the five report
+     * sections with deterministic role + checkpointKey ordering. All counters come from the store
+     * projection; "research has no issue" statements only exist as concrete CONFIRMED checkpoints.
+     */
+    private AssessmentReportView buildAssessmentSections(ReviewId reviewId, int attemptNo) {
+        List<ReviewQueryService.AssessmentView> views = queryService.findAssessmentViews(reviewId, attemptNo);
+        views = views == null ? List.of() : List.copyOf(views);
+        ReviewQueryService.AssessmentCoverageView coverage = queryService.findAssessmentCoverage(reviewId, attemptNo);
+        Comparator<ReviewQueryService.AssessmentView> order =
+                Comparator.comparing(ReviewQueryService.AssessmentView::role)
+                        .thenComparing(ReviewQueryService.AssessmentView::checkpointKey);
+        return new AssessmentReportView(
+                coverage == null ? 0 : coverage.required(),
+                coverage == null ? 0 : coverage.covered(),
+                countStatus(views, "CONFIRMED"),
+                countStatus(views, "PARTIAL"),
+                countStatus(views, "GAP"),
+                countStatus(views, "UNKNOWN"),
+                countStatus(views, "NOT_APPLICABLE"),
+                coverage == null ? List.of() : coverage.uncoveredCheckpoints(),
+                entries(views, "CONFIRMED", order),
+                entries(views, "PARTIAL", order),
+                entries(views, "GAP", order),
+                entries(views, "UNKNOWN", order),
+                entries(views, "NOT_APPLICABLE", order));
+    }
+
+    private int countStatus(List<ReviewQueryService.AssessmentView> views, String status) {
+        return (int) views.stream().filter(view -> status.equals(view.status())).count();
+    }
+
+    private List<AssessmentEntryView> entries(
+            List<ReviewQueryService.AssessmentView> views,
+            String status,
+            Comparator<ReviewQueryService.AssessmentView> order) {
+        return views.stream()
+                .filter(view -> status.equals(view.status()))
+                .sorted(order)
+                .map(view -> new AssessmentEntryView(
+                        view.role(), view.checkpointKey(), view.summary(), view.reasonSummary(), view.evidenceIds()))
+                .toList();
+    }
+
+    private DebateMetricsView toDebateMetricsView(ConflictDetectionService.DebateMetrics metrics) {
+        return new DebateMetricsView(
+                metrics.conflictCandidateCount(),
+                metrics.registeredTopicCount(),
+                metrics.remainingRiskCount(),
+                metrics.unclosedActionCount());
     }
 
     private List<EvidenceLinkView> findEvidenceLinks(
@@ -224,6 +314,7 @@ public class ReviewReportService implements ReviewEventListener {
             appendEvidenceReferences(markdown, claim.evidenceIds(), content.summary().reviewId());
             markdown.append('\n');
         });
+        appendAssessmentSections(markdown, content);
         markdown.append("\n## 辩论与裁决\n\n");
         content.debates().forEach(debate -> {
             markdown.append("### ").append(debate.subjectKey()).append("\n\n");
@@ -247,6 +338,13 @@ public class ReviewReportService implements ReviewEventListener {
                 markdown.append('\n');
             }
         });
+        if (content.debateMetrics() != null) {
+            markdown.append("\n## 辩论指标\n\n");
+            markdown.append("- 冲突候选: ").append(content.debateMetrics().conflictCandidateCount())
+                    .append("；已登记主题: ").append(content.debateMetrics().registeredTopicCount())
+                    .append("；剩余风险: ").append(content.debateMetrics().remainingRiskCount())
+                    .append("；未闭环动作: ").append(content.debateMetrics().unclosedActionCount()).append('\n');
+        }
         markdown.append("\n## 人工审核草稿\n\n");
         content.humanReviewItems().forEach(item -> {
             markdown.append("- [").append(item.severity()).append("] ").append(item.title())
@@ -267,6 +365,45 @@ public class ReviewReportService implements ReviewEventListener {
         content.evidenceLinks().forEach(link -> markdown.append("- [").append(link.evidenceId())
                 .append("](").append(link.href()).append(")\n"));
         return markdown.toString();
+    }
+
+    private void appendAssessmentSections(StringBuilder markdown, ReportContent content) {
+        AssessmentReportView sections = content.assessments();
+        markdown.append("\n## 检查点结论\n\n");
+        markdown.append("- required=").append(sections.required())
+                .append(", confirmed=").append(sections.confirmed())
+                .append(", partial=").append(sections.partial())
+                .append(", gap=").append(sections.gap())
+                .append(", unknown=").append(sections.unknown())
+                .append(", notApplicable=").append(sections.notApplicable()).append('\n');
+        if (!sections.uncoveredCheckpoints().isEmpty()) {
+            markdown.append("- 未覆盖 required 检查点: ")
+                    .append(String.join("；", sections.uncoveredCheckpoints())).append('\n');
+        }
+        appendAssessmentSection(markdown, "确定结论", "CONFIRMED", sections.confirmedEntries(), content.summary().reviewId());
+        appendAssessmentSection(markdown, "部分满足", "PARTIAL", sections.partialEntries(), content.summary().reviewId());
+        appendAssessmentSection(markdown, "风险缺口", "GAP", sections.gapEntries(), content.summary().reviewId());
+        appendAssessmentSection(markdown, "证据不足", "UNKNOWN", sections.unknownEntries(), content.summary().reviewId());
+        appendAssessmentSection(markdown, "不适用", "NOT_APPLICABLE", sections.notApplicableEntries(), content.summary().reviewId());
+    }
+
+    private void appendAssessmentSection(
+            StringBuilder markdown,
+            String title,
+            String status,
+            List<AssessmentEntryView> entries,
+            UUID reviewId) {
+        markdown.append("\n### ").append(title).append("（").append(status).append("：")
+                .append(entries.size()).append("）\n\n");
+        entries.forEach(entry -> {
+            markdown.append("- ").append(entry.role()).append(" / ").append(entry.checkpointKey())
+                    .append(": ").append(entry.summary());
+            if (entry.reasonSummary() != null && !entry.reasonSummary().isBlank()) {
+                markdown.append(" — ").append(entry.reasonSummary());
+            }
+            appendEvidenceReferences(markdown, entry.evidenceIds(), reviewId);
+            markdown.append('\n');
+        });
     }
 
     private void appendEvidenceReferences(StringBuilder markdown, List<UUID> evidenceIds, UUID reviewId) {
@@ -297,10 +434,52 @@ public class ReviewReportService implements ReviewEventListener {
             List<ReviewQueryService.EventView> planEvents,
             List<RoleView> roles,
             List<ReviewQueryService.ClaimView> claims,
+            AssessmentReportView assessments,
+            DebateMetricsView debateMetrics,
             List<ReviewQueryService.DebateView> debates,
             List<HumanReviewItemView> humanReviewItems,
             List<HumanGateView> gateDecisions,
             List<EvidenceLinkView> evidenceLinks) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Five assessment sections with server-side counters; entries are
+     * sorted by role + checkpointKey so identical store facts produce identical reports.
+     *
+     * @author wangli
+     */
+    public record AssessmentReportView(
+            int required,
+            int covered,
+            int confirmed,
+            int partial,
+            int gap,
+            int unknown,
+            int notApplicable,
+            List<String> uncoveredCheckpoints,
+            List<AssessmentEntryView> confirmedEntries,
+            List<AssessmentEntryView> partialEntries,
+            List<AssessmentEntryView> gapEntries,
+            List<AssessmentEntryView> unknownEntries,
+            List<AssessmentEntryView> notApplicableEntries) {
+    }
+
+    /** @author wangli */
+    public record AssessmentEntryView(
+            String role, String checkpointKey, String summary, String reasonSummary, List<UUID> evidenceIds) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Debate counters derived from {@code ConflictDetectionService}
+     * store queries; never hand-written by models.
+     *
+     * @author wangli
+     */
+    public record DebateMetricsView(
+            int conflictCandidateCount,
+            int registeredTopicCount,
+            int remainingRiskCount,
+            int unclosedActionCount) {
     }
 
     /** @author wangli */

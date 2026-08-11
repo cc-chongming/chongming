@@ -52,6 +52,15 @@ public class ReviewQueryController {
         return reviewQueryService.findClaims(new ReviewId(reviewId));
     }
 
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Five-status assessment projection with the server-side coverage
+     * summary, consumed by the review workbench.
+     */
+    @GetMapping("/{reviewId}/assessments")
+    public ReviewQueryService.AssessmentsView assessments(@PathVariable UUID reviewId) {
+        return reviewQueryService.findAssessments(new ReviewId(reviewId));
+    }
+
     @GetMapping("/{reviewId}/evidence/{evidenceId}")
     public ResponseEntity<ReviewQueryService.EvidenceView> evidence(
             @PathVariable UUID reviewId,

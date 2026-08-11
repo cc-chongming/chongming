@@ -10,18 +10,24 @@ import ai.cc.chongming.review.domain.model.EvidenceBlock;
 import ai.cc.chongming.review.domain.model.GateDecision;
 import ai.cc.chongming.review.domain.model.HumanGateDecision;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewAssessment;
+import ai.cc.chongming.review.domain.model.ReviewTypes.AssessmentStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
 import ai.cc.chongming.review.domain.model.ReviewTypes.EvidenceId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.JudgeDecision;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
+import ai.cc.chongming.review.domain.repository.ReviewAssessmentStore;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
 import ai.cc.chongming.review.domain.repository.ReviewEventStore;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.domain.repository.ReviewRepositories;
+import ai.cc.chongming.review.domain.role.RolePack;
+import ai.cc.chongming.review.domain.role.RolePackRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -32,11 +38,15 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -61,6 +71,8 @@ public class ReviewQueryService {
     private final ReviewRegistry reviewRegistry;
     private final ReviewRepositories reviewRepositories;
     private final ContextScoutConclusionStore contextScoutConclusionStore;
+    private final ReviewAssessmentStore assessmentStore;
+    private final RolePackRegistry rolePackRegistry;
 
     ReviewQueryService(
             ReviewEventStore eventStore,
@@ -69,7 +81,7 @@ public class ReviewQueryService {
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry) {
         this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
-                (ReviewRepositories) null, null);
+                (ReviewRepositories) null, null, null, null);
     }
 
     ReviewQueryService(
@@ -80,7 +92,7 @@ public class ReviewQueryService {
             ReviewRegistry reviewRegistry,
             ContextScoutConclusionStore contextScoutConclusionStore) {
         this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
-                (ReviewRepositories) null, contextScoutConclusionStore);
+                (ReviewRepositories) null, contextScoutConclusionStore, null, null);
     }
 
     public ReviewQueryService(
@@ -91,7 +103,19 @@ public class ReviewQueryService {
             ReviewRegistry reviewRegistry,
             ObjectProvider<ReviewRepositories> reviewRepositoriesProvider) {
         this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
-                reviewRepositoriesProvider.getIfAvailable(), null);
+                reviewRepositoriesProvider.getIfAvailable(), null, null, null);
+    }
+
+    public ReviewQueryService(
+            ReviewEventStore eventStore,
+            ReviewDebateStore debateStore,
+            EvidenceLedgerService evidenceLedgerService,
+            HumanGateDecisionStore humanGateDecisionStore,
+            ReviewRegistry reviewRegistry,
+            ObjectProvider<ReviewRepositories> reviewRepositoriesProvider,
+            ContextScoutConclusionStore contextScoutConclusionStore) {
+        this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
+                reviewRepositoriesProvider.getIfAvailable(), contextScoutConclusionStore, null, null);
     }
 
     @Autowired
@@ -102,9 +126,12 @@ public class ReviewQueryService {
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry,
             ObjectProvider<ReviewRepositories> reviewRepositoriesProvider,
-            ContextScoutConclusionStore contextScoutConclusionStore) {
+            ContextScoutConclusionStore contextScoutConclusionStore,
+            ObjectProvider<ReviewAssessmentStore> assessmentStoreProvider,
+            ObjectProvider<RolePackRegistry> rolePackRegistryProvider) {
         this(eventStore, debateStore, evidenceLedgerService, humanGateDecisionStore, reviewRegistry,
-                reviewRepositoriesProvider.getIfAvailable(), contextScoutConclusionStore);
+                reviewRepositoriesProvider.getIfAvailable(), contextScoutConclusionStore,
+                assessmentStoreProvider.getIfAvailable(), rolePackRegistryProvider.getIfAvailable());
     }
 
     private ReviewQueryService(
@@ -114,7 +141,9 @@ public class ReviewQueryService {
             HumanGateDecisionStore humanGateDecisionStore,
             ReviewRegistry reviewRegistry,
             ReviewRepositories reviewRepositories,
-            ContextScoutConclusionStore contextScoutConclusionStore) {
+            ContextScoutConclusionStore contextScoutConclusionStore,
+            ReviewAssessmentStore assessmentStore,
+            RolePackRegistry rolePackRegistry) {
         this.eventStore = eventStore;
         this.debateStore = debateStore;
         this.evidenceLedgerService = evidenceLedgerService;
@@ -122,6 +151,8 @@ public class ReviewQueryService {
         this.reviewRegistry = reviewRegistry;
         this.reviewRepositories = reviewRepositories;
         this.contextScoutConclusionStore = contextScoutConclusionStore;
+        this.assessmentStore = assessmentStore;
+        this.rolePackRegistry = rolePackRegistry;
     }
 
     @Transactional(readOnly = true)
@@ -229,6 +260,123 @@ public class ReviewQueryService {
                 .sorted(Comparator.comparing(claim -> claim.claimId().value()))
                 .map(this::toClaimView)
                 .toList();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Projects the five-status assessments of the review's current
+     * attempt, sorted deterministically by role and checkpointKey, together with the server-side
+     * coverage summary derived from the core RolePack required checkpoints.
+     */
+    @Transactional(readOnly = true)
+    public AssessmentsView findAssessments(ReviewId reviewId) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Integer attempt = currentAttempt(reviewId);
+        if (attempt == null || attempt < 1) {
+            return new AssessmentsView(null, emptyCoverage(), List.of());
+        }
+        return new AssessmentsView(attempt, findAssessmentCoverage(reviewId, attempt),
+                findAssessmentViews(reviewId, attempt));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] One batch store read of all assessments of one attempt.
+     */
+    @Transactional(readOnly = true)
+    public List<AssessmentView> findAssessmentViews(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (assessmentStore == null) {
+            return List.of();
+        }
+        return assessmentStore.findByReview(reviewId, attemptNo).stream()
+                .map(this::toAssessmentView)
+                .toList();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Coverage counters computed only from persisted assessments and the
+     * RolePack required checkpoint contract; models never hand-write these numbers.
+     */
+    @Transactional(readOnly = true)
+    public AssessmentCoverageView findAssessmentCoverage(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        List<ReviewAssessment> assessments = assessmentStore == null
+                ? List.of()
+                : assessmentStore.findByReview(reviewId, attemptNo);
+        Set<RequiredCheckpointSlot> required = requiredCheckpointSlots();
+        Set<RequiredCheckpointSlot> covered = new HashSet<>();
+        Map<AssessmentStatus, Long> counts = new EnumMap<>(AssessmentStatus.class);
+        for (AssessmentStatus status : AssessmentStatus.values()) {
+            counts.put(status, 0L);
+        }
+        for (ReviewAssessment assessment : assessments) {
+            counts.merge(assessment.status(), 1L, Long::sum);
+            covered.add(new RequiredCheckpointSlot(assessment.roleType(), assessment.checkpointKey()));
+        }
+        Set<String> uncovered = new TreeSet<>();
+        int coveredRequired = 0;
+        for (RequiredCheckpointSlot slot : required) {
+            if (covered.contains(slot)) {
+                coveredRequired++;
+            } else {
+                uncovered.add(slot.roleType().name() + ":" + slot.checkpointKey());
+            }
+        }
+        return new AssessmentCoverageView(
+                required.size(),
+                coveredRequired,
+                counts.get(AssessmentStatus.CONFIRMED).intValue(),
+                counts.get(AssessmentStatus.PARTIAL).intValue(),
+                counts.get(AssessmentStatus.GAP).intValue(),
+                counts.get(AssessmentStatus.UNKNOWN).intValue(),
+                counts.get(AssessmentStatus.NOT_APPLICABLE).intValue(),
+                List.copyOf(uncovered));
+    }
+
+    private Set<RequiredCheckpointSlot> requiredCheckpointSlots() {
+        if (rolePackRegistry == null) {
+            return Set.of();
+        }
+        Set<RequiredCheckpointSlot> slots = new HashSet<>();
+        for (RolePack rolePack : rolePackRegistry.all()) {
+            if (!rolePack.roleType().isCore()) {
+                continue;
+            }
+            for (RolePack.Checkpoint checkpoint : rolePack.checklist()) {
+                if (checkpoint.required() && checkpoint.hasStableKey()) {
+                    slots.add(new RequiredCheckpointSlot(rolePack.roleType(), checkpoint.checkpointKey()));
+                }
+            }
+        }
+        return slots;
+    }
+
+    private Integer currentAttempt(ReviewId reviewId) {
+        Review review = reviewRegistry.find(reviewId)
+                .orElseGet(() -> reviewRepositories == null
+                        ? null
+                        : reviewRepositories.findReview(reviewId).orElse(null));
+        if (review != null) {
+            return review.attemptNo();
+        }
+        return eventStore.findLatest(reviewId).map(ReviewEvent::attemptNo).orElse(null);
+    }
+
+    private AssessmentCoverageView emptyCoverage() {
+        return new AssessmentCoverageView(0, 0, 0, 0, 0, 0, 0, List.of());
+    }
+
+    private AssessmentView toAssessmentView(ReviewAssessment assessment) {
+        return new AssessmentView(
+                assessment.roleType().name(),
+                assessment.checkpointKey(),
+                assessment.status().name(),
+                assessment.summary(),
+                assessment.reasonSummary(),
+                assessment.evidenceIds().stream().map(EvidenceId::value).toList(),
+                format(assessment.createdAt()));
+    }
+
+    private record RequiredCheckpointSlot(RoleType roleType, String checkpointKey) {
     }
 
     private DebateView toDebateView(
@@ -526,6 +674,49 @@ public class ReviewQueryService {
             String reasonSummary,
             String status,
             List<UUID> evidenceIds) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] One five-status checkpoint assessment projected for public reads.
+     *
+     * @author wangli
+     */
+    public record AssessmentView(
+            String role,
+            String checkpointKey,
+            String status,
+            String summary,
+            String reasonSummary,
+            List<UUID> evidenceIds,
+            String createdAt) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Server-side coverage summary; {@code uncoveredCheckpoints} lists
+     * still-missing required slots as {@code ROLE:checkpointKey} in stable order.
+     *
+     * @author wangli
+     */
+    public record AssessmentCoverageView(
+            int required,
+            int covered,
+            int confirmed,
+            int partial,
+            int gap,
+            int unknown,
+            int notApplicable,
+            List<String> uncoveredCheckpoints) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] Assessment query response consumed by the frontend workbench.
+     *
+     * @author wangli
+     */
+    public record AssessmentsView(
+            Integer attempt,
+            AssessmentCoverageView coverage,
+            List<AssessmentView> assessments) {
     }
 
     /**

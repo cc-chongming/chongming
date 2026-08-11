@@ -10,12 +10,16 @@ import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.protocol.DebateStateMachine;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
+import ai.cc.chongming.review.domain.repository.ReviewAssessmentStore;
+import ai.cc.chongming.review.domain.role.RolePackRegistry;
+import ai.cc.chongming.review.infrastructure.assessment.InMemoryReviewAssessmentStore;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,6 +95,29 @@ class JudgeServiceTests {
         JudgeService service = new JudgeService(store);
 
         assertThat(service.draftGate(review).result()).isEqualTo(GateResult.AI_PASS);
+        assertThat(review.stage()).isEqualTo(ReviewStage.WAITING_HUMAN);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案5] The Gate consumes one batch assessment query plus the RolePack
+     * required checkpoint set; without positive coverage AI_PASS is impossible.
+     */
+    @Test
+    void gateDraftRequiresHumanWhenRequiredCheckpointCoverageIsMissing() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        Review review = judgingReview();
+        ReviewAssessmentStore assessmentStore = new InMemoryReviewAssessmentStore();
+        RolePackRegistry rolePackRegistry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+        List<ReviewEventDraft> events = new ArrayList<>();
+        JudgeService service =
+                new JudgeService(store, new GatePolicy(), events::add, assessmentStore, rolePackRegistry);
+
+        var draft = service.draftGate(review);
+
+        assertThat(draft.result()).isEqualTo(GateResult.HUMAN_REQUIRED);
+        assertThat(draft.publicReasonSummary())
+                .contains("required checkpoint coverage incomplete")
+                .contains("required=");
         assertThat(review.stage()).isEqualTo(ReviewStage.WAITING_HUMAN);
     }
 

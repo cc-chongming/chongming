@@ -396,19 +396,19 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java` | 3 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/dispatch/InMemoryReviewDispatchStore.java` | 3 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/application/ConflictDetectionService.java` | 4 | ✅ 已完成 |
-| `src/main/resources/db/migration/V19__create_review_assessment_and_dispatch_tables.sql` | 5 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStore.java` | 5 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewAssessmentPersistenceMapper.java` | 5 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStore.java` | 5 | ⏳ 待实施 |
-| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewDispatchPersistenceMapper.java` | 5 | ⏳ 待实施 |
+| `src/main/resources/db/migration/V19__create_review_assessment_and_dispatch_tables.sql` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStore.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewAssessmentPersistenceMapper.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStore.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewDispatchPersistenceMapper.java` | 5 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/assessment/ReviewAssessmentContractTests.java` | 0 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/AssessmentServiceTests.java` | 1 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/agentscope/RepositoryFileGrantTests.java` | 2 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/ReviewDispatchServiceTests.java` | 3 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/agentscope/ReviewWorkflowDispatcherTests.java` | 3 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/ConflictDetectionServiceTests.java` | 4 | ✅ 已完成 |
-| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStoreTests.java` | 5 | ⏳ 待实施 |
-| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStoreTests.java` | 5 | ⏳ 待实施 |
+| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStoreTests.java` | 5 | ✅ 已完成 |
+| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStoreTests.java` | 5 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/lifecycle/ReviewQualityConvergenceIntegrationTests.java` | 7 | ⏳ 待实施 |
 | `frontend/tests/review-assessment-coverage.e2e.js` | 7 | ⏳ 待实施 |
 
@@ -426,9 +426,9 @@ readLines(fileRef, startLine, lineCount?)
 | `ReviewDirectorHarnessFactory.java`、`ReviewWorkflowDispatcher.java` | 3 | ✅ 已完成 |
 | `ReviewDebateToolFactory.java`、`DebateToolCommands.java` | 3-4 | ✅ 已完成（方案3：写动作接入 commandId、Director 新增 dispatch_debate_action；方案4：新增 list_conflict_candidates/register_topics 工具与 RegisterTopics 批量命令，移除 open_debate_topic） |
 | `ConflictDetector.java`、`DebateService.java`、`DebateStateMachine.java` | 4 | ✅ 已完成（含 `ReviewStateMachine.java` 允许 ROUND_1→JUDGING 提前收敛，见偏差记录） |
-| `GatePolicy.java`、`JudgeService.java` | 5 | ⏳ 待实施 |
-| `ReviewReportService.java`、`ReviewQueryService.java` | 5 | ⏳ 待实施 |
-| `ReviewPersistenceMapper.java`、`MyBatisReviewRepository.java` | 5 | ⏳ 待实施 |
+| `GatePolicy.java`、`JudgeService.java` | 5 | ✅ 已完成（方案5 后端） |
+| `ReviewReportService.java`、`ReviewQueryService.java` | 5 | ✅ 已完成（方案5 后端，含 `ReviewQueryController` 新增 assessments 端点，见偏差记录） |
+| `ReviewPersistenceMapper.java`、`MyBatisReviewRepository.java` | 5 | ✅ 未修改，Assessment/Dispatch 持久化由独立 mapper/store 承载（见偏差记录） |
 | `frontend/src/api/review-api.js`、`frontend/src/stores/review-store.js` | 5 | ⏳ 待实施 |
 | `ReviewWorkbenchView.vue`、`ReviewReportView.vue`、`ReviewRoundtable.vue` | 5 | ⏳ 待实施 |
 | `application.yml`、`application-local.yml` | 6 | ⏳ 待实施 |
@@ -511,6 +511,7 @@ readLines(fileRef, startLine, lineCount?)
 | 2026-08-10 | 方案1+2 联合验证：放宽 `RoleSubagentFactory.assertToolContract` 为“注册集合 ⊆ 声明集合”，空授权集场景下接受 `readLines`/`getFileMetadata` 缺失并要求授权集为空作为可理解原因；`RoleSubagentIsolationTests` 同步更新断言语义并新增三个联合契约测试。全量后端测试 407 运行 0 失败 10 环境性跳过（8 项 Docker/Testcontainers/MySQL 不可用，2 项 Windows 无符号链接权限）；前端 Vitest 51/51 通过。 |
 | 2026-08-10 | 方案3 完成：新增 `ReviewDispatchCommand`（PENDING→CONSUMED/EXPIRED/REJECTED 状态机、commandId/reviewId/attemptNo/stage/round/recipientRole/allowedAction/topicId?/targetClaimId?/targetTurnId?/expiresAt 契约字段）、`ReviewDispatchStore` 与 `InMemoryReviewDispatchStore`（`@ConditionalOnProperty review.persistence.enabled=false` 条件装配）、`ReviewDispatchService`（签发前服务端校验：角色已激活、主题/Claim/Turn 归属当前 review、动作适用主题状态、round 由服务端从 stage 注入（模型不可指定）、未过期；幂等键重放；`resolveForWrite` 调用时校验返回具体可恢复错误与合法动作列表；错误含 DISPATCH_ACTOR_MISMATCH、COMMAND_EXPIRED、STAGE_ROUND_DRIFT 等）；`ReviewWorkflowDispatcher` 删除 dispatchRound 四角色广播文案，只消费已校验命令并把同一 envelope 注入目标角色上下文，CHALLENGE_SUBMITTED 后服务端以幂等键 `dispatch:rebuttal:<turnId>` 生成仅发给 challenge.targetRole 的 REBUTTAL 命令，命令消费/丢弃均有日志与事件；`ReviewDebateToolFactory` 四个辩论写工具（challenge/rebuttal/concede/withdraw）schema 与调用强制引用有效 commandId，Director 新增 `dispatch_debate_action` 工具；`ReviewEventType` 新增 DISPATCH_COMMAND_ISSUED/CONSUMED/EXPIRED/REJECTED，`ReviewEventDrafts` 新增 dispatchCommand 工厂；`AgentRuntimeAdapter` 新增 `deliverDispatchCommand` 默认方法，`AgentScopeReviewRuntimeAdapter` 最小改动记录 DISPATCH_ENVELOPE_INJECTED 后委托 send。定向测试 ReviewDispatchServiceTests 16、ReviewWorkflowDispatcherTests 7、ReviewDebateToolFactoryTests 2（含新增 commandId schema 断言），DebateGoldenPathIntegrationTests 3、DebateToolsContractTests 3、AgentScopeReviewRuntimeAdapterTests 14 均通过；全量测试 431 运行 0 失败 10 环境性跳过（MySQL/Docker 不可用，已知环境条件）。 |
 | 2026-08-10 | 方案4 完成：新增 `ConflictDetectionService`（包装既有 `ConflictDetector`，按归一化 subjectKey 聚合持久化 Assessment+Claim，单 GAP/UNKNOWN 仅作 Gate 风险输入不自动建辩题，仅同一主题相互矛盾的结论产出冲突候选；候选与已登记/明确跳过主题保持一一对应审计记录（内存 ConcurrentHashMap，DETECTED/REGISTERED/SKIPPED/NO_CONFLICT），供方案5 持久化消费；`debateMetrics` 从 store 单次批量查询派生冲突候选数/已登记主题数/剩余风险数/未闭环动作数）；`DebateService` 删除 `hasConflictingClaimPositions`（任意非撤回 OPPOSE 即冲突），新增批量原子 `registerTopics`（完整校验+幂等键去重后才保存全部主题，最后单次迁移 CONFLICT_DETECTION→DEBATE_ROUND_1，重复调用幂等），rebuttal 身份不变量（actorRole==challenge.targetRole、targetRole==challenge.actorRole、targetTurnId==challenge.turnId，违规抛 DISPATCH_ACTOR_MISMATCH 且状态不变），放宽 targetTurnId 校验为“属于该主题且动作匹配”（第二轮回应保留第一轮真实 targetTurnId）；`DebateStateMachine` 第二轮进入需存在有效开放动作（OPEN/CHALLENGED 或未应答 EVIDENCE_REQUEST），否则提前收敛 JUDGING，禁止 0 动作空回合；Director 工具新增 `list_conflict_candidates`/`register_topics`（移除 open_debate_topic），写动作 commandId 语义保持不变；确定性修复：Turn 排序改 round→createdAt→turnId（内存 store 与 MyBatis mapper 同步），`DebateService` 引入单调 turn 时钟。验证矩阵全覆盖：「单一风险」GAP 无相反结论不建辩题（ConflictDetectionServiceTests）；「多主题」N 候选原子登记 N 主题且阶段只迁移一次、幂等重放不重复迁移（DebateGoldenPathIntegrationTests）；「定向反驳」仅 challenge.targetRole 可回应、第三方 PROJECT 被拒且状态不变；「第二轮收敛」无有效动作跳过第二轮直达 JUDGING、有动作时目标 ID 与回合一致。定向测试 ConflictDetectionServiceTests 3、ConflictDetectorTests 4、DebateGoldenPathIntegrationTests 7、DebateToolsContractTests 3、DebateStageTransitionEventTests 3、ReviewDebateToolFactoryTests 2、ReviewDispatchServiceTests 16、ReviewStateMachineTests 8 全部通过；全量测试 442 运行 0 失败 10 环境性跳过（REVIEW_PERSISTENCE_ENABLED=false，MySQL/Docker 不可用，已知环境条件）。 |
+| 2026-08-11 | 方案5 后端完成（前端待实施）：新增 V19 迁移（`review_assessment` 以 review_id+attempt_no+role_type+checkpoint_key 复合主键作幂等唯一键并含 review_id+attempt_no 复合索引；`review_dispatch_command` 以 command_id 主键唯一、idempotency_key 唯一键幂等签发）；新增 `MyBatisReviewAssessmentStore`/`MyBatisReviewDispatchStore` 与对应 mapper（`@ConditionalOnProperty review.persistence.enabled=true` 条件装配，批量 upsert/INSERT IGNORE 与单语句批量读，无循环单查）；`GatePolicy.draft` 扩展为 assessments+claims+judgeDecisions+requiredCheckpointSet，确定性优先级：required 未覆盖→HUMAN_REQUIRED；P0/P1 未验证 Claim→HUMAN_REQUIRED；required GAP 缺处置→HUMAN_REQUIRED；高风险 UNKNOWN→HUMAN_REQUIRED；Judge RETURN/BLOCK/CONDITIONAL 延续保守序；仅全覆盖且无阻断才 AI_PASS；reason 输出服务端计数（required=…, confirmed=…, partial=…, gap=…, unknown=…, notApplicable=…）；`JudgeService.draftGate` 一次批量查询 ReviewAssessmentStore 并从 RolePackRegistry 派生 requiredCheckpointSet；`ReviewReportService` 新增确定结论/部分满足/风险缺口/证据不足/不适用五区块（按角色+检查点稳定排序，计数全部 store 派生）并同步 golden 报告；`ReviewQueryService` 新增 `findAssessments`/`findAssessmentViews`/`findAssessmentCoverage` 五态投影，`ReviewQueryController` 新增 `GET /api/reviews/{reviewId}/assessments`。测试：GatePolicyTests 参数化 15、ReviewReportServiceTests 3、ReviewQueryServiceTests 7、MyBatisReviewAssessmentStoreTests 5、MyBatisReviewDispatchStoreTests 5、JudgeServiceTests 4 全部通过；ReviewPersistenceMigrationIntegrationTests 6 项因无 Docker 环境性跳过（已知环境条件）；全量测试 REVIEW_PERSISTENCE_ENABLED=false 绿（环境性跳过除外）。 |
 
 ## 偏差记录
 
@@ -534,5 +535,8 @@ readLines(fileRef, startLine, lineCount?)
 - 2026-08-10（方案4）：`InMemoryReviewDebateStore` 与 `DebatePersistenceMapper` 的 Turn 排序由 round→turnId 改为 round→createdAt→turnId，且 `DebateService` 引入单调 turn 时钟（`nextTurnInstant`）保证同评审内 Turn 时间戳严格递增。原因：turnId 为随机 UUID，等时间戳下按 UUID 排序使“EVIDENCE_REQUEST 是否已被 targetRole 应答”的判定非确定性，联跑偶发失败；影响：内存与 MyBatis 两种 store 行为一致，createdAt 成为排序一级依据；替代方案：仅加 turnId 回退不变——拒绝（根因是时序语义缺失而非比较器问题）。
 - 2026-08-10（方案4）：`DebateService.closeTopic` 事件的 round 由 `review.stage()` 派生（ROUND_2→2，否则 1），替代 `topic.currentRound()`。原因：主题在无任何 Turn 时 currentRound 为 0，违反事件 round∈[1,2] 校验；影响：仅事件元数据，领域状态不变；替代方案：允许事件 round=0——拒绝（破坏事件契约）。
 - 2026-08-10（方案4）：冲突候选/登记/跳过审计记录当前为 `ConflictDetectionService` 内存 `ConcurrentHashMap`，报告计数经 `debateMetrics` 单次批量查询派生，未改 `ReviewReportService` 报告结构。原因：审计持久化与报告文案展示属方案5；影响：进程重启后审计记录丢失（方案5 持久化后消除）；替代方案：本阶段直接建表持久化——拒绝（越界到方案5）。
+- 2026-08-11（方案5）：Assessment/Dispatch 持久化由独立的 `ReviewAssessmentPersistenceMapper`/`ReviewDispatchPersistenceMapper` + `MyBatisReviewAssessmentStore`/`MyBatisReviewDispatchStore` 承载，文件清单中的 `ReviewPersistenceMapper.java`、`MyBatisReviewRepository.java` 未修改。原因：`ReviewAssessmentStore`/`ReviewDispatchStore` 已是独立领域接口（方案0/3 定义），独立 mapper/store 与既有 `MyBatisReviewDebateStore` 条件装配模式一致，避免把无关聚合塞进 Review 主聚合仓库；影响：接口与不变量不变，装配开关同 `review.persistence.enabled`；替代方案：扩展现有 `ReviewPersistenceMapper`/`MyBatisReviewRepository`——拒绝（主聚合仓库职责膨胀且跨表批量查询耦合）。
+- 2026-08-11（方案5）：`GatePolicy` 保留 legacy 三参 `draft` 重载，`JudgeService` 采用“新增 `@Autowired` 全参构造器 + 可空依赖回退”扩展注入 `ReviewAssessmentStore`/`RolePackRegistry`。原因：兼容既有测试夹具与非覆盖场景调用点；影响：assessments/requiredCheckpointSet 缺省时 Gate 退化为原有保守优先级语义（生产装配始终注入，覆盖检查恒生效）；替代方案：直接修改原签名强制全部调用点传覆盖数据——拒绝（破坏既有调用点且与方案1 同款扩展模式不一致）。
+- 2026-08-11（方案5）：`ReviewQueryController` 新增 `GET /api/reviews/{reviewId}/assessments` 端点（方案5 文件清单仅列出 `ReviewQueryService.java`，未列 controller）。原因：工作台五态投影与覆盖率汇总需要前端消费面，服务层投影已就绪只差暴露端点；影响：仅新增只读端点，无鉴权/路由结构变化；替代方案：复用既有报告端点内嵌投影——拒绝（报告为终态产物，五态需在评审进行中实时轮询）。
 
 实施过程中任何接口、文件、状态机或验收标准调整，都必须先记录原因、影响与替代方案，再修改对应方案状态。
