@@ -42,6 +42,29 @@ const connectionText = computed(() => ({
     unsupported: '浏览器不支持实时连接', 'malformed-event': '收到无效事件', closed: '连接已关闭'
 }[state.connection.status] ?? state.connection.status));
 
+// [AIREVIEW-PLAN-024#方案5] Five-status checkpoint coverage. The note below is triggered only by
+// server coverage facts (no confirmed checkpoint while UNKNOWN exists), never by hard-coded roles.
+const coverage = store.assessmentCoverage;
+const coverageBreakdown = store.assessmentBreakdown;
+const roleCoverage = store.roleAssessmentProgress;
+const coveragePercent = computed(() => {
+    const required = coverage.value.required;
+    if (!required) return 0;
+    return Math.min(100, Math.round((coverage.value.covered / required) * 100));
+});
+const unauthorizedSnapshotNote = computed(() => (
+    coverage.value.confirmed === 0 && coverage.value.unknown > 0
+        ? 'UNKNOWN：当前评审快照未授予前端文件'
+        : null
+));
+const fiveStatusChips = computed(() => [
+    { key: 'CONFIRMED', label: '确认', count: coverage.value.confirmed },
+    { key: 'PARTIAL', label: '部分满足', count: coverage.value.partial },
+    { key: 'GAP', label: '风险缺口', count: coverage.value.gap },
+    { key: 'UNKNOWN', label: '证据不足', count: coverage.value.unknown },
+    { key: 'NOT_APPLICABLE', label: '不适用', count: coverage.value.notApplicable }
+]);
+
 const stageList = ['PENDING', 'SNAPSHOTTING', 'PLANNING', 'INITIAL_REVIEW', 'CONFLICT_DETECTION', 'DEBATE_ROUND_1', 'DEBATE_ROUND_2', 'JUDGING', 'WAITING_HUMAN', 'NOTIFYING', 'COMPLETED'];
 const pipelineSteps = [
     { key: 'scout', label: 'Scout', onStages: ['SNAPSHOTTING', 'PLANNING'] },
@@ -193,7 +216,32 @@ onUnmounted(() => { store.dispose(); runtimeTrace.dispose(); });
                     @refresh="refreshSummary"
                 />
                 <DebateTimeline class="wide-panel" :debates="state.debates" @open-evidence="store.selectEvidence" />
-                <ReviewRoundtable class="wide-panel" :events="store.events.value" :roles="roundtableRoles" @inspect-role="(role) => { runtimeTrace.state.selectedRole = role; }" />
+                <ReviewRoundtable class="wide-panel" :events="store.events.value" :roles="roundtableRoles" :assessments="store.assessmentView.value.assessments" @inspect-role="(role) => { runtimeTrace.state.selectedRole = role; }" />
+                <section class="panel coverage-panel" aria-labelledby="coverage-title">
+                    <div class="panel-heading"><div><p class="eyebrow">五态检查点</p><h2 id="coverage-title">检查点覆盖</h2></div><span class="topic-status">{{ coverage.covered }}/{{ coverage.required }}</span></div>
+                    <template v-if="store.assessmentView.value.attempt != null">
+                        <div class="coverage-bar" role="progressbar" :aria-valuenow="coveragePercent" aria-valuemin="0" aria-valuemax="100" :aria-label="`必检检查点覆盖 ${coveragePercent}%`"><span :style="{ width: `${coveragePercent}%` }"></span></div>
+                        <ul class="coverage-breakdown" aria-label="检查点结论区分">
+                            <li class="cb-pend"><strong>{{ coverageBreakdown.notExecuted }}</strong><span>未执行</span></li>
+                            <li class="cb-unknown"><strong>{{ coverageBreakdown.executedUnknown }}</strong><span>执行但未知</span></li>
+                            <li class="cb-confirmed"><strong>{{ coverageBreakdown.confirmed }}</strong><span>确认无问题</span></li>
+                            <li class="cb-gap"><strong>{{ coverageBreakdown.gap }}</strong><span>确认有缺口</span></li>
+                        </ul>
+                        <ul class="asmt-chips" aria-label="五态数量">
+                            <li v-for="chip in fiveStatusChips" :key="chip.key" class="asmt-chip" :class="`asmt-${chip.key.toLowerCase()}`">{{ chip.label }} {{ chip.count }}</li>
+                        </ul>
+                        <p v-if="unauthorizedSnapshotNote" class="asmt-note" role="note">{{ unauthorizedSnapshotNote }}</p>
+                        <ul v-if="roleCoverage.length" class="role-coverage-list">
+                            <li v-for="entry in roleCoverage" :key="entry.role">
+                                <div class="rcl-head"><strong>{{ entry.role }}</strong><span>{{ entry.submitted }}/{{ entry.total }}<template v-if="entry.uncovered"> · 未执行 {{ entry.uncovered }}</template></span></div>
+                                <div class="rcl-dots" :aria-label="`${entry.role} 五态结论`">
+                                    <span v-for="chip in fiveStatusChips" :key="chip.key" v-show="entry.statuses[chip.key]" class="asmt-dot" :class="`asmt-${chip.key.toLowerCase()}`" :title="`${chip.label} ${entry.statuses[chip.key]}`">{{ chip.label }} {{ entry.statuses[chip.key] }}</span>
+                                </div>
+                            </li>
+                        </ul>
+                    </template>
+                    <p v-else class="empty-note">角色提交检查点结论后将展示覆盖进度与五态数量。</p>
+                </section>
                 <AgUiConversationPanel class="ag-ui-workbench-panel" :conversation="state.agUi" />
                 <HumanReviewPanel
                     :review-id="reviewId"

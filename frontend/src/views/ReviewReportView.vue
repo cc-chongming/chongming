@@ -57,6 +57,28 @@ const consensus = computed(() => claims.value.length
     : null);
 const maxRound = computed(() => debates.value.reduce((max, debate) => Math.max(max, Number(debate.currentRound) || 0), 0));
 
+// [AIREVIEW-PLAN-024#方案5] Five checkpoint conclusion sections. Counters come straight from the
+// server-side projection; entries keep the deterministic role + checkpointKey order.
+const assessmentReport = computed(() => (
+    report.value && typeof report.value.assessments === 'object' && report.value.assessments !== null
+        ? report.value.assessments
+        : null
+));
+const assessmentSections = computed(() => {
+    const view = assessmentReport.value;
+    if (!view) return [];
+    const byRoleAndKey = (left, right) => String(left.role ?? '').localeCompare(String(right.role ?? ''))
+        || String(left.checkpointKey ?? '').localeCompare(String(right.checkpointKey ?? ''));
+    const sortEntries = (entries) => (Array.isArray(entries) ? [...entries].sort(byRoleAndKey) : []);
+    return [
+        { key: 'confirmed', title: '确定结论', tone: 'asmt-confirmed', count: view.confirmed ?? 0, hint: '证据充分，检查点符合或无问题', entries: sortEntries(view.confirmedEntries) },
+        { key: 'partial', title: '部分满足', tone: 'asmt-partial', count: view.partial ?? 0, hint: '部分符合，未满足部分已说明', entries: sortEntries(view.partialEntries) },
+        { key: 'gap', title: '风险缺口', tone: 'asmt-gap', count: view.gap ?? 0, hint: '确认存在缺口，需要处置', entries: sortEntries(view.gapEntries) },
+        { key: 'unknown', title: '证据不足', tone: 'asmt-unknown', count: view.unknown ?? 0, hint: '授权证据不足以确认，“未看到”不等于“未实现”', entries: sortEntries(view.unknownEntries) },
+        { key: 'notApplicable', title: '不适用', tone: 'asmt-not-applicable', count: view.notApplicable ?? 0, hint: '检查点对本次需求不适用', entries: sortEntries(view.notApplicableEntries) }
+    ];
+});
+
 function roleLabel(role) {
     const meta = roleMeta[role];
     return meta ? `${meta.icon} ${meta.label}` : (role ?? '—');
@@ -160,6 +182,37 @@ onMounted(() => load(selectedVersion.value));
                         <div class="rpt-kpi"><div class="num" style="color:#dc2626">{{ opposeCount }}</div><div class="lbl">冲突</div></div>
                         <div class="rpt-kpi"><div class="num" style="color:#d97706">{{ totalRounds }}</div><div class="lbl">辩论轮次</div></div>
                         <div class="rpt-kpi"><div class="num" style="color:#059669">{{ consensus == null ? '—' : `${consensus}%` }}</div><div class="lbl">共识度</div></div>
+                    </div>
+                </div>
+
+                <div v-if="assessmentReport" class="rpt-section"><h3>检查点结论</h3>
+                    <div class="rpt-grid asmt-kpis">
+                        <div class="rpt-kpi"><div class="num" style="color:#44403c">{{ assessmentReport.required ?? 0 }}</div><div class="lbl">必检检查点</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#2563eb">{{ assessmentReport.covered ?? 0 }}</div><div class="lbl">已覆盖</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#16a34a">{{ assessmentReport.confirmed ?? 0 }}</div><div class="lbl">确定结论</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#d97706">{{ assessmentReport.partial ?? 0 }}</div><div class="lbl">部分满足</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#dc2626">{{ assessmentReport.gap ?? 0 }}</div><div class="lbl">风险缺口</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#7c3aed">{{ assessmentReport.unknown ?? 0 }}</div><div class="lbl">证据不足</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#78716c">{{ assessmentReport.notApplicable ?? 0 }}</div><div class="lbl">不适用</div></div>
+                    </div>
+                    <p v-if="assessmentReport.uncoveredCheckpoints?.length" class="asmt-uncovered">
+                        <strong>未执行（{{ assessmentReport.uncoveredCheckpoints.length }}）：</strong>
+                        <code v-for="slot in assessmentReport.uncoveredCheckpoints" :key="slot">{{ slot }}</code>
+                    </p>
+                    <div class="asmt-columns">
+                        <section v-for="section in assessmentSections" :key="section.key" class="asmt-block" :class="section.tone" :aria-label="`${section.title} ${section.count} 项`">
+                            <h4>{{ section.title }} {{ section.count }}</h4>
+                            <p class="asmt-hint">{{ section.hint }}</p>
+                            <ol v-if="section.entries.length">
+                                <li v-for="(entry, index) in section.entries" :key="`${entry.role}-${entry.checkpointKey}-${index}`">
+                                    <div class="asmt-entry-head"><strong>{{ roleLabel(entry.role) }}</strong><code>{{ entry.checkpointKey }}</code></div>
+                                    <p v-if="entry.summary" class="asmt-summary">{{ entry.summary }}</p>
+                                    <p v-if="entry.reasonSummary" class="asmt-reason">{{ entry.reasonSummary }}</p>
+                                    <span v-if="entry.evidenceIds?.length" class="asmt-evidence">证据 {{ entry.evidenceIds.length }} 项</span>
+                                </li>
+                            </ol>
+                            <p v-else class="dash-empty">无</p>
+                        </section>
                     </div>
                 </div>
 
@@ -307,6 +360,25 @@ onMounted(() => load(selectedVersion.value));
 .judge-claim-group li p { margin: 3px 0; color: #57534e; font-size: 12px; }
 .judge-claim-group li code { color: #78716c; font-size: 11px; overflow-wrap: anywhere; }
 .report-judge-empty { margin: 0; padding: 10px 12px; color: #92400e; background: #fffbeb; border-radius: 8px; }
+.asmt-kpis { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+.asmt-uncovered { margin: 10px 0; padding: 10px 12px; color: #57534e; background: #f5f5f4; border-radius: 8px; font-size: 13px; }
+.asmt-uncovered code { display: inline-block; margin: 2px 6px 0 0; padding: 1px 6px; color: #44403c; background: #fff; border: 1px solid #e7e5e4; border-radius: 6px; font-size: 11px; overflow-wrap: anywhere; }
+.asmt-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+.asmt-block { padding: 12px; border: 1px solid #e7e5e4; border-radius: 10px; background: #fff; }
+.asmt-block h4 { margin: 0; font-size: 14px; }
+.asmt-hint { margin: 4px 0 10px; color: #78716c; font-size: 12px; }
+.asmt-block ol { display: grid; gap: 10px; margin: 0; padding-left: 18px; }
+.asmt-block li { line-height: 1.5; }
+.asmt-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.asmt-entry-head code { color: #78716c; font-size: 11px; overflow-wrap: anywhere; }
+.asmt-summary { margin: 3px 0; font-size: 13px; }
+.asmt-reason { margin: 0; color: #57534e; font-size: 12px; }
+.asmt-evidence { display: inline-block; margin-top: 4px; padding: 1px 7px; color: #1d4ed8; background: #dbeafe; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.asmt-block.asmt-confirmed { border-top: 3px solid #16a34a; }
+.asmt-block.asmt-partial { border-top: 3px solid #d97706; }
+.asmt-block.asmt-gap { border-top: 3px solid #dc2626; }
+.asmt-block.asmt-unknown { border-top: 3px solid #7c3aed; }
+.asmt-block.asmt-not-applicable { border-top: 3px solid #a8a29e; }
 @media (max-width: 760px) {
     .judge-claim-columns { grid-template-columns: 1fr; }
     .report-judge-result > header { align-items: flex-start; flex-direction: column; }

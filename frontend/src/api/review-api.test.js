@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { reviewApi } from './review-api';
+import { parseAssessmentsView, reviewApi } from './review-api';
 
 const reviewId = '11111111-1111-1111-1111-111111111111';
 const originalFetch = globalThis.fetch;
@@ -57,6 +57,60 @@ describe('Context Scout preview API', () => {
             'Content-Type': 'application/json', 'X-Trace-Id': 'scout-trace-001'
         });
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ userId: 'scout-preview' });
+    });
+});
+
+describe('assessment five-status API', () => {
+    it('queries the assessments endpoint and keeps the server coverage counters intact', async () => {
+        const payload = {
+            attempt: 2,
+            coverage: {
+                required: 20, covered: 18, confirmed: 10, partial: 3, gap: 2, unknown: 2, notApplicable: 1,
+                uncoveredCheckpoints: ['BACKEND:api_contract', 'PROJECT:milestone_alignment']
+            },
+            assessments: [
+                {
+                    role: 'FRONTEND', checkpointKey: 'ui_state_handling', status: 'UNKNOWN',
+                    summary: 'UNKNOWN：当前评审快照未授予前端文件', reasonSummary: '未获得前端文件授权。',
+                    evidenceIds: [], createdAt: '2026-08-11T10:00:00Z'
+                },
+                {
+                    role: 'BACKEND', checkpointKey: 'api_contract', status: 'CONFIRMED',
+                    summary: '接口契约已确认。', reasonSummary: '已读取控制器与测试。',
+                    evidenceIds: ['50000000-0000-0000-0000-000000000001'], createdAt: '2026-08-11T10:01:00Z'
+                }
+            ]
+        };
+        const fetchMock = vi.fn().mockResolvedValue(response(payload));
+        globalThis.fetch = fetchMock;
+
+        const view = parseAssessmentsView(await reviewApi.getAssessments(reviewId));
+
+        expect(fetchMock.mock.calls[0][0]).toBe(`/api/reviews/${reviewId}/assessments`);
+        expect(view.attempt).toBe(2);
+        expect(view.coverage).toEqual({
+            required: 20, covered: 18, confirmed: 10, partial: 3, gap: 2, unknown: 2, notApplicable: 1,
+            uncoveredCheckpoints: ['BACKEND:api_contract', 'PROJECT:milestone_alignment']
+        });
+        expect(view.assessments).toHaveLength(2);
+        expect(view.assessments[0]).toMatchObject({ role: 'FRONTEND', status: 'UNKNOWN' });
+        expect(view.assessments[1].evidenceIds).toEqual(['50000000-0000-0000-0000-000000000001']);
+    });
+
+    it('normalizes missing assessment payload fields with safe defaults', () => {
+        expect(parseAssessmentsView(null)).toEqual({
+            attempt: null,
+            coverage: {
+                required: 0, covered: 0, confirmed: 0, partial: 0, gap: 0, unknown: 0, notApplicable: 0,
+                uncoveredCheckpoints: []
+            },
+            assessments: []
+        });
+        const sparse = parseAssessmentsView({ attempt: 1, assessments: [{ role: 'PRODUCT' }] });
+        expect(sparse.assessments[0]).toMatchObject({
+            checkpointKey: null, status: 'UNKNOWN', summary: '', reasonSummary: '', evidenceIds: [], createdAt: null
+        });
+        expect(parseAssessmentsView({}).coverage.uncoveredCheckpoints).toEqual([]);
     });
 });
 

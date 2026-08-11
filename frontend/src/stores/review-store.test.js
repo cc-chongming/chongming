@@ -10,6 +10,7 @@ function createApi() {
         getClaims: async () => [],
         getHumanItems: async () => [],
         getHumanGateVersions: async () => [],
+        getAssessments: async () => null,
         getReport: async () => null,
         getReportVersions: async () => [],
         getNotifications: async () => []
@@ -288,6 +289,66 @@ describe('review store', () => {
         await vi.waitFor(() => expect(store.state.summary).not.toBeNull());
         expect(store.state.summary.stage).toBe('INITIAL_REVIEW');
         expect(store.state.summary.activatedRoles).toHaveLength(1);
+    });
+
+    it('derives role coverage progress and five-status breakdown from the assessments projection', async () => {
+        const api = {
+            ...createApi(),
+            getAssessments: async () => ({
+                attempt: 1,
+                coverage: {
+                    required: 20, covered: 17, confirmed: 9, partial: 2, gap: 1, unknown: 4, notApplicable: 1,
+                    uncoveredCheckpoints: ['BACKEND:error_codes', 'BACKEND:idempotency', 'FRONTEND:ui_state_handling']
+                },
+                assessments: [
+                    { role: 'FRONTEND', checkpointKey: 'build_safety', status: 'UNKNOWN', summary: '未授权', reasonSummary: '', evidenceIds: [], createdAt: '2026-08-11T10:00:00Z' },
+                    { role: 'BACKEND', checkpointKey: 'api_contract', status: 'CONFIRMED', summary: '已确认', reasonSummary: '', evidenceIds: [], createdAt: '2026-08-11T10:01:00Z' },
+                    { role: 'BACKEND', checkpointKey: 'persistence', status: 'GAP', summary: '有缺口', reasonSummary: '', evidenceIds: [], createdAt: '2026-08-11T10:02:00Z' }
+                ]
+            })
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+
+        await store.load(fixture.reviewId);
+
+        expect(store.assessmentCoverage.value.required).toBe(20);
+        expect(store.assessmentCoverage.value.covered).toBe(17);
+        expect(store.assessmentBreakdown.value).toEqual({ notExecuted: 3, executedUnknown: 4, confirmed: 9, gap: 1 });
+        expect(store.roleAssessmentProgress.value).toEqual([
+            { role: 'BACKEND', submitted: 2, uncovered: 2, statuses: { CONFIRMED: 1, PARTIAL: 0, GAP: 1, UNKNOWN: 0, NOT_APPLICABLE: 0 }, total: 4 },
+            { role: 'FRONTEND', submitted: 1, uncovered: 1, statuses: { CONFIRMED: 0, PARTIAL: 0, GAP: 0, UNKNOWN: 1, NOT_APPLICABLE: 0 }, total: 2 }
+        ]);
+    });
+
+    it('refreshes the five-status projection when a role completes its initial review', async () => {
+        let assessmentReads = 0;
+        const api = {
+            ...createApi(),
+            getAssessments: async () => {
+                assessmentReads += 1;
+                if (assessmentReads === 1) return null;
+                return {
+                    attempt: 1,
+                    coverage: { required: 5, covered: 5, confirmed: 5, partial: 0, gap: 0, unknown: 0, notApplicable: 0, uncoveredCheckpoints: [] },
+                    assessments: [
+                        { role: 'PRODUCT', checkpointKey: 'scope_clarity', status: 'CONFIRMED', summary: '已确认', reasonSummary: '', evidenceIds: [], createdAt: '2026-08-11T10:00:00Z' }
+                    ]
+                };
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+        expect(store.assessmentView.value.attempt).toBeNull();
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'ROLE_COMPLETED', category: 'ROLE',
+            actorRole: 'PRODUCT', occurredAt: '2026-08-11T10:00:00Z', payload: { summary: '初审完成。' }
+        });
+
+        await vi.waitFor(() => expect(store.assessmentView.value.attempt).toBe(1));
+        expect(assessmentReads).toBe(2);
+        expect(store.assessmentCoverage.value.confirmed).toBe(5);
+        expect(store.assessmentBreakdown.value).toEqual({ notExecuted: 0, executedUnknown: 0, confirmed: 5, gap: 0 });
     });
 
     it('ignores replayed stage events from an earlier attempt', async () => {

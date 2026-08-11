@@ -2,8 +2,54 @@
  * [AIREVIEW-PLAN-012#1.3] Thin REST client for the public review API.
  * [AIREVIEW-PLAN-023#2] Loads safe repository identifiers from the active backend configuration.
  * [AIREVIEW-PLAN-023#3] Launches a draft requirement through one idempotent orchestration command.
+ * [AIREVIEW-PLAN-024#方案5] Queries the five-status assessment projection and normalizes its fields.
  * Request and response values deliberately remain plain objects so API fixtures can exercise them directly.
  */
+
+// [AIREVIEW-PLAN-024#方案5] Frozen five-status assessment vocabulary shared by Gate, report and workbench.
+export const ASSESSMENT_STATUSES = ['CONFIRMED', 'PARTIAL', 'GAP', 'UNKNOWN', 'NOT_APPLICABLE'];
+
+/**
+ * [AIREVIEW-PLAN-024#方案5] Normalizes the AssessmentsView payload so views never branch on
+ * missing fields. Counters keep the server values untouched; only shapes become safe.
+ */
+export function parseAssessmentsView(payload) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const coverageSource = source.coverage && typeof source.coverage === 'object' ? source.coverage : {};
+    const count = (value) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const assessments = Array.isArray(source.assessments)
+        ? source.assessments
+            .filter((entry) => entry && typeof entry === 'object')
+            .map((entry) => ({
+                role: entry.role ?? null,
+                checkpointKey: entry.checkpointKey ?? null,
+                status: typeof entry.status === 'string' ? entry.status : 'UNKNOWN',
+                summary: entry.summary ?? '',
+                reasonSummary: entry.reasonSummary ?? '',
+                evidenceIds: Array.isArray(entry.evidenceIds) ? entry.evidenceIds : [],
+                createdAt: entry.createdAt ?? null
+            }))
+        : [];
+    return {
+        attempt: Number.isInteger(source.attempt) ? source.attempt : null,
+        coverage: {
+            required: count(coverageSource.required),
+            covered: count(coverageSource.covered),
+            confirmed: count(coverageSource.confirmed),
+            partial: count(coverageSource.partial),
+            gap: count(coverageSource.gap),
+            unknown: count(coverageSource.unknown),
+            notApplicable: count(coverageSource.notApplicable),
+            uncoveredCheckpoints: Array.isArray(coverageSource.uncoveredCheckpoints)
+                ? coverageSource.uncoveredCheckpoints.filter((value) => typeof value === 'string')
+                : []
+        },
+        assessments
+    };
+}
 
 export class ReviewApiError extends Error {
     constructor(message, { status, errorCode, traceId, body } = {}) {
@@ -232,6 +278,11 @@ export const reviewApi = {
 
     getClaims(reviewId) {
         return request(`/api/reviews/${reviewId}/claims`);
+    },
+
+    // [AIREVIEW-PLAN-024#方案5] Five-status checkpoint projection for the live workbench.
+    getAssessments(reviewId) {
+        return request(`/api/reviews/${reviewId}/assessments`);
     },
 
     getEvidence(reviewId, evidenceId) {

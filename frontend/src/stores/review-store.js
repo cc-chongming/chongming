@@ -1,6 +1,6 @@
 import { computed, reactive } from 'vue';
 import { EventType } from '@ag-ui/core';
-import { ReviewApiError, reviewApi } from '../api/review-api';
+import { ReviewApiError, parseAssessmentsView, reviewApi } from '../api/review-api';
 import {
     applyAgUiEvent,
     createAgUiConversation,
@@ -19,6 +19,11 @@ const DEBATE_AFFECTING_EVENTS = new Set([
 const SUMMARY_AFFECTING_EVENTS = new Set([
     'GATE_DRAFTED', 'HUMAN_GATE_FINALIZED', 'REVIEW_FAILED', 'REVIEW_CANCELLED',
     'REVIEW_RETRIED', 'REVIEW_RECOVERED'
+]);
+// [AIREVIEW-PLAN-024#方案5] Assessments are persisted server-side as roles complete their
+// checkpoint coverage; those facts and attempt resets invalidate the five-status projection.
+const ASSESSMENT_AFFECTING_EVENTS = new Set([
+    'ROLE_COMPLETED', 'INITIAL_REVIEW_COMPLETED', 'REVIEW_RETRIED'
 ]);
 
 function optional(promise, fallback) {
@@ -46,6 +51,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         claims: [],
         humanItems: [],
         humanGateVersions: [],
+        assessments: null,
         report: null,
         reportMarkdown: '',
         reportVersions: [],
@@ -68,6 +74,40 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         return [...byRole.entries()].map(([role, event]) => ({ role, type: event.type, occurredAt: event.occurredAt }));
     });
 
+    // [AIREVIEW-PLAN-024#方案5] Five-status projection and coverage derived from the server
+    // payload; counters are never recomputed client-side so they always match the backend.
+    const assessmentView = computed(() => parseAssessmentsView(state.assessments));
+    const assessmentCoverage = computed(() => assessmentView.value.coverage);
+    const assessmentBreakdown = computed(() => ({
+        notExecuted: assessmentCoverage.value.uncoveredCheckpoints.length,
+        executedUnknown: assessmentCoverage.value.unknown,
+        confirmed: assessmentCoverage.value.confirmed,
+        gap: assessmentCoverage.value.gap
+    }));
+    const roleAssessmentProgress = computed(() => {
+        const emptyStatuses = () => ({ CONFIRMED: 0, PARTIAL: 0, GAP: 0, UNKNOWN: 0, NOT_APPLICABLE: 0 });
+        const byRole = new Map();
+        const bucketFor = (role) => {
+            if (!byRole.has(role)) {
+                byRole.set(role, { role, submitted: 0, uncovered: 0, statuses: emptyStatuses() });
+            }
+            return byRole.get(role);
+        };
+        assessmentView.value.assessments.forEach((entry) => {
+            const bucket = bucketFor(entry.role ?? 'UNKNOWN');
+            bucket.submitted += 1;
+            if (Object.prototype.hasOwnProperty.call(bucket.statuses, entry.status)) {
+                bucket.statuses[entry.status] += 1;
+            }
+        });
+        assessmentCoverage.value.uncoveredCheckpoints.forEach((slot) => {
+            bucketFor(String(slot).split(':')[0] ?? 'UNKNOWN').uncovered += 1;
+        });
+        return [...byRole.values()]
+            .sort((left, right) => left.role.localeCompare(right.role))
+            .map((bucket) => ({ ...bucket, total: bucket.submitted + bucket.uncovered }));
+    });
+
     function key(reviewId) {
         return `${STORAGE_PREFIX}${reviewId}`;
     }
@@ -82,6 +122,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         state.claims = [];
         state.humanItems = [];
         state.humanGateVersions = [];
+        state.assessments = null;
         state.report = null;
         state.reportMarkdown = '';
         state.reportVersions = [];
@@ -178,6 +219,9 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             if (domainEvent.type === 'CLAIM_SUBMITTED' || domainEvent.type === 'POSITION_CHANGED') {
                 refreshClaims().catch(() => {});
             }
+            if (ASSESSMENT_AFFECTING_EVENTS.has(domainEvent.type)) {
+                refreshAssessments().catch(() => {});
+            }
             return true;
         }
         applyAgUiEvent(state.agUi, event);
@@ -200,6 +244,10 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
     async function refreshClaims() {
         const claims = await optional(api.getClaims(state.reviewId), []);
         state.claims = Array.isArray(claims) ? claims : [];
+    }
+
+    async function refreshAssessments() {
+        state.assessments = await optional(api.getAssessments(state.reviewId), null);
     }
 
     async function refreshNotifications() {
@@ -284,9 +332,9 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         reset(reviewId);
         state.loading = true;
         try {
-            const [summary, plans, debates, claims] = await Promise.all([
+            const [summary, plans, debates, claims, assessments] = await Promise.all([
                 optional(api.getSummary(reviewId), null), api.getPlans(reviewId), api.getDebates(reviewId),
-                optional(api.getClaims(reviewId), [])
+                optional(api.getClaims(reviewId), []), optional(api.getAssessments(reviewId), null)
             ]);
             state.summary = summary;
             applyAgUiEvent(state.agUi, {
@@ -297,6 +345,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             state.plans = plans;
             state.debates = debates;
             state.claims = Array.isArray(claims) ? claims : [];
+            state.assessments = assessments;
             await Promise.all([refreshHumanData(), refreshReports(), refreshNotifications()]);
             subscription = createReviewSseSubscription({
                 reviewId,
@@ -332,6 +381,10 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         state,
         events,
         roles,
+        assessmentView,
+        assessmentCoverage,
+        assessmentBreakdown,
+        roleAssessmentProgress,
         load,
         dispose,
         mergeEvent,
@@ -341,6 +394,7 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
         refreshSummary,
         refreshHumanData,
         refreshClaims,
+        refreshAssessments,
         refreshNotifications,
         refreshReports,
         selectEvidence

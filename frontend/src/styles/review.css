@@ -200,6 +200,8 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .roundtable-layout h3 { margin-top: 0; }
 .role-seat { display: grid; width: 100%; gap: .2rem; margin-bottom: .5rem; padding: .65rem; text-align: left; color: #243b5a; background: #f7f9fc; border: 1px solid #dce5f0; cursor: pointer; }
 .role-seat span, .director-narrative span { color: #5b6c83; font-size: .84rem; }
+/* [AIREVIEW-PLAN-024#方案5] five-status conclusion line on roundtable role seats */
+.role-seat .seat-asmt { color: #245293; font-weight: 700; }
 .director-narrative ol { display: grid; gap: .55rem; padding: 0; list-style: none; }
 .director-narrative li { display: grid; gap: .2rem; padding: .65rem; border-left: 3px solid #4c82cf; background: #f8fbff; }
 .agent-trace-drawer { z-index: 25; }
@@ -261,6 +263,33 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .ag-ui-tool-call[data-status="SUCCESS"] { border-color: #c8dfd3; }
 @media (max-width: 640px) { .scout-conversation-timeline { margin-top: .8rem; } .ag-ui-tool-call details { padding: .55rem; } .ag-ui-tool-call summary { flex-wrap: wrap; } .tool-call-status { margin-left: 0; } .tool-call-summary, .tool-call-truncated, .tool-call-details { margin-left: 0; } .workbench-header .live-session-meta { justify-content: flex-start; } .live-agent-conversation { min-height: 28rem; } .live-agent-timeline { gap: .9rem; } .live-agent-entry { grid-template-columns: 1.7rem minmax(0, 1fr); gap: .55rem; } .agent-avatar { width: 1.7rem; height: 1.7rem; } .agent-tool-call summary { flex-wrap: wrap; } .agent-tool-call .tool-call-status { margin-left: 0; } }
 @media (max-width: 960px) { .roundtable-panel { grid-column: auto; } .roundtable-layout { grid-template-columns: 1fr; } }
+
+/* ═══ [AIREVIEW-PLAN-024#方案5] five-status checkpoint coverage panel ═══ */
+.coverage-panel { margin-top: 1.2rem; }
+.coverage-bar { height: 8px; margin: .8rem 0 1rem; overflow: hidden; background: #edf3fc; border-radius: 999px; }
+.coverage-bar span { display: block; height: 100%; background: #2f6bd8; border-radius: 999px; transition: width .3s ease; }
+.coverage-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; padding: 0; list-style: none; }
+.coverage-breakdown li { display: grid; gap: .1rem; padding: .5rem .55rem; text-align: center; background: #f7f9fc; border: 1px solid #dce5f0; border-radius: .5rem; }
+.coverage-breakdown strong { color: #243b5a; font-size: 1.05rem; }
+.coverage-breakdown span { color: #5b6c83; font-size: .74rem; font-weight: 700; }
+.coverage-breakdown .cb-pend { border-top: 2px solid #94a3b8; }
+.coverage-breakdown .cb-unknown { border-top: 2px solid #7c3aed; }
+.coverage-breakdown .cb-confirmed { border-top: 2px solid #16a34a; }
+.coverage-breakdown .cb-gap { border-top: 2px solid #dc2626; }
+.asmt-chips { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0; list-style: none; }
+.asmt-chip { padding: .18rem .55rem; border-radius: 1rem; font-size: .75rem; font-weight: 800; }
+.asmt-chip.asmt-confirmed, .asmt-dot.asmt-confirmed { color: #14532d; background: #dcfce7; }
+.asmt-chip.asmt-partial, .asmt-dot.asmt-partial { color: #92400e; background: #fef3c7; }
+.asmt-chip.asmt-gap, .asmt-dot.asmt-gap { color: #7f1d1d; background: #fee2e2; }
+.asmt-chip.asmt-unknown, .asmt-dot.asmt-unknown { color: #4c1d95; background: #ede9fe; }
+.asmt-chip.asmt-not_applicable, .asmt-dot.asmt-not_applicable { color: #44403c; background: #f5f5f4; }
+.asmt-note { margin: .8rem 0 0; padding: .6rem .7rem; color: #4c1d95; background: #ede9fe; border-radius: .5rem; font-size: .84rem; font-weight: 700; }
+.role-coverage-list { display: grid; gap: .6rem; margin: .9rem 0 0; padding: 0; list-style: none; }
+.role-coverage-list li { padding: .55rem .65rem; background: #f7f9fc; border: 1px solid #dce5f0; border-radius: .5rem; }
+.rcl-head { display: flex; justify-content: space-between; gap: .6rem; color: #243b5a; font-size: .86rem; }
+.rcl-head span { color: #5b6c83; }
+.rcl-dots { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
+.asmt-dot { padding: .1rem .45rem; border-radius: 1rem; font-size: .7rem; font-weight: 700; }
 
 /* [AIREVIEW-PLAN-020#2.2] Full-flow live review workspace. */
 .review-flow-shell { display: block; min-height: 100vh; background: #0b0d13; }
