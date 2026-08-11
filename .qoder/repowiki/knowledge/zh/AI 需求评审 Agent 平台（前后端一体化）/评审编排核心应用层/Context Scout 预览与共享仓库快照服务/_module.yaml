@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: 8d914ab9-89ee-4074-9895-408bc2b425c4/01368779-3f14-4e7e-ad1d-58b74d453622
+title: Context Scout 预览与共享仓库快照服务
+scope:
+    - src/main/java/ai/cc/chongming/review/application/ContextScoutPreviewService.java
+    - src/main/java/ai/cc/chongming/review/application/ContextScoutConclusionService.java
+    - src/main/java/ai/cc/chongming/review/application/RepositorySnapshotService.java
+    - src/main/java/ai/cc/chongming/review/application/SharedSnapshotLifecycleService.java
+source_files: []
+depends_on: []
+related_to: []

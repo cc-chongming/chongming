@@ -1,0 +1,16 @@
+schema_version: 1
+module_path: 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/641931e2-5b9a-441f-9070-c8520d91185c
+title: 需求生命周期管理（Requirement Lifecycle）
+scope:
+    - src/main/java/ai/cc/chongming/review/application/RequirementCommandService.java
+    - src/main/java/ai/cc/chongming/review/application/RequirementLifecycleService.java
+    - src/main/java/ai/cc/chongming/review/application/RequirementQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/RequirementReviewLaunchService.java
+    - src/main/java/ai/cc/chongming/review/domain/model/Requirement.java
+    - src/main/java/ai/cc/chongming/review/domain/model/RequirementSnapshot.java
+    - src/main/java/ai/cc/chongming/review/domain/model/RequirementTypes.java
+    - src/main/java/ai/cc/chongming/review/api/RequirementCommandController.java
+    - src/main/java/ai/cc/chongming/review/api/RequirementQueryController.java
+source_files: []
+depends_on: []
+related_to: []

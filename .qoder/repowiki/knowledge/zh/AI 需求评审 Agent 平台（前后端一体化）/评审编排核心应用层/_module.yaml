@@ -1,0 +1,37 @@
+schema_version: 1
+module_path: 8d914ab9-89ee-4074-9895-408bc2b425c4
+title: 评审编排核心应用层
+scope:
+    - src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewRecoveryService.java
+    - src/main/java/ai/cc/chongming/review/application/RoleActivationService.java
+    - src/main/java/ai/cc/chongming/review/application/SharedSnapshotLifecycleService.java
+    - src/main/java/ai/cc/chongming/review/application/ContextScoutPreviewService.java
+    - src/main/java/ai/cc/chongming/review/application/ContextScoutConclusionService.java
+    - src/main/java/ai/cc/chongming/review/application/DashboardQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/InitialReviewProgressService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewEventService.java
+    - src/main/java/ai/cc/chongming/review/application/RepositorySnapshotService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewContextAssembler.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewRuntimeContext.java
+    - src/main/java/ai/cc/chongming/review/domain/model/Review.java
+    - src/main/java/ai/cc/chongming/review/domain/model/ReviewTypes.java
+    - src/main/java/ai/cc/chongming/review/domain/model/SnapshotReference.java
+    - src/main/java/ai/cc/chongming/review/domain/model/SharedRepositorySnapshot.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewCommandController.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewLifecycleCommandController.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewQueryController.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewListController.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewEventController.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewRuntimeTraceController.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewWorkbenchController.java
+    - src/main/java/ai/cc/chongming/review/api/ContextScoutPreviewController.java
+    - src/main/java/ai/cc/chongming/review/api/DashboardController.java
+    - src/main/java/ai/cc/chongming/review/api/RepositoryOptionController.java
+source_files: []
+depends_on: []
+related_to: []

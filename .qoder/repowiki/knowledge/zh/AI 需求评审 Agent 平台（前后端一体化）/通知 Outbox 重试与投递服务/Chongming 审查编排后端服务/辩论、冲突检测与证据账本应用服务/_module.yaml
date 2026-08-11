@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/d1d72500-3108-46d7-b002-4ec684b257ac
+title: 辩论、冲突检测与证据账本应用服务
+scope:
+    - src/main/java/ai/cc/chongming/review/application/DebateService.java
+    - src/main/java/ai/cc/chongming/review/application/JudgeService.java
+    - src/main/java/ai/cc/chongming/review/application/EvidenceLedgerService.java
+    - src/main/java/ai/cc/chongming/review/application/ConflictDetectionService.java
+source_files: []
+depends_on: []
+related_to: []

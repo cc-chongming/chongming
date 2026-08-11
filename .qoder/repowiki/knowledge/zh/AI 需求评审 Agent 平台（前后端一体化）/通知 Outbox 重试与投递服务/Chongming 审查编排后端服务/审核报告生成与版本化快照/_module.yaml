@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/10b0950e-97b0-4d49-b53e-119c3b9fec67
+title: 审核报告生成与版本化快照
+scope:
+    - src/main/java/ai/cc/chongming/review/application/ReviewReportService.java
+    - src/main/java/ai/cc/chongming/review/domain/model/ReviewReport.java
+    - src/main/java/ai/cc/chongming/review/api/ReviewReportController.java
+source_files: []
+depends_on: []
+related_to: []

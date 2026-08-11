@@ -1,0 +1,231 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: master
+nodes_managed: true
+exported_at: "2026-08-11T02:33:34Z"
+modules:
+    "":
+        dir_name: AI 需求评审 Agent 平台（前后端一体化）
+        title: AI 需求评审 Agent 平台（前后端一体化）
+        scope: []
+        source_files: []
+        children:
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51
+            - 8d914ab9-89ee-4074-9895-408bc2b425c4
+            - afd1ac66-da16-4d5c-b5af-1e510feadaba
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51:
+        dir_name: 通知 Outbox 重试与投递服务
+        title: 通知 Outbox 重试与投递服务
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/NotificationOutboxService.java
+            - src/main/java/ai/cc/chongming/review/application/NotificationDeliveryPort.java
+            - src/main/java/ai/cc/chongming/review/domain/model/NotificationOutboxEntry.java
+            - src/main/java/ai/cc/chongming/review/domain/model/NotificationCommand.java
+            - src/main/java/ai/cc/chongming/review/domain/model/NotificationDeliveryReceipt.java
+            - src/main/java/ai/cc/chongming/review/api/NotificationOutboxController.java
+        source_files: []
+        children:
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9:
+        dir_name: Chongming 审查编排后端服务
+        title: Chongming 审查编排后端服务
+        scope:
+            - src/
+        source_files: []
+        children:
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/081024ca-3211-4f71-95e5-17886eaa420d
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/10b0950e-97b0-4d49-b53e-119c3b9fec67
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/641931e2-5b9a-441f-9070-c8520d91185c
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/6ee43cf1-69a3-4a4b-9f57-93710600bcc5
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/d1d72500-3108-46d7-b002-4ec684b257ac
+            - 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/d8be1c42-91df-4d2d-aa48-4f9b13d4a564
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/6ee43cf1-69a3-4a4b-9f57-93710600bcc5:
+        dir_name: 人工审核与最终 Gate 决策
+        title: 人工审核与最终 Gate 决策
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/HumanReviewService.java
+            - src/main/java/ai/cc/chongming/review/application/HumanGateDecisionService.java
+            - src/main/java/ai/cc/chongming/review/domain/model/HumanGateDecision.java
+            - src/main/java/ai/cc/chongming/review/domain/model/HumanReviewItem.java
+            - src/main/java/ai/cc/chongming/review/domain/model/HumanReviewAuditEvent.java
+            - src/main/java/ai/cc/chongming/review/api/HumanReviewController.java
+            - src/main/java/ai/cc/chongming/review/api/HumanGateDecisionController.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/10b0950e-97b0-4d49-b53e-119c3b9fec67:
+        dir_name: 审核报告生成与版本化快照
+        title: 审核报告生成与版本化快照
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/ReviewReportService.java
+            - src/main/java/ai/cc/chongming/review/domain/model/ReviewReport.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewReportController.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/081024ca-3211-4f71-95e5-17886eaa420d:
+        dir_name: 审查评估提交与定向调度命令服务
+        title: 审查评估提交与定向调度命令服务
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/AssessmentService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java
+            - src/main/java/ai/cc/chongming/review/domain/model/ReviewAssessment.java
+            - src/main/java/ai/cc/chongming/review/domain/model/ReviewDispatchCommand.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/641931e2-5b9a-441f-9070-c8520d91185c:
+        dir_name: 需求生命周期管理（Requirement Lifecycle）
+        title: 需求生命周期管理（Requirement Lifecycle）
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/RequirementCommandService.java
+            - src/main/java/ai/cc/chongming/review/application/RequirementLifecycleService.java
+            - src/main/java/ai/cc/chongming/review/application/RequirementQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/RequirementReviewLaunchService.java
+            - src/main/java/ai/cc/chongming/review/domain/model/Requirement.java
+            - src/main/java/ai/cc/chongming/review/domain/model/RequirementSnapshot.java
+            - src/main/java/ai/cc/chongming/review/domain/model/RequirementTypes.java
+            - src/main/java/ai/cc/chongming/review/api/RequirementCommandController.java
+            - src/main/java/ai/cc/chongming/review/api/RequirementQueryController.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/d1d72500-3108-46d7-b002-4ec684b257ac:
+        dir_name: 辩论、冲突检测与证据账本应用服务
+        title: 辩论、冲突检测与证据账本应用服务
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/DebateService.java
+            - src/main/java/ai/cc/chongming/review/application/JudgeService.java
+            - src/main/java/ai/cc/chongming/review/application/EvidenceLedgerService.java
+            - src/main/java/ai/cc/chongming/review/application/ConflictDetectionService.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/d8be1c42-91df-4d2d-aa48-4f9b13d4a564:
+        dir_name: SSE 事件流与运行时追踪注册中心
+        title: SSE 事件流与运行时追踪注册中心
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/ReviewSseRegistry.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewSseProperties.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewRuntimeTraceRegistry.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    8d914ab9-89ee-4074-9895-408bc2b425c4:
+        dir_name: 评审编排核心应用层
+        title: 评审编排核心应用层
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewRecoveryService.java
+            - src/main/java/ai/cc/chongming/review/application/RoleActivationService.java
+            - src/main/java/ai/cc/chongming/review/application/SharedSnapshotLifecycleService.java
+            - src/main/java/ai/cc/chongming/review/application/ContextScoutPreviewService.java
+            - src/main/java/ai/cc/chongming/review/application/ContextScoutConclusionService.java
+            - src/main/java/ai/cc/chongming/review/application/DashboardQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/InitialReviewProgressService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewEventService.java
+            - src/main/java/ai/cc/chongming/review/application/RepositorySnapshotService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewContextAssembler.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewRuntimeContext.java
+            - src/main/java/ai/cc/chongming/review/domain/model/Review.java
+            - src/main/java/ai/cc/chongming/review/domain/model/ReviewTypes.java
+            - src/main/java/ai/cc/chongming/review/domain/model/SnapshotReference.java
+            - src/main/java/ai/cc/chongming/review/domain/model/SharedRepositorySnapshot.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewCommandController.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewLifecycleCommandController.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewQueryController.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewListController.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewEventController.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewRuntimeTraceController.java
+            - src/main/java/ai/cc/chongming/review/api/ReviewWorkbenchController.java
+            - src/main/java/ai/cc/chongming/review/api/ContextScoutPreviewController.java
+            - src/main/java/ai/cc/chongming/review/api/DashboardController.java
+            - src/main/java/ai/cc/chongming/review/api/RepositoryOptionController.java
+        source_files: []
+        children:
+            - 8d914ab9-89ee-4074-9895-408bc2b425c4/01368779-3f14-4e7e-ad1d-58b74d453622
+            - 8d914ab9-89ee-4074-9895-408bc2b425c4/70fba404-970d-4f63-bef7-8c4df7a6d38c
+            - 8d914ab9-89ee-4074-9895-408bc2b425c4/9c21437a-d9e1-411f-93b9-b1977c34bdf3
+        depends_on: []
+        related_to: []
+    8d914ab9-89ee-4074-9895-408bc2b425c4/9c21437a-d9e1-411f-93b9-b1977c34bdf3:
+        dir_name: 审查生命周期编排应用服务
+        title: 审查生命周期编排应用服务
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewRecoveryService.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    8d914ab9-89ee-4074-9895-408bc2b425c4/70fba404-970d-4f63-bef7-8c4df7a6d38c:
+        dir_name: 评审查询与初始评审编排应用服务
+        title: 评审查询与初始评审编排应用服务
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/DashboardQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java
+            - src/main/java/ai/cc/chongming/review/application/InitialReviewProgressService.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    8d914ab9-89ee-4074-9895-408bc2b425c4/01368779-3f14-4e7e-ad1d-58b74d453622:
+        dir_name: Context Scout 预览与共享仓库快照服务
+        title: Context Scout 预览与共享仓库快照服务
+        scope:
+            - src/main/java/ai/cc/chongming/review/application/ContextScoutPreviewService.java
+            - src/main/java/ai/cc/chongming/review/application/ContextScoutConclusionService.java
+            - src/main/java/ai/cc/chongming/review/application/RepositorySnapshotService.java
+            - src/main/java/ai/cc/chongming/review/application/SharedSnapshotLifecycleService.java
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    afd1ac66-da16-4d5c-b5af-1e510feadaba:
+        dir_name: AI 需求评审 Agent 平台（前后端一体化）
+        title: AI 需求评审 Agent 平台（前后端一体化）
+        scope: []
+        source_files: []
+        children:
+            - afd1ac66-da16-4d5c-b5af-1e510feadaba/0105c645-a0fb-4110-a8d1-18cf586a873b
+            - afd1ac66-da16-4d5c-b5af-1e510feadaba/173ea60b-a460-4a13-9b24-b7ae579051dd
+        depends_on: []
+        related_to: []
+    afd1ac66-da16-4d5c-b5af-1e510feadaba/0105c645-a0fb-4110-a8d1-18cf586a873b:
+        dir_name: 评审工作流前端（Vue 3 评审 UI）
+        title: 评审工作流前端（Vue 3 评审 UI）
+        scope:
+            - frontend/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    afd1ac66-da16-4d5c-b5af-1e510feadaba/173ea60b-a460-4a13-9b24-b7ae579051dd:
+        dir_name: AI 需求评审 Agent 专项实施计划与契约文档集
+        title: AI 需求评审 Agent 专项实施计划与契约文档集
+        scope:
+            - docs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: 4ed6a7fb-f60f-4441-8d1b-ad7520234c51
+title: 通知 Outbox 重试与投递服务
+scope:
+    - src/main/java/ai/cc/chongming/review/application/NotificationOutboxService.java
+    - src/main/java/ai/cc/chongming/review/application/NotificationDeliveryPort.java
+    - src/main/java/ai/cc/chongming/review/domain/model/NotificationOutboxEntry.java
+    - src/main/java/ai/cc/chongming/review/domain/model/NotificationCommand.java
+    - src/main/java/ai/cc/chongming/review/domain/model/NotificationDeliveryReceipt.java
+    - src/main/java/ai/cc/chongming/review/api/NotificationOutboxController.java
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: afd1ac66-da16-4d5c-b5af-1e510feadaba/173ea60b-a460-4a13-9b24-b7ae579051dd
+title: AI 需求评审 Agent 专项实施计划与契约文档集
+scope:
+    - docs/
+source_files: []
+depends_on: []
+related_to: []

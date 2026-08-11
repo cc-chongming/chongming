@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: 8d914ab9-89ee-4074-9895-408bc2b425c4/9c21437a-d9e1-411f-93b9-b1977c34bdf3
+title: 审查生命周期编排应用服务
+scope:
+    - src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewOrchestrationService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewLifecycleService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewRecoveryService.java
+source_files: []
+depends_on: []
+related_to: []

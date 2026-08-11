@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: afd1ac66-da16-4d5c-b5af-1e510feadaba/0105c645-a0fb-4110-a8d1-18cf586a873b
+title: 评审工作流前端（Vue 3 评审 UI）
+scope:
+    - frontend/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/081024ca-3211-4f71-95e5-17886eaa420d
+title: 审查评估提交与定向调度命令服务
+scope:
+    - src/main/java/ai/cc/chongming/review/application/AssessmentService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java
+    - src/main/java/ai/cc/chongming/review/domain/model/ReviewAssessment.java
+    - src/main/java/ai/cc/chongming/review/domain/model/ReviewDispatchCommand.java
+source_files: []
+depends_on: []
+related_to: []

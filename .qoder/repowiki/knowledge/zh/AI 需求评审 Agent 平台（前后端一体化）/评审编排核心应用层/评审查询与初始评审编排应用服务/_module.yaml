@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: 8d914ab9-89ee-4074-9895-408bc2b425c4/70fba404-970d-4f63-bef7-8c4df7a6d38c
+title: 评审查询与初始评审编排应用服务
+scope:
+    - src/main/java/ai/cc/chongming/review/application/DashboardQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewListQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java
+    - src/main/java/ai/cc/chongming/review/application/InitialReviewProgressService.java
+source_files: []
+depends_on: []
+related_to: []

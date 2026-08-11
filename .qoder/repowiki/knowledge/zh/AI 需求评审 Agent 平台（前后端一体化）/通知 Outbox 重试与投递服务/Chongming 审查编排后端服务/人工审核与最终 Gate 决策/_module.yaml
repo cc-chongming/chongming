@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: 4ed6a7fb-f60f-4441-8d1b-ad7520234c51/4df3fc1b-7d5f-42a4-8684-7f2b205347e9/6ee43cf1-69a3-4a4b-9f57-93710600bcc5
+title: 人工审核与最终 Gate 决策
+scope:
+    - src/main/java/ai/cc/chongming/review/application/HumanReviewService.java
+    - src/main/java/ai/cc/chongming/review/application/HumanGateDecisionService.java
+    - src/main/java/ai/cc/chongming/review/domain/model/HumanGateDecision.java
+    - src/main/java/ai/cc/chongming/review/domain/model/HumanReviewItem.java
+    - src/main/java/ai/cc/chongming/review/domain/model/HumanReviewAuditEvent.java
+    - src/main/java/ai/cc/chongming/review/api/HumanReviewController.java
+    - src/main/java/ai/cc/chongming/review/api/HumanGateDecisionController.java
+source_files: []
+depends_on: []
+related_to: []
