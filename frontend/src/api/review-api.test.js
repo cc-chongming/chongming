@@ -175,7 +175,8 @@ describe('requirement platform API', () => {
         const [path, options] = fetchMock.mock.calls[0];
         expect(path).toBe('/api/requirements/requirement-001/reviews');
         expect(options).toMatchObject({ method: 'POST' });
-        expect(options.headers).toEqual({ 'Idempotency-Key': 'launch-001', 'X-Trace-Id': 'trace-001' });
+        // Tolerate extra headers (e.g. a Bearer Authorization when a session exists in localStorage).
+        expect(options.headers).toMatchObject({ 'Idempotency-Key': 'launch-001', 'X-Trace-Id': 'trace-001' });
         expect(options.body).toBeInstanceOf(FormData);
         expect(options.body.get('requirementFile')).toBe(requirementFile);
         expect(options.body.get('repositoryPath')).toBe('cx-ai');

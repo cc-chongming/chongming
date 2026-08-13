@@ -6,6 +6,8 @@
  * Request and response values deliberately remain plain objects so API fixtures can exercise them directly.
  */
 
+import { clearAuthSession, getAuthToken, redirectToLogin } from '../services/auth-token';
+
 // [AIREVIEW-PLAN-024#方案5] Frozen five-status assessment vocabulary shared by Gate, report and workbench.
 export const ASSESSMENT_STATUSES = ['CONFIRMED', 'PARTIAL', 'GAP', 'UNKNOWN', 'NOT_APPLICABLE'];
 
@@ -75,14 +77,21 @@ async function parseResponse(response) {
     return text || null;
 }
 
-async function request(path, { method = 'GET', body, headers = {}, fetchImpl = fetch } = {}) {
+export async function request(path, { method = 'GET', body, headers = {}, fetchImpl = fetch } = {}) {
+    // Attach the Bearer token when a session exists; auth endpoints stay token-free.
+    const token = getAuthToken();
+    const mergedHeaders = token ? { Authorization: `Bearer ${token}`, ...headers } : headers;
     const response = await fetchImpl(apiPath(path), {
         method,
-        headers,
+        headers: mergedHeaders,
         body
     });
     const parsed = await parseResponse(response);
     if (!response.ok) {
+        if (response.status === 401 && !apiPath(path).startsWith('/api/auth/')) {
+            clearAuthSession();
+            redirectToLogin();
+        }
         const detail = typeof parsed === 'object' && parsed !== null ? parsed.detail : null;
         throw new ReviewApiError(detail || `请求失败（HTTP ${response.status}）`, {
             status: response.status,

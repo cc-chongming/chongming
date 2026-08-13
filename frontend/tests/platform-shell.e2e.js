@@ -1,5 +1,21 @@
 import { expect, test } from '@playwright/test';
 
+// Auth guard seeded: e2e flows exercise protected routes with a long-lived local JWT.
+test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+        const payload = btoa(JSON.stringify({ sub: 'e2e-user', exp: 4102444800 }))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        localStorage.setItem('chongming-auth', JSON.stringify({
+            token: `e2e.${payload}.signature`,
+            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT' }
+        }));
+    });
+    // 兜底拦截：具体路由未覆盖的 /api 请求不得经 vite 代理泄漏到本地后端（其 401 会清除会话并跳登录页）。
+    await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
+        status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'not mocked' })
+    }));
+});
+
 test('renders the platform shell with grouped navigation, breadcrumb and live counts', async ({ page }) => {
     await page.route('**/api/dashboard', async (route) => {
         await route.fulfill({
@@ -41,10 +57,11 @@ test('renders the platform shell with grouped navigation, breadcrumb and live co
     await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toBeVisible();
     await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toHaveCount(0);
 
-    await page.locator('.nav-item', { hasText: '新建需求' }).click();
+    // 新建入口位于需求库页内（侧栏只保留需求库一个分组项），点击后需求库保持高亮。
+    await page.getByRole('link', { name: /新建需求/ }).click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('新建需求');
-    await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toBeVisible();
-    await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toHaveCount(0);
+    await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toBeVisible();
+    await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toHaveCount(0);
 
     await page.locator('.nav-item', { hasText: '评审列表' }).click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('评审列表');

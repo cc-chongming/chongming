@@ -76,7 +76,8 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "context_scout_conclusion",
                     "requirement_review_launch_command",
                     "review_assessment",
-                    "review_dispatch_command");
+                    "review_dispatch_command",
+                    "users");
             Map<String, String> expectedLongTextColumns = Map.of(
                     "review_plan.plan_json", "LONGTEXT",
                     "repository_snapshot.manifest_json", "LONGTEXT",
@@ -100,7 +101,7 @@ class ReviewPersistenceMigrationIntegrationTests {
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_event", "idx_review_event_occurred_at"))
                     .containsExactly("OCCURRED_AT");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_event", "idx_review_event_recent_activity"))
-                    .containsExactly("EVENT_SEQUENCE", "OCCURRED_AT", "REVIEW_ID");
+                    .containsExactly("OCCURRED_AT", "REVIEW_ID", "EVENT_SEQUENCE");
             // [AIREVIEW-PLAN-024#方案5] assessment identity is the (review, attempt, role, checkpoint)
             // composite primary key; dispatch commands are unique on command_id plus idempotency_key.
             assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "review_assessment"))
@@ -111,6 +112,20 @@ class ReviewPersistenceMigrationIntegrationTests {
                     .containsExactly("REVIEW_ID", "ATTEMPT_NO");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command", "uk_review_dispatch_idempotency"))
                     .containsExactly("IDEMPOTENCY_KEY");
+            // [AIREVIEW-PLAN-025#1] V20 creates the users table with a unique username index
+            // and seeds the built-in administrator account.
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "users", "password_hash"))
+                    .isEqualTo("VARCHAR");
+            assertThat(readColumnSize(connection.getMetaData(), connection.getCatalog(), "users", "password_hash"))
+                    .isEqualTo(255);
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "users", "uk_users_username"))
+                    .containsExactly("USERNAME");
+            try (Statement statement = connection.createStatement();
+                    ResultSet adminRows = statement.executeQuery(
+                            "SELECT COUNT(*) FROM users WHERE username='admin' AND role='ADMIN'")) {
+                assertThat(adminRows.next()).isTrue();
+                assertThat(adminRows.getLong(1)).isEqualTo(1L);
+            }
         }
     }
 
@@ -277,26 +292,32 @@ class ReviewPersistenceMigrationIntegrationTests {
 
     private Set<String> readPrimaryKeyColumns(DatabaseMetaData metadata, String catalog, String tableName)
             throws SQLException {
-        Set<String> columns = new java.util.LinkedHashSet<>();
+        // JDBC getPrimaryKeys() row order is driver/server dependent (observed unordered on
+        // MySQL 5.6 + Connector/J), so sort explicitly by KEY_SEQ before collecting names.
+        java.util.Map<Integer, String> columnsByKeySeq = new java.util.TreeMap<>();
         try (ResultSet resultSet = metadata.getPrimaryKeys(catalog, null, tableName)) {
             while (resultSet.next()) {
-                columns.add(resultSet.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
+                columnsByKeySeq.put(resultSet.getInt("KEY_SEQ"),
+                        resultSet.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
             }
         }
-        return columns;
+        return new java.util.LinkedHashSet<>(columnsByKeySeq.values());
     }
 
     private Set<String> readIndexColumns(DatabaseMetaData metadata, String catalog, String tableName, String indexName)
             throws SQLException {
-        Set<String> columns = new java.util.TreeSet<>();
+        // Connector/J getIndexInfo() row order is not guaranteed to follow index column order,
+        // so sort explicitly by ORDINAL_POSITION before collecting names.
+        java.util.Map<Integer, String> columnsByPosition = new java.util.TreeMap<>();
         try (ResultSet resultSet = metadata.getIndexInfo(catalog, null, tableName, false, false)) {
             while (resultSet.next()) {
                 if (indexName.equalsIgnoreCase(resultSet.getString("INDEX_NAME"))) {
-                    columns.add(resultSet.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
+                    columnsByPosition.put(resultSet.getInt("ORDINAL_POSITION"),
+                            resultSet.getString("COLUMN_NAME").toUpperCase(Locale.ROOT));
                 }
             }
         }
-        return columns;
+        return new java.util.LinkedHashSet<>(columnsByPosition.values());
     }
 
     private MysqlDataSource dataSource(MySQLContainer<?> mysql) {

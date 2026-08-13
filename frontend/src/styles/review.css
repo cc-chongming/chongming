@@ -729,3 +729,27 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
     .flow-drawer-toggle { margin-left: auto; }.review-flow-header-status { width: auto; }.scout-conclusion-grid { grid-template-columns: 1fr; }
     .live-agent-entry, .live-agent-entry.is-tool, .live-agent-entry.is-notice { grid-template-columns: 1.7rem minmax(0, 1fr); }.agent-entry-spacer { width: 1.7rem; }.agent-dialogue-header { flex-wrap: wrap; }.agent-dialogue-header time { margin-left: 0; }
 }
+
+/* ===== Auth flow: standalone login / register screens ===== */
+.platform-shell.auth-flow-shell { display: block; }
+.auth-flow-shell .app-main { padding: 0; }
+.auth-page {
+    display: grid; place-items: center; min-height: 100vh; padding: 1.5rem;
+    background:
+        radial-gradient(52rem 34rem at 115% -12%, rgba(37, 99, 235, .10), transparent 60%),
+        radial-gradient(46rem 30rem at -15% 112%, rgba(79, 70, 229, .10), transparent 60%),
+        #f4f7fb;
+}
+.auth-card { width: min(26rem, 100%); max-width: none; margin: 0; }
+.auth-brand { display: flex; align-items: center; gap: .7rem; margin-bottom: 1.35rem; }
+.auth-brand .logo-mark { width: 42px; height: 42px; font-size: 21px; border-radius: 9px; }
+.auth-brand-name { font-size: 1.25rem; font-weight: 700; letter-spacing: .6px; line-height: 1.25; }
+.auth-brand-sub { color: #78716c; font-size: .76rem; letter-spacing: .3px; }
+.auth-title { margin: 0 0 .3rem; font-size: 1.2rem; }
+.auth-subtitle { margin: 0 0 1.15rem; color: #4a5d76; font-size: .85rem; }
+.auth-card .review-form { grid-template-columns: 1fr; gap: .85rem; }
+.auth-card .error-banner { margin: .25rem 0 0; }
+.auth-actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .35rem; }
+.auth-switch { color: #1456a9; font-size: .85rem; text-decoration: none; }
+.auth-switch:hover { text-decoration: underline; }
+.user-area .auth-logout { margin-left: auto; font-size: 11px; white-space: nowrap; }

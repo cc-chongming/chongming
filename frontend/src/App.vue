@@ -1,12 +1,25 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { RouterLink, RouterView, useRoute } from 'vue-router';
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
 import { reviewApi } from './api/review-api';
+import { authStore } from './stores/auth-store';
 
 const route = useRoute();
+const router = useRouter();
 const isReviewFlow = computed(() => route.name === 'review-live');
+// Auth pages render as standalone, centered screens without the platform chrome.
+const isAuthFlow = computed(() => route.name === 'login' || route.name === 'register');
 const counts = ref(null);
 const sidebarCollapsed = ref(false);
+
+const authUser = computed(() => authStore.currentUser.value);
+const userDisplayName = computed(() => authUser.value?.displayName || authUser.value?.username || '未登录');
+const userInitial = computed(() => (userDisplayName.value || '重').charAt(0));
+
+function handleLogout() {
+    authStore.logout();
+    router.push('/login');
+}
 
 const pageTitles = {
     dashboard: '工作台',
@@ -66,8 +79,8 @@ onMounted(async () => {
 
 <template>
     <a class="skip-link" href="#main-content">跳至主要内容</a>
-    <div class="platform-shell" :class="{ 'review-flow-shell': isReviewFlow, 'sidebar-collapsed': sidebarCollapsed && !isReviewFlow }">
-        <aside v-if="!isReviewFlow" class="platform-sidebar" :class="{ collapsed: sidebarCollapsed }">
+    <div class="platform-shell" :class="{ 'review-flow-shell': isReviewFlow, 'auth-flow-shell': isAuthFlow, 'sidebar-collapsed': sidebarCollapsed && !isReviewFlow && !isAuthFlow }">
+        <aside v-if="!isReviewFlow && !isAuthFlow" class="platform-sidebar" :class="{ collapsed: sidebarCollapsed }">
             <div class="logo-area">
                 <div class="logo-mark">重</div>
                 <div class="logo-text"><div class="logo">重明</div><div class="sub">需求生命周期管理</div></div>
@@ -83,12 +96,13 @@ onMounted(async () => {
                 </div>
             </nav>
             <div class="user-area">
-                <div class="avatar">张</div>
-                <div><div class="user-name">张工</div><div class="user-role">产品经理</div></div>
+                <div class="avatar">{{ userInitial }}</div>
+                <div><div class="user-name">{{ userDisplayName }}</div><div class="user-role">{{ authUser?.username ?? '' }}</div></div>
+                <button type="button" class="text-button auth-logout" @click="handleLogout">退出登录</button>
             </div>
         </aside>
         <div class="platform-frame" :class="{ 'review-flow-frame': isReviewFlow }">
-            <header v-if="!isReviewFlow" class="main-topbar">
+            <header v-if="!isReviewFlow && !isAuthFlow" class="main-topbar">
                 <button type="button" class="sidebar-toggle" :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'" aria-label="折叠或展开侧边栏" @click="toggleSidebar"><span aria-hidden="true">☰</span></button>
                 <div class="breadcrumb">
                     <RouterLink class="home" to="/dashboard">首页</RouterLink>

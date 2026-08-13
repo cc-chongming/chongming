@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createAgUiRuntimeSubscription } from './ag-ui-runtime-sse';
+import { createScoutPreviewSubscription } from './scout-preview-sse';
 
 class FakeEventSource {
     static instances = [];
@@ -36,22 +36,22 @@ afterEach(() => {
     FakeEventSource.instances.length = 0;
 });
 
-describe('AG-UI runtime subscription', () => {
-    it('subscribes to one concrete review attempt and forwards valid AG-UI events', () => {
+describe('scout preview subscription', () => {
+    it('forwards events for one isolated preview run', () => {
         const received = [];
-        const subscription = createAgUiRuntimeSubscription({
-            reviewId: '11111111-1111-1111-1111-111111111111',
-            attemptNo: 2,
+        const subscription = createScoutPreviewSubscription({
+            reviewId: 'r1',
+            attemptNo: 1,
+            previewId: 'p1',
             EventSourceImpl: FakeEventSource,
             onEvent: (event) => received.push(event)
         });
 
         const source = FakeEventSource.instances.at(-1);
-        source.emit({ type: 'RUN_STARTED', runId: 'review:2:director' });
-        source.emit({ unexpected: true });
+        source.emit({ type: 'SCOUT_TRACE', note: 'step' });
 
-        expect(source.url).toBe('/api/reviews/11111111-1111-1111-1111-111111111111/attempts/2/runtime/ag-ui');
-        expect(received).toEqual([{ type: 'RUN_STARTED', runId: 'review:2:director' }]);
+        expect(source.url).toBe('/api/reviews/r1/attempts/1/scout-previews/p1/events');
+        expect(received).toEqual([{ type: 'SCOUT_TRACE', note: 'step' }]);
         subscription.close();
         expect(source.closed).toBe(true);
     });
@@ -61,9 +61,10 @@ describe('AG-UI runtime subscription', () => {
         const firstToken = makeJwt({ sub: 'alice', exp: 4102444800 });
         backing.set('chongming-auth', JSON.stringify({ token: firstToken, user: null }));
         const scheduled = [];
-        const subscription = createAgUiRuntimeSubscription({
+        const subscription = createScoutPreviewSubscription({
             reviewId: 'r1',
-            attemptNo: 2,
+            attemptNo: 1,
+            previewId: 'p1',
             EventSourceImpl: FakeEventSource,
             setTimeoutImpl: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
             clearTimeoutImpl: () => {},
@@ -87,9 +88,10 @@ describe('AG-UI runtime subscription', () => {
         const backing = installLocalStorage();
         backing.set('chongming-auth', JSON.stringify({ token: makeJwt({ sub: 'alice', exp: 1000 }), user: null }));
         const states = [];
-        const subscription = createAgUiRuntimeSubscription({
+        const subscription = createScoutPreviewSubscription({
             reviewId: 'r1',
-            attemptNo: 2,
+            attemptNo: 1,
+            previewId: 'p1',
             EventSourceImpl: FakeEventSource,
             setTimeoutImpl: () => { throw new Error('expired token must not schedule retries'); },
             clearTimeoutImpl: () => {},

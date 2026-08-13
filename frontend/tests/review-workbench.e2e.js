@@ -8,6 +8,22 @@ const topicId = '20000000-0000-0000-0000-000000000001';
 const claimId = '30000000-0000-0000-0000-000000000001';
 const evidenceId = '50000000-0000-0000-0000-000000000001';
 
+// Auth guard seeded: e2e flows exercise protected routes with a long-lived local JWT.
+test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+        const payload = btoa(JSON.stringify({ sub: 'e2e-user', exp: 4102444800 }))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        localStorage.setItem('chongming-auth', JSON.stringify({
+            token: `e2e.${payload}.signature`,
+            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT' }
+        }));
+    });
+    // 兜底拦截：具体路由未覆盖的 /api 请求不得经 vite 代理泄漏到本地后端（其 401 会清除会话并跳登录页）。
+    await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({
+        status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'not mocked' })
+    }));
+});
+
 test('renders a replayable debate workbench without executing report content', async ({ page }) => {
     await page.route('**/api/reviews/**', async (route) => {
         const requestUrl = new URL(route.request().url());
@@ -74,7 +90,10 @@ test('renders the live review page as the full-flow workspace with phase-specifi
             return json({
                 reviewId, attempt: 1, stage: 'INITIAL_REVIEW', progress: 40, lastSequence: 2, reviewVersion: 4,
                 occurredAt: '2026-08-04 15:25:57', gate: { result: 'PASS', status: 'DRAFT', reasonSummary: 'AI 判断可以通过。' },
-                activatedRoles: [{ role: 'PRODUCT', agentLabel: 'product-reviewer', initialReviewCompleted: false }]
+                activatedRoles: [
+                    { role: 'PRODUCT', agentLabel: 'product-reviewer', initialReviewCompleted: false },
+                    { role: 'TESTING', agentLabel: 'testing-reviewer', initialReviewCompleted: false }
+                ]
             });
         }
         if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
@@ -108,12 +127,13 @@ test('renders the live review page as the full-flow workspace with phase-specifi
 
     await expect(page.getByText('需求评审全流程', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '评审流程' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '运行调试' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '收起观察' })).toBeVisible();
 
     // 默认停留在当前阶段：只展示实际激活或有正式 Claim 的动态角色。
     await expect(page.getByRole('heading', { name: /独立审查/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /产品经理/ })).toBeVisible();
     await expect(page.getByText('发现 1 项：0 项阻断、1 项高风险、0 项改进建议')).toBeVisible();
+    // 已激活但尚无 Claim 与运行事件的角色卡展示等待文案。
     await expect(page.getByText('角色已激活，等待公开运行事件。')).toBeVisible();
     await expect(page.getByRole('button', { name: /项目经理/ })).toHaveCount(0);
     // 展开角色卡后可看到论点与可折叠的运行详情
@@ -139,7 +159,8 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await page.getByRole('button', { name: /人工决策/ }).click();
     await expect(page.getByText('系统已暂停 AI 输出，最终结论必须由人工在工作台明确选择并提交')).toBeVisible();
     await expect(page.getByText('人工结论与 AI Gate 草案不同')).toBeVisible();
-    await expect(page.getByText('范围需要补齐')).toBeVisible();
+    // 结论文案会在结论链、人工理由与 Gate 版本历史多处展示。
+    await expect(page.getByText('范围需要补齐').first()).toBeVisible();
     await expect(page.getByRole('link', { name: '进入人工决策' })).toBeVisible();
 });
 
@@ -169,7 +190,7 @@ test('removes the temporary draft when the uploaded Markdown already has a revie
     });
 
     await page.goto('/index.html#/requirements/create');
-    await page.getByLabel('需求标题').fill('重复快照测试');
+    await page.getByPlaceholder('简短描述需求内容').fill('重复快照测试');
     await expect(page.getByLabel('目标仓库')).toHaveValue('cx-ai');
     await page.locator('input[type="file"][accept*=".md"]').setInputFiles({
         name: 'repeat.md', mimeType: 'text/markdown', buffer: Buffer.from('# 已有评审的需求')
@@ -235,7 +256,8 @@ test('launches an unbound draft from its detail page with a configured repositor
         createdAt: '2026-08-10T00:00:00Z', updatedAt: '2026-08-10T00:00:00Z'
     };
     const launchRequests = [];
-    await page.route('**/api/**', async (route) => {
+    // 谓词限定只拦截 /api/ 请求，避免 glob 误伤 Vite 的 /src/api/*.js 模块请求。
+    await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();
@@ -306,7 +328,7 @@ test('refreshes a draft and rotates the command key after a version conflict', a
     const requirementId = '93000000-0000-0000-0000-000000000001';
     let reads = 0;
     const launches = [];
-    await page.route('**/api/**', async (route) => {
+    await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();
@@ -335,6 +357,10 @@ test('refreshes a draft and rotates the command key after a version conflict', a
 
     await expect(page.getByText('需求版本已刷新，请检查最新草稿并确认后重试。')).toBeVisible();
     expect(reads).toBeGreaterThanOrEqual(2);
+    // 版本冲突后页面会重新加载详情，发起面板重建后需重新选择文档再重试。
+    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+        name: 'version-retry.md', mimeType: 'text/markdown', buffer: Buffer.from('# 版本冲突重试')
+    });
     await page.getByRole('button', { name: '确认发起评审' }).click();
     await expect.poll(() => launches.length).toBe(2);
     expect(launches[1].headers['idempotency-key']).not.toBe(launches[0].headers['idempotency-key']);

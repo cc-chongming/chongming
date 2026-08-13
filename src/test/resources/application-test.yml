@@ -4,6 +4,10 @@ review:
   # ReviewAssessmentStore lands with 方案5, so full-context tests must not require it.
   persistence:
     enabled: false
+  auth:
+    # Test-only HS256 signing key so the authentication module can assemble in the
+    # persistence-free test context; never used outside this profile.
+    jwt-secret: chongming-test-jwt-secret-0123456789abcdef
   max-agents: 8
   max-debate-rounds: 2
   agentscope:

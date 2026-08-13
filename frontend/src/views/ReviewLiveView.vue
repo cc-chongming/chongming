@@ -106,6 +106,8 @@ const completedRoleCodes = computed(() => completedReviewRoles(
 ));
 const completedRoles = computed(() => completedRoleCodes.value.length);
 const completedRoleSet = computed(() => new Set(completedRoleCodes.value));
+const activatedRoleSet = computed(() => new Set(
+    reviewRoles(store.state.summary?.activatedRoles ?? [], [], [])));
 const scoutHasActivity = computed(() => runtimeTrace.state.events.some((event) =>
     String(event?.runId ?? '').includes(':context-scout')));
 const scoutRunFinished = computed(() => runtimeTrace.state.events.some((event) =>
@@ -179,6 +181,7 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
     const stance = claims.some((claim) => claim.position === 'OPPOSE') ? 'oppose'
         : claims.some((claim) => claim.position === 'SUPPORT') ? 'support' : null;
     const completed = completedRoleSet.value.has(role);
+    const activated = activatedRoleSet.value.has(role);
     return {
         role,
         label: roleTitle(role),
@@ -189,7 +192,7 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
         summary: claims.length
             ? claimOverview(claims)
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'
-            : latest ? itemSummary(latest) : activation ? '角色已激活，等待公开运行事件。' : '等待 Director 分配评审任务。',
+            : latest ? itemSummary(latest) : activated ? '角色已激活，等待公开运行事件。' : '等待 Director 分配评审任务。',
         claims,
         items
     };

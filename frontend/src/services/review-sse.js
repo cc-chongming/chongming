@@ -1,7 +1,10 @@
 /**
  * [AIREVIEW-PLAN-012#1.4] Owns one resumable SSE subscription per review.
  * Browser EventSource cannot supply arbitrary headers, so recovery uses the server's afterSequence parameter.
+ * The Bearer token travels as an `access_token` query parameter instead.
  */
+
+import { isStoredTokenUsable, redirectToLogin, withAuthToken } from './auth-token';
 
 export const REVIEW_EVENT_TYPES = [
     'REVIEW_ACCEPTED', 'PLAN_CREATED', 'PLAN_REVISED',
@@ -40,7 +43,7 @@ export function createReviewSseSubscription({
     const open = () => {
         if (closed) return;
         onState({ status: retries === 0 ? 'connecting' : 'reconnecting', retryDelayMs: null });
-        source = new EventSourceImpl(`/api/reviews/${encodeURIComponent(reviewId)}/events?afterSequence=${cursor}`);
+        source = new EventSourceImpl(withAuthToken(`/api/reviews/${encodeURIComponent(reviewId)}/events?afterSequence=${cursor}`));
         source.onopen = () => {
             retries = 0;
             onState({ status: 'connected', retryDelayMs: null });
@@ -68,6 +71,13 @@ export function createReviewSseSubscription({
         source.onerror = () => {
             source.close();
             if (closed) return;
+            // An expired token cannot recover through backoff: stop retrying and let the guard sign out.
+            if (!isStoredTokenUsable()) {
+                closed = true;
+                onState({ status: 'auth-expired', retryDelayMs: null });
+                redirectToLogin();
+                return;
+            }
             const delay = Math.min(30_000, 1_000 * (2 ** Math.min(retries, 5)));
             retries += 1;
             onState({ status: 'reconnecting', retryDelayMs: delay });
