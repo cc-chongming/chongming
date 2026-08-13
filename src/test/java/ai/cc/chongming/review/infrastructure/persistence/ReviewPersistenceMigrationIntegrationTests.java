@@ -77,7 +77,8 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "requirement_review_launch_command",
                     "review_assessment",
                     "review_dispatch_command",
-                    "users");
+                    "users",
+                    "dev_task");
             Map<String, String> expectedLongTextColumns = Map.of(
                     "review_plan.plan_json", "LONGTEXT",
                     "repository_snapshot.manifest_json", "LONGTEXT",
@@ -126,6 +127,20 @@ class ReviewPersistenceMigrationIntegrationTests {
                 assertThat(adminRows.next()).isTrue();
                 assertThat(adminRows.getLong(1)).isEqualTo(1L);
             }
+            // 任务流转与派发：V21 creates the dev_task table with a requirement-scoped unique
+            // key plus the assignee and status index pair used by the task workbench reads.
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "dev_task", "task_id"))
+                    .isEqualTo("CHAR");
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "dev_task", "acceptance_note"))
+                    .isEqualTo("VARCHAR");
+            assertThat(readColumnSize(connection.getMetaData(), connection.getCatalog(), "dev_task", "acceptance_note"))
+                    .isEqualTo(512);
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "dev_task", "uk_dev_task_requirement"))
+                    .containsExactly("REQUIREMENT_ID");
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "dev_task", "idx_dev_task_assignee_status"))
+                    .containsExactly("ASSIGNEE_USERNAME", "TASK_STATUS");
+            assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "dev_task", "idx_dev_task_status_updated"))
+                    .containsExactly("TASK_STATUS", "UPDATED_AT");
         }
     }
 

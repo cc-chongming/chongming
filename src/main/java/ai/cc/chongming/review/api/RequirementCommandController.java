@@ -6,6 +6,7 @@ import ai.cc.chongming.review.application.RequirementReviewLaunchService;
 import ai.cc.chongming.review.application.RequirementQueryService.RequirementView;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.task.application.TaskFlowGuard;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -48,19 +49,29 @@ public class RequirementCommandController {
     private final RequirementCommandService commandService;
     private final RequirementReviewLaunchService launchService;
     private final ObjectMapper objectMapper;
+    private final TaskFlowGuard taskFlowGuard;
 
     public RequirementCommandController(RequirementCommandService commandService) {
-        this(commandService, null, new ObjectMapper());
+        this(commandService, null, new ObjectMapper(), null);
+    }
+
+    public RequirementCommandController(
+            RequirementCommandService commandService,
+            RequirementReviewLaunchService launchService,
+            ObjectMapper objectMapper) {
+        this(commandService, launchService, objectMapper, null);
     }
 
     @Autowired
     public RequirementCommandController(
             RequirementCommandService commandService,
             RequirementReviewLaunchService launchService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            TaskFlowGuard taskFlowGuard) {
         this.commandService = commandService;
         this.launchService = launchService;
         this.objectMapper = objectMapper;
+        this.taskFlowGuard = taskFlowGuard;
     }
 
     @PostMapping
@@ -133,16 +144,19 @@ public class RequirementCommandController {
     @PostMapping("/{requirementId}/start-development")
     public RequirementView startDevelopment(
             @PathVariable UUID requirementId, @Valid @RequestBody VersionedCommand request) {
+        requireNoActiveTask(requirementId);
         return RequirementView.from(commandService.startDevelopment(new RequirementId(requirementId), request.expectedVersion()));
     }
 
     @PostMapping("/{requirementId}/complete")
     public RequirementView complete(@PathVariable UUID requirementId, @Valid @RequestBody VersionedCommand request) {
+        requireNoActiveTask(requirementId);
         return RequirementView.from(commandService.complete(new RequirementId(requirementId), request.expectedVersion()));
     }
 
     @PostMapping("/{requirementId}/cancel")
     public RequirementView cancel(@PathVariable UUID requirementId, @Valid @RequestBody VersionedCommand request) {
+        requireNoActiveTask(requirementId);
         return RequirementView.from(commandService.cancel(new RequirementId(requirementId), request.expectedVersion()));
     }
 
@@ -187,6 +201,16 @@ public class RequirementCommandController {
      * @author zyj
      */
     public record VersionedCommand(@Min(0) long expectedVersion) {
+    }
+
+    /**
+     * Blocks manual lifecycle commands while the requirement still owns a non-DONE dev task;
+     * skipped when the guard is absent (legacy constructor used by older tests).
+     */
+    private void requireNoActiveTask(UUID requirementId) {
+        if (taskFlowGuard != null) {
+            taskFlowGuard.requireNoActiveTask(new RequirementId(requirementId));
+        }
     }
 
     private List<String> parsePublicTasks(String publicTasks) {

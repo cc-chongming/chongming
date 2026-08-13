@@ -6,47 +6,58 @@ import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
 import ai.cc.chongming.auth.config.AuthModuleEnabledCondition;
 import ai.cc.chongming.auth.domain.AuthErrorCode;
 import ai.cc.chongming.auth.domain.AuthException;
+import ai.cc.chongming.auth.domain.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Authentication endpoints: credential login, self-service registration and current-user lookup.
- * Successful login and registration share the {@code {token, expiresAt, user}} envelope; the
- * {@code /me} endpoint returns the principal that {@link AuthJwtFilter} already validated.
+ * Authentication endpoints: credential login, self-service registration, current-user lookup
+ * and the administrator-only user directory. Successful login and registration share the
+ * {@code {token, expiresAt, user}} envelope; the {@code /me} endpoint returns the principal
+ * that {@link AuthJwtFilter} already validated.
  *
  * @author wangli
  */
 @RestController
-@RequestMapping("/api/auth")
 @Conditional(AuthModuleEnabledCondition.class)
 public class AuthController {
 
     /** Request attribute key where {@link AuthJwtFilter} stores the verified principal. */
     public static final String PRINCIPAL_ATTRIBUTE = AuthJwtFilter.PRINCIPAL_ATTRIBUTE;
 
+    private static final String ADMIN_ROLE = "ADMIN";
+
     private final AuthService authService;
+    private final UserRepository userRepository;
 
     public AuthController(AuthService authService) {
-        this.authService = Objects.requireNonNull(authService, "authService must not be null");
+        this(authService, null);
     }
 
-    @PostMapping("/login")
+    @Autowired
+    public AuthController(AuthService authService, UserRepository userRepository) {
+        this.authService = Objects.requireNonNull(authService, "authService must not be null");
+        this.userRepository = userRepository;
+    }
+
+    @PostMapping("/api/auth/login")
     public AuthResponse login(@Valid @RequestBody LoginRequest request) {
         AuthResult result = authService.login(request.username(), request.password());
         return AuthResponse.from(result);
     }
 
-    @PostMapping("/register")
+    @PostMapping("/api/auth/register")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
         AuthResult result = authService.register(request.username(), request.password(), request.displayName());
         return AuthResponse.from(result);
@@ -58,13 +69,39 @@ public class AuthController {
      * @param request current servlet request carrying the principal attribute
      * @return current user view
      */
-    @GetMapping("/me")
+    @GetMapping("/api/auth/me")
     public UserResponse me(HttpServletRequest request) {
+        AuthPrincipal authPrincipal = requirePrincipal(request);
+        return new UserResponse(authPrincipal.username(), authPrincipal.displayName(), authPrincipal.role());
+    }
+
+    /**
+     * Administrator-only user directory used by task dispatch. The projection never carries
+     * credential material.
+     *
+     * @param request current servlet request carrying the principal attribute
+     * @return credential-free view of every account
+     */
+    @GetMapping("/api/users")
+    public List<UserResponse> users(HttpServletRequest request) {
+        AuthPrincipal authPrincipal = requirePrincipal(request);
+        if (!ADMIN_ROLE.equals(authPrincipal.role())) {
+            throw new AuthException(AuthErrorCode.FORBIDDEN, "仅管理员可查看用户列表");
+        }
+        if (userRepository == null) {
+            throw new AuthException(AuthErrorCode.FORBIDDEN, "用户目录当前不可用");
+        }
+        return userRepository.findAll().stream()
+                .map(user -> new UserResponse(user.username(), user.displayName(), user.role()))
+                .toList();
+    }
+
+    private AuthPrincipal requirePrincipal(HttpServletRequest request) {
         Object principal = request.getAttribute(PRINCIPAL_ATTRIBUTE);
         if (!(principal instanceof AuthPrincipal authPrincipal)) {
             throw new AuthException(AuthErrorCode.UNAUTHENTICATED, "当前请求未携带有效的认证凭据");
         }
-        return new UserResponse(authPrincipal.username(), authPrincipal.displayName(), authPrincipal.role());
+        return authPrincipal;
     }
 
     /**

@@ -26,5 +26,10 @@ export const authApi = {
 
     me() {
         return request('/api/auth/me');
+    },
+
+    /** Task-center user directory (ADMIN only): [{username, displayName, role}]. */
+    listUsers() {
+        return request('/api/users');
     }
 };

@@ -30,7 +30,10 @@ const pageTitles = {
     'review-workbench': '评审工作台',
     reports: '评审报告',
     'review-report': '评审报告',
-    'review-create': '发起评审'
+    'review-create': '发起评审',
+    tasks: '全部任务',
+    'my-tasks': '我的任务',
+    'task-detail': '任务详情'
 };
 const currentTitle = computed(() => pageTitles[route.name] ?? '工作台');
 
@@ -49,7 +52,14 @@ const navGroups = computed(() => [
         ]
     },
     { title: '评审', items: [{ to: '/reviews', icon: '⚖', label: '评审列表', badge: counts.value?.activeReviewCount }] },
-    { title: '报告', items: [{ to: '/reports', icon: '↗', label: '评审报告' }] }
+    { title: '报告', items: [{ to: '/reports', icon: '↗', label: '评审报告' }] },
+    {
+        title: '任务中心',
+        items: [
+            { to: '/tasks', icon: '☰', label: '全部任务' },
+            { to: '/tasks/mine', icon: '◎', label: '我的任务' }
+        ]
+    }
 ]);
 
 /**
@@ -59,6 +69,8 @@ const navGroups = computed(() => [
 function isItemActive(item) {
     const isReportDetail = /^\/reviews\/[^/]+\/report(\/|$)/.test(route.path);
     if (item.to === '/requirements') return route.path.startsWith('/requirements');
+    if (item.to === '/tasks/mine') return route.path === '/tasks/mine';
+    if (item.to === '/tasks') return route.path.startsWith('/tasks') && !route.path.startsWith('/tasks/mine');
     if (item.to === '/reports') return route.path.startsWith('/reports') || isReportDetail;
     if (item.to === '/reviews' && isReportDetail) return false;
     return route.path === item.to || route.path.startsWith(`${item.to}/`);

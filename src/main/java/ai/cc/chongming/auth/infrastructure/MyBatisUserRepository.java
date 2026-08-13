@@ -5,6 +5,7 @@ import ai.cc.chongming.auth.domain.AuthException;
 import ai.cc.chongming.auth.domain.User;
 import ai.cc.chongming.auth.domain.UserRepository;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.UserMapper;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
@@ -58,6 +59,13 @@ public class MyBatisUserRepository implements UserRepository {
             throw new IllegalStateException("user row vanished after insert: " + nonNullUser.username());
         }
         return toUser(stored);
+    }
+
+    @Override
+    public List<UserView> findAll() {
+        return mapper.findAll().stream()
+                .map(row -> new UserView(row.username(), row.displayName(), row.role()))
+                .toList();
     }
 
     private User toUser(UserMapper.UserRow row) {

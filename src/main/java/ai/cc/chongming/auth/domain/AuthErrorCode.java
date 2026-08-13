@@ -8,5 +8,6 @@ package ai.cc.chongming.auth.domain;
 public enum AuthErrorCode {
     INVALID_CREDENTIAL,
     USERNAME_TAKEN,
-    UNAUTHENTICATED
+    UNAUTHENTICATED,
+    FORBIDDEN
 }

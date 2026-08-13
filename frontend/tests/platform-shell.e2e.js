@@ -44,7 +44,7 @@ test('renders the platform shell with grouped navigation, breadcrumb and live co
 
     await expect(page.locator('.logo-text .logo')).toHaveText('重明');
     await expect(page.locator('.logo-text .sub')).toHaveText('需求生命周期管理');
-    await expect(page.locator('.nav-group-title')).toHaveText(['概览', '需求管理', '评审', '报告']);
+    await expect(page.locator('.nav-group-title')).toHaveText(['概览', '需求管理', '评审', '报告', '任务中心']);
     await expect(page.locator('.breadcrumb .cur')).toHaveText('工作台');
 
     const requirementBadge = page.locator('.nav-item', { hasText: '需求库' }).locator('.badge-count');

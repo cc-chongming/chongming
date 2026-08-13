@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { formatApiError, ReviewApiError, reviewApi } from '../api/review-api';
+import { taskApi } from '../api/task-api';
 import RepositorySelect from '../components/RepositorySelect.vue';
 
 // [AIREVIEW-PLAN-023#2] Draft repository edits use the configured repository selector.
@@ -24,6 +25,9 @@ const configuredRepositoryIds = ref([]);
 const reviewSummary = ref(null);
 const gateVersions = ref([]);
 const claims = ref([]);
+// Related development tasks drive the task-flow card and suppress manual lifecycle shortcuts.
+const relatedTasks = ref([]);
+const tasksLoadFailed = ref(false);
 const editForm = reactive({ title: '', description: '', assigneeId: '', repositoryPath: '', priority: 'P1' });
 const launchForm = reactive({
     repositoryPath: '',
@@ -87,6 +91,10 @@ const currentStatus = computed(() => statusMeta[requirement.value?.status]
 
 const canStartDevelopment = computed(() => requirement.value?.status === 'APPROVED');
 const canComplete = computed(() => requirement.value?.status === 'DEVELOPING');
+// When a task-flow is attached, manual start/complete shortcuts stay hidden to avoid dual writes.
+const hasRelatedTasks = computed(() => relatedTasks.value.length > 0);
+const canStartDevelopmentManual = computed(() => canStartDevelopment.value && !hasRelatedTasks.value);
+const canCompleteManual = computed(() => canComplete.value && !hasRelatedTasks.value);
 const canCancel = computed(() => requirement.value?.status === 'DRAFT');
 const canEdit = computed(() => ['DRAFT', 'RETURNED'].includes(requirement.value?.status));
 const canDelete = computed(() => requirement.value !== null);
@@ -235,11 +243,25 @@ async function launchReview() {
     }
 }
 
+async function loadRelatedTasks() {
+    tasksLoadFailed.value = false;
+    try {
+        // The request passes requirementId for backend filtering; the client-side check
+        // below keeps the card correct if the backend ignores the unknown parameter.
+        const page = await taskApi.listTasks({ requirementId: props.requirementId, page: 1, size: 100 });
+        relatedTasks.value = (page?.items ?? []).filter((item) => item.requirementId === props.requirementId);
+    } catch {
+        relatedTasks.value = [];
+        tasksLoadFailed.value = true;
+    }
+}
+
 async function load() {
     loading.value = true;
     error.value = '';
     try {
         requirement.value = await reviewApi.getRequirement(props.requirementId);
+        await loadRelatedTasks();
         if (requirement.value.reviewId) {
             const [summary, gates, claimItems] = await Promise.all([
                 reviewApi.getSummary(requirement.value.reviewId).catch(() => null),
@@ -404,6 +426,28 @@ onMounted(refreshRepositoryAvailability);
             <div class="rd-grid">
                 <div>
                     <div class="card" style="margin-bottom:16px">
+                        <div class="card-hd"><span class="card-ico">🛠</span><div class="card-nm">开发任务</div>
+                            <span class="card-hint">{{ hasRelatedTasks ? `共 ${relatedTasks.length} 个任务` : '尚未创建' }}</span>
+                        </div>
+                        <div class="card-bd" style="padding:14px">
+                            <template v-if="hasRelatedTasks">
+                                <RouterLink v-for="item in relatedTasks" :key="item.taskId" class="re-entry" style="margin-bottom:10px" :to="`/tasks/${item.taskId}`">
+                                    <div class="re-top">
+                                        <span class="re-ico">🛠</span>
+                                        <div class="re-title">{{ item.title }}</div>
+                                        <span class="tag" :class="({ PENDING_ASSIGN: 'tag-pending', DEVELOPING: 'tag-dev', PENDING_ACCEPTANCE: 'tag-review', DONE: 'tag-done' })[item.status] ?? 'tag-draft'">
+                                            {{ ({ PENDING_ASSIGN: '待指派', DEVELOPING: '开发中', PENDING_ACCEPTANCE: '待验收', DONE: '已完成' })[item.status] ?? item.status }}
+                                        </span>
+                                    </div>
+                                    <div class="re-summary">负责人：{{ item.assigneeUsername || '未指派' }} · 更新于 {{ item.updatedAt }}</div>
+                                </RouterLink>
+                            </template>
+                            <p v-else-if="tasksLoadFailed" class="dash-empty">关联任务读取失败，请稍后重试。</p>
+                            <p v-else class="dash-empty">该需求尚未关联开发任务。</p>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom:16px">
                         <div class="card-hd"><span class="card-ico">📄</span><div class="card-nm">需求文档</div></div>
                         <div class="card-bd"><pre class="rd-doc">{{ requirement.description || '未填写需求描述。' }}</pre></div>
                     </div>
@@ -495,9 +539,10 @@ onMounted(refreshRepositoryAvailability);
                                 <button v-if="canEdit" class="button secondary" type="button" :disabled="changing || editing" @click="beginEdit">编辑需求</button>
                                 <button v-if="canLaunchReview" class="button" type="button" :disabled="changing || launching || launchOpen || repositorySubmissionBlocked" @click="openLaunchForm">发起评审</button>
                                 <button v-if="canDelete" class="button danger-button" type="button" :disabled="changing" @click="deleteRequirement">删除需求</button>
-                                <button v-if="canStartDevelopment" class="button" type="button" :disabled="changing" @click="apply('development')">开始开发</button>
-                                <button v-if="canComplete" class="button" type="button" :disabled="changing" @click="apply('complete')">标记完成</button>
+                                <button v-if="canStartDevelopmentManual" class="button" type="button" :disabled="changing" @click="apply('development')">开始开发</button>
+                                <button v-if="canCompleteManual" class="button" type="button" :disabled="changing" @click="apply('complete')">标记完成</button>
                                 <button v-if="canCancel" class="text-button danger" type="button" :disabled="changing" @click="apply('cancel')">取消草稿</button>
+                                <p v-if="hasRelatedTasks && (canStartDevelopment || canComplete)" class="dash-empty" style="margin:0">该需求已接入任务流，开发/完成状态由任务验收驱动，请在开发任务卡片中操作。</p>
                                 <p v-if="!canStartDevelopment && !canComplete && !canCancel && !canEdit" class="dash-empty" style="margin:0">当前状态没有可执行的人工生命周期操作。</p>
                             </div>
                         </div>

@@ -4,6 +4,8 @@ import ai.cc.chongming.auth.domain.AuthErrorCode;
 import ai.cc.chongming.auth.domain.AuthException;
 import ai.cc.chongming.auth.domain.User;
 import ai.cc.chongming.auth.domain.UserRepository;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -49,5 +51,13 @@ public class InMemoryUserRepository implements UserRepository {
             throw new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用");
         }
         return persisted;
+    }
+
+    @Override
+    public List<UserView> findAll() {
+        return usersByUsername.values().stream()
+                .sorted(Comparator.comparing(User::username))
+                .map(user -> new UserView(user.username(), user.displayName(), user.role()))
+                .toList();
     }
 }

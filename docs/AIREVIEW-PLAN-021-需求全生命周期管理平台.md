@@ -222,11 +222,13 @@ ALTER TABLE review_request ADD COLUMN requirement_id CHAR(36) NULL;
 | Gate: PASS / CONDITIONAL | `REVIEWING → APPROVED` |
 | Gate: BLOCK | `REVIEWING → REJECTED` |
 | Gate: RETURN | `REVIEWING → RETURNED`（待修订后重新提交） |
-| 需求手动操作"开始开发" | `APPROVED → DEVELOPING` |
-| 需求手动操作"完成" | `DEVELOPING → DONE` |
+| 需求手动操作"开始开发"（**遗留兼容**，见下方注记） | `APPROVED → DEVELOPING` |
+| 需求手动操作"完成"（**遗留兼容**，见下方注记） | `DEVELOPING → DONE` |
 
 - 联动通过**事件监听**而非在 Controller 里硬编码，保持评审内核解耦。
 - 手动流转（开始开发/完成）走需求命令 API，同样经状态机校验。
+
+> **遗留兼容注记（2026-08-13，PLAN-026 收口后）**：`POST /api/requirements/{requirementId}/start-development` 与 `/complete` 两个手工入口自 `AIREVIEW-PLAN-026-任务流转与派发验收` 落地起不再是开发流转的权威路径——需求一旦关联开发任务，前端需求详情页已隐藏"开始开发/标记完成"按钮，改由任务指派（同事务调用 `startDevelopment`）与任务验收通过（同事务调用 `complete`）驱动。后端保留这两个端点以兼容既有集成与测试，不得再作为新增 UI 的调用面。开发流转的权威路径以 PLAN-026 任务流为准。
 
 ---
 
@@ -297,7 +299,7 @@ public record DashboardSnapshot(
 - 生命周期进度条：`DRAFT → PENDING_REVIEW → REVIEWING → GATE → DEVELOPING → DONE`，当前状态高亮。
 - 右侧栏：Scout 发现（复用现有 scout API）、参与角色（从 review 查询）、Gate 状态（从 `getHumanGateVersions`）。
 - "进入评审"按钮跳转 `/reviews/{reviewId}`。
-- 从需求详情可触发"开始开发/完成"手动流转（调需求命令 API）。
+- 从需求详情可触发"开始开发/完成"手动流转（调需求命令 API）。**遗留兼容**：自 PLAN-026 起，需求存在关联开发任务时该两个按钮在前端已隐藏，开发/完成由任务流驱动；无关联任务的历史需求仍可经该入口手动流转。
 
 ---
 
@@ -507,3 +509,4 @@ flowchart LR
 | 2026-08-06 | 需求详情页（RequirementDetailView）按 `pg-req-detail` 重构：顶部标题 + meta（短 ID/状态 tag/优先级 badge/负责人/仓库/更新时间）；生命周期轨道（草稿→待评审→评审中→Gate 决策→开发→完成，done/active/pending 三态胶囊）；左右分栏——左侧需求文档与评审记录（可进入工作台，含尝试号/阶段 tag/进度/参与角色/共识度），右侧 Scout 发现（publicSummary + 状态 tag）、参与角色（支持/反对 Claim 数或初审状态）、Gate 决策（gate-box 结果标签 + 决策者/理由，空态可前往工作台）、操作卡（编辑/删除/开始开发/标记完成/取消草稿，编辑表单保留）。前端单测 20/20、`npm run build` 通过，`static/review` 产物更新为 `index-FXveMSmD.js`。 |
 
 | 2026-08-06 | 评审工作台（ReviewWorkbenchView）对齐 `pg-review-wb`：在真实工作台顶部新增平台风格的评审流程阶段条（Scout → Director → 独立审查 → 冲突检测 → 多轮辩论 → Judge → 人工决策，done/on/pend 三态胶囊 + 连接线，由评审 stage 实时驱动；辩论步显示 R1/R2 进行中），下方保留原有实时面板（计划/生命周期/辩论时间线/圆桌/对话/人工评审/通知）与抽屉，不改变任何联动与 SSE 订阅。前端单测 20/20、`npm run build` 通过，`static/review` 产物更新为 `index-2ByolpQg.js`。至此侧边栏 4 个主菜单页（工作台/需求库/评审列表/评审报告）及需求详情、报告详情、评审工作台子页面均已按 platform.html 对齐。 |
+| 2026-08-13 | `AIREVIEW-PLAN-026-任务流转与派发验收` 落地：最终 Gate 通过自动建任务、管理员指派、四态任务状态机含验收打回闭环、验收通过同事务驱动需求 DONE，并新增任务中心前端页面。本计划段 3/段 7 的 `start-development`/`complete` 手工入口标记为**遗留兼容**：前端在存在关联任务时已隐藏该按钮，后端保留以兼容既有集成与测试；开发流转的权威路径改为 PLAN-026 任务流。 |

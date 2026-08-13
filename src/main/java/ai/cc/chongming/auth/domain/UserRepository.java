@@ -1,5 +1,6 @@
 package ai.cc.chongming.auth.domain;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -34,4 +35,20 @@ public interface UserRepository {
      * @return persisted user with its identifier
      */
     User save(User user);
+
+    /**
+     * Lists every account as a credential-free projection; implementations must not load
+     * the stored password hash.
+     *
+     * @return all users ordered by username
+     */
+    List<UserView> findAll();
+
+    /**
+     * Credential-free user projection exposed to directory reads.
+     *
+     * @author wangli
+     */
+    record UserView(String username, String displayName, String role) {
+    }
 }
