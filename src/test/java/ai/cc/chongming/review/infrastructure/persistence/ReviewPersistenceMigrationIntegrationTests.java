@@ -91,8 +91,7 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "requirement_review_launch_command",
                     "review_assessment",
                     "review_dispatch_command",
-                    "review_conflict_audit");
-                    "review_dispatch_command",
+                    "review_conflict_audit",
                     "users",
                     "dev_task");
             Map<String, String> expectedLongTextColumns = Map.of(
@@ -131,7 +130,7 @@ class ReviewPersistenceMigrationIntegrationTests {
                     .containsExactly("REVIEW_ID", "ATTEMPT_NO");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command", "uk_review_dispatch_idempotency"))
                     .containsExactly("IDEMPOTENCY_KEY");
-            // [AIREVIEW-PLAN-025#1] V20 creates the users table with a unique username index
+            // [AIREVIEW-PLAN-025#1] V21 creates the users table with a unique username index
             // and seeds the built-in administrator account.
             assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "users", "password_hash"))
                     .isEqualTo("VARCHAR");
@@ -145,7 +144,7 @@ class ReviewPersistenceMigrationIntegrationTests {
                 assertThat(adminRows.next()).isTrue();
                 assertThat(adminRows.getLong(1)).isEqualTo(1L);
             }
-            // 任务流转与派发：V21 creates the dev_task table with a requirement-scoped unique
+            // 任务流转与派发：V22 creates the dev_task table with a requirement-scoped unique
             // key plus the assignee and status index pair used by the task workbench reads.
             assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "dev_task", "task_id"))
                     .isEqualTo("CHAR");

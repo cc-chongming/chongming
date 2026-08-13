@@ -63,12 +63,10 @@ test('renders the platform shell with grouped navigation, breadcrumb and live co
     await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toHaveCount(0);
 
     // 新建入口位于需求库页内（侧栏只保留需求库一个分组项），点击后需求库保持高亮。
-    await page.getByRole('link', { name: /新建需求/ }).click();
     await page.getByRole('link', { name: '＋ 新建需求' }).click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('新建需求');
     await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toBeVisible();
     await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toHaveCount(0);
-    await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toBeVisible();
 
     await page.locator('.nav-item', { hasText: '评审列表' }).click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('评审列表');

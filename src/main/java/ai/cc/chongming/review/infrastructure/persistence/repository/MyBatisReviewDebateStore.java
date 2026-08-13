@@ -291,7 +291,9 @@ public class MyBatisReviewDebateStore implements ReviewDebateStore {
     }
 
     private String writeStringList(List<String> values) {
-        return values.isEmpty() ? null : write(values);
+        // review_debate_topic.claim_ids_json is NOT NULL (V16); an empty list serializes as "[]",
+        // which the read side already normalizes back to an empty list.
+        return values.isEmpty() ? "[]" : write(values);
     }
 
     private String writeClaimIds(List<ClaimId> claimIds) {

@@ -18,7 +18,7 @@ PLAN-021 已落地需求生命周期 `DRAFT → PENDING_REVIEW → REVIEWING →
 
 ### 范围与非目标
 
-**本计划范围**：task 领域包（聚合、状态机、错误码）、事件驱动建任务监听器与对账、任务命令/查询服务、`/api/tasks` REST 契约与 V21 迁移、双实现仓储、`GET /api/users` 用户目录端点、前端任务中心与需求详情页联动。
+**本计划范围**：task 领域包（聚合、状态机、错误码）、事件驱动建任务监听器与对账、任务命令/查询服务、`/api/tasks` REST 契约与 V22 迁移、双实现仓储、`GET /api/users` 用户目录端点、前端任务中心与需求详情页联动。
 
 **非目标**：
 
@@ -126,9 +126,9 @@ PENDING_ACCEPTANCE → DEVELOPING                       （管理员打回返工
 
 前端 `task-api.js` 复用 `review-api` 的共享 `request()` 管道，ProblemDetail 解析、`ReviewApiError` 语义与 Bearer 令牌注入保持一致。
 
-## V21 迁移说明
+## V22 迁移说明
 
-`V21__create_dev_task_table.sql` 新建 `dev_task` 表：
+`V22__create_dev_task_table.sql` 新建 `dev_task` 表：
 
 - 主键 `task_id CHAR(36)`；`requirement_id` 非空并外键关联 `requirement`，外键带 `ON DELETE CASCADE`（删除需求时级联清理其开发任务，保持既有“删除需求”契约不因外键而 500），`review_id` 可空（记录产生该任务的评审）；
 - **唯一键 `uk_dev_task_requirement (requirement_id)`**：从存储层兜底"每个需求至多一个任务"；
@@ -159,7 +159,7 @@ PENDING_ACCEPTANCE → DEVELOPING                       （管理员打回返工
 - **InMemory 模式重启丢数据**：默认 `review.persistence.enabled=false` 下任务与需求等全部聚合均为进程内存储，重启即丢失——这与全平台现状一致，不是本计划新增的边界；InMemory 仓储已补齐乐观版本校验（`existing.version()+1 != task.version()` 抛 `VERSION_CONFLICT`）、requirement 唯一性校验（对齐 `uk_dev_task_requirement`）、查重+写入整体加锁与防御性副本；
 - **跨聚合无真事务（残余限制）**：`assign`/`accept` 联动需求与任务两个聚合，InMemory 模式下不存在真实事务边界。已通过顺序调整（先执行需求侧迁移，成功后再保存任务）+ 双侧乐观版本校验将不一致窗口压缩到最小；若需求侧迁移抛错（如 `VERSION_CONFLICT`），任务状态保持原样不落库。MySQL 模式下两仓储仍各自提交，极端失败窗口同样靠版本校验与对账兜底，未引入分布式事务；
 - **手工生命周期端点服务端屏障**：`start-development`/`complete`/`cancel` 三个手工端点在服务端经 `TaskFlowGuard` 检查：需求存在非 DONE 的关联开发任务时拒绝（409 `REQUIREMENT_HAS_ACTIVE_TASK`），不再仅依赖前端隐藏按钮；`TaskFlowGuard` 经新增 `@Autowired` 构造器注入 `RequirementCommandController`，旧构造器保留（guard 缺省时跳过守卫，既有测试零改动通过）；
-- **删除需求级联删除任务**：V21 外键 `fk_dev_task_requirement` 带 `ON DELETE CASCADE`，删除需求时其开发任务由存储层级联清理，删除需求 API 契约不变；
+- **删除需求级联删除任务**：V22 外键 `fk_dev_task_requirement` 带 `ON DELETE CASCADE`，删除需求时其开发任务由存储层级联清理，删除需求 API 契约不变；
 - **负责人展示优先显示名**：任务列表/详情的负责人优先渲染 `assigneeDisplayName`（Mapper 分页/详情 LEFT JOIN `users` 取 `display_name`；InMemory 经可选注入的 `UserRepository` 富化），缺失时回退 `assigneeUsername`；
 - **`GET /api/tasks` 支持 requirementId 服务端过滤**：控制器可选参数 → `TaskFilter` → Mapper `<script>` 动态条件（`#{}` 参数化）与 InMemory 对偶实现三处一致；
 - **指派目标不存在映射为 `TASK_NOT_FOUND`（404）**：负责人账号缺失复用任务域的 404 错误码，语义上偏向“被引用对象不存在”，前端按错误文本展示，未新增独立错误码；
@@ -195,5 +195,6 @@ PENDING_ACCEPTANCE → DEVELOPING                       （管理员打回返工
 |---|---|
 | 2026-08-13 | 创建 PLAN-026：基于已落地实现回写目标范围、技术方案、前后端契约、V21 迁移、边界说明与验证记录；同步将 PLAN-021 的 `start-development`/`complete` 手工入口标注为遗留兼容。 |
 | 2026-08-13 | 评审修复回环：V21 外键改 `ON DELETE CASCADE`；InMemory 仓储补版本校验/唯一性/加锁/防御性副本；assign/accept 顺序调整（先需求侧迁移后保存任务）；监听器加 APPROVED/REVIEWING 状态守卫；`GET /api/tasks` 支持 `requirementId` 服务端过滤；Bean Validation 生效 + 500 兜底异常；新增 `TaskFlowGuard` 手工端点服务端屏障；`GET /api/tasks/{taskId}` 补鉴权；任务视图增 `assigneeDisplayName`（LEFT JOIN users）；前端修复导航双高亮与负责人显示名。 |
+| 2026-08-13 | 合并他人提交（de4acce，携带 V20 `review_conflict_audit` 迁移）后，为解决与本方登录迁移（原 V20，已重编号为 V21）的版本号撞车，将 `dev_task` 迁移由 V21 重编号为 `V22__create_dev_task_table.sql`（内容不变），并同步更新本文档与持久化集成测试中的版本号引用。 |
 
 实施过程中任何接口、文件、状态机或验收标准调整，都必须先记录原因、影响与替代方案，再修改对应章节。

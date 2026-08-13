@@ -205,7 +205,6 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
             ? claimOverview(claims)
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'
             : latest ? itemSummary(latest) : activated ? '角色已激活，等待公开运行事件。' : '等待 Director 分配评审任务。',
-            : latest ? itemSummary(latest) : '角色已激活，等待公开运行事件。',
         claims,
         items
     };

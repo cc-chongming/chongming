@@ -91,6 +91,8 @@ describe('runtime trace store', () => {
         for (let index = 1; index <= 20300; index += 1) {
             source.emit({ type: 'TEXT_MESSAGE_CONTENT', runId: 'runtime', delta: 'x' }, String(index));
         }
+        // 尾部未凑满批次的缓冲事件需先经定时器 flush，再校验保留窗口边界。
+        timers.flush();
         expect(store.state.events).toHaveLength(20000);
 
         source.emit({ type: 'TEXT_MESSAGE_CONTENT', runId: 'runtime', delta: 'tail' }, '20301');

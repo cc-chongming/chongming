@@ -19,7 +19,7 @@
 
 ### 0.2 范围
 
-**本计划范围**：`ai.cc.chongming.auth` 认证模块（API/应用/领域/基础设施/配置分层）、Flyway V20 迁移、`application.yml` 认证配置段、前端认证三件套（auth-token/auth-store/auth-api）、路由守卫、API 客户端与 SSE 三服务的令牌接入、App.vue 用户区与 `.auth-page` 样式、生产 bundle 同步。
+**本计划范围**：`ai.cc.chongming.auth` 认证模块（API/应用/领域/基础设施/配置分层）、Flyway V21 迁移、`application.yml` 认证配置段、前端认证三件套（auth-token/auth-store/auth-api）、路由守卫、API 客户端与 SSE 三服务的令牌接入、App.vue 用户区与 `.auth-page` 样式、生产 bundle 同步。
 
 **非目标**：
 
@@ -77,9 +77,9 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 3. 解析失败、过期、缺 subject 一律归一为 `AuthException(UNAUTHENTICATED)`，不向客户端泄露具体失败原因。
 4. 支持测试注入 `Clock`，过期场景可确定性验证。
 
-### 1.5 users 表与预置 admin（Flyway V20）
+### 1.5 users 表与预置 admin（Flyway V21）
 
-迁移脚本 `src/main/resources/db/migration/V20__create_users_table_and_admin.sql`：
+迁移脚本 `src/main/resources/db/migration/V21__create_users_table_and_admin.sql`：
 
 1. `users` 表：`id` 自增主键、`username` 唯一键、`password_hash VARCHAR(255)`、`display_name`、`role`（默认 `USER`，带索引）、创建/更新时间；InnoDB + utf8mb4。
 2. 预置一行 `admin`（`role=ADMIN`，显示名“管理员”），初始密码 `Admin@123`；种子哈希由与运行时一致的 `PasswordHasher`（PBKDF2WithHmacSHA256、210000 轮、随机盐）离线生成，脚本注释明确要求尽快修改。
@@ -96,7 +96,7 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 用户仓储跟随既有持久化开关：
 
 1. `review.persistence.enabled=true`：装配 `MyBatisUserRepository`（mapper 扫描与数据源此时可用），账号持久化在 `users` 表。
-2. `review.persistence.enabled=false` 或未配置：装配 `InMemoryUserRepository` 兜底，登录/注册在无数据库场景（如 test profile）仍可工作；进程内数据重启即失，且**不预置 admin**（admin 种子只存在于 V20 迁移），仅支持自助注册。
+2. `review.persistence.enabled=false` 或未配置：装配 `InMemoryUserRepository` 兜底，登录/注册在无数据库场景（如 test profile）仍可工作；进程内数据重启即失，且**不预置 admin**（admin 种子只存在于 V21 迁移），仅支持自助注册。
 3. `application-test.yml` 显式设置持久化关闭与一个仅用于测试上下文的 `jwt-secret`，不出现在任何生产或提交配置中。
 
 ### 1.7 认证服务行为
@@ -220,7 +220,7 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 | `src/main/java/ai/cc/chongming/auth/domain/User.java`、`UserRepository.java`、`AuthException.java`、`AuthErrorCode.java` | #1 | ✅ |
 | `src/main/java/ai/cc/chongming/auth/infrastructure/InMemoryUserRepository.java`、`MyBatisUserRepository.java` | #1 | ✅ |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/UserMapper.java` | #1 | ✅ |
-| `src/main/resources/db/migration/V20__create_users_table_and_admin.sql` | #1 | ✅ |
+| `src/main/resources/db/migration/V21__create_users_table_and_admin.sql` | #1 | ✅ |
 | `src/test/java/ai/cc/chongming/auth/**`（AuthControllerTests、AuthJwtFilterTests、AuthServiceTests、JwtTokenServiceTests、PasswordHasherTests、MyBatisUserRepositoryTests、AuthStartupContractTests） | #1 | ✅ |
 | `frontend/src/services/auth-token.js` | #2 | ✅ |
 | `frontend/src/stores/auth-store.js` | #2 | ✅ |
@@ -243,7 +243,7 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 | `frontend/src/styles/review.css`（`.auth-page` 一族样式） | #2 | ✅ |
 | `frontend/tests/platform-shell.e2e.js`、`review-workbench.e2e.js`（既有 E2E 前置登录适配） | #2 | ✅ |
 | `src/main/resources/static/review/`（新 hash bundle 与 index.html 同步，旧 hash 删除） | #2 | ✅ |
-| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/ReviewPersistenceMigrationIntegrationTests.java`（V20 迁移纳入持久化集成验证） | #1 | ✅ |
+| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/ReviewPersistenceMigrationIntegrationTests.java`（V21 迁移纳入持久化集成验证） | #1 | ✅ |
 
 ## 6. 已知风险与权衡
 
@@ -252,7 +252,7 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 | SSE `access_token` query 参数会进入访问日志 | EventSource 无法携带自定义请求头，query 通道是当前唯一可行方案；令牌会出现在反向代理/容器访问日志中。当前演示与内网规模可接受，增强方案（一次性 ticket）见 #7。 |
 | token 存 localStorage 依赖无 XSS 前提 | localStorage 可被同源脚本读取，安全边界是页面不存在 XSS；评审前端已禁用 Markdown raw HTML 与危险 URL（PLAN-023），该前提持续成立。若未来引入第三方脚本需重新评估。 |
 | 登出为纯客户端清除 | 无服务端注销端点与令牌黑名单，登出后旧令牌在 TTL 内技术上仍有效；当前单应用、短 TTL（12h）场景可接受。 |
-| 共享库 10.0.28.99 存在旧草稿 V20 迁移冲突 | 共享 MySQL 库中曾存在同版本号的旧草稿迁移记录，与本计划 `V20__create_users_table_and_admin.sql` 冲突。**接入共享库前必须由负责人处理**：删除旧历史行后重放，或 `flyway repair` 后手工补建 users 表并插入 admin 种子。本地 Docker 容器库不受影响。 |
+| 共享库 10.0.28.99 旧草稿迁移冲突 | 共享 MySQL 库中曾存在同版本号（V20）的旧草稿迁移记录，原本与本计划 users 迁移冲突；合并他人提交（其 V20 为 `review_conflict_audit`）后，本迁移已重编号为 `V21__create_users_table_and_admin.sql`，原 V20 冲突随之消解。**接入共享库前必须由负责人确认**不存在同版本（V21）迁移记录；若存在，删除旧历史行后重放，或 `flyway repair` 后手工补建 users 表并插入 admin 种子。本地 Docker 容器库不受影响。 |
 | InMemory 兜底不预置 admin | 持久化关闭时（如 test profile）无 admin 种子，仅支持自助注册；这是条件装配的明确取舍，生产必须开启持久化。 |
 | 登录失败与成功无速率限制 | 当前无防爆破限流；内网演示规模可接受，公网暴露前需补充（见 #7）。 |
 | 密钥缺失时认证模块静默降级 | 开关未显式开启而密钥缺失/过短时模块不装配（WARN 日志），部署可能误以为认证生效。缓解：日志明确提示；生产显式设置 `REVIEW_AUTH_ENABLED=true` 即可强制 fail-fast。 |
@@ -267,7 +267,7 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 
 ## 8. 验证记录
 
-1. **后端**：`./mvnw.cmd clean verify` 全量 **512 个用例全部通过**（含认证模块定向测试 AuthControllerTests、AuthJwtFilterTests、AuthServiceTests、JwtTokenServiceTests、PasswordHasherTests、MyBatisUserRepositoryTests，与真实 MySQL 容器的 V20 迁移集成测试）。
+1. **后端**：`./mvnw.cmd clean verify` 全量 **512 个用例全部通过**（含认证模块定向测试 AuthControllerTests、AuthJwtFilterTests、AuthServiceTests、JwtTokenServiceTests、PasswordHasherTests、MyBatisUserRepositoryTests，与真实 MySQL 容器的 V21 迁移集成测试）。
 2. **前端单测**：`npm test` **68 项全部通过**（含 auth-api 请求契约与 auth-store 会话/过期/登出行为）。
 3. **E2E**：`npx playwright test` **20 项全部通过**（含新增 `auth.e2e.js`：登录、注册、错误密码、未登录重定向、登出；既有 platform-shell/review-workbench 用例经前置登录适配后保持通过）。
 4. **真实浏览器验收**：登录成功进入 dashboard、错误密码展示 `INVALID_CREDENTIAL` 错误、注册新用户并自动登录、未登录直接访问受保护页重定向 `/login` 且登录后回到原目的地、退出登录清空会话并回到登录页——全部通过；过程截图存档于 `frontend/test-results/`（e2e-01-login-page、e2e-02-redirect-to-login、e2e-03-wrong-password-error、e2e-04-dashboard-admin、e2e-06-logout-to-login 等）。
@@ -279,7 +279,7 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 
 1. **不依赖 MCP**：认证全流程（登录、注册、`/me`、过滤器、SSE 令牌通道）在 Spring Boot 进程内闭环，未接入学习通通知 MCP 或任何 MCP 客户端；通知侧集成（PLAN-011）与本计划无耦合。
 2. **不依赖外部平台**：不依赖 OAuth/SSO 提供商、外部认证服务或商业网关；JWT 验签完全本地完成。
-3. **MySQL 边界**：`users` 表由 Flyway V20 自动迁移；本地验证使用 **Docker MySQL 容器**（Testcontainers 集成测试与本地容器库），共享库 10.0.28.99 的 V20 冲突在接入前按 #6 处理，不作为本计划完成的前置条件。
+3. **MySQL 边界**：`users` 表由 Flyway V21 自动迁移；本地验证使用 **Docker MySQL 容器**（Testcontainers 集成测试与本地容器库），共享库 10.0.28.99 的同版本冲突已随重编号为 V21 消解，接入前仍按 #6 确认，不作为本计划完成的前置条件。
 4. **持久化关闭边界**：`review.persistence.enabled=false` 时认证以 InMemory 仓储兜底，功能可用但无持久账号；该模式仅用于测试与免数据库演示。
 
 ## 10. 变更记录
@@ -287,3 +287,4 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 | 日期 | 变更 |
 |---|---|
 | 2026-08-12 | 创建 PLAN-025：登录/注册界面、JWT（HS256）认证、AuthJwtFilter 双通道守卫、PBKDF2 密码哈希、V20 users 表与 admin 种子、前端认证三件套与路由守卫、SSE access_token 通道、用户区与 `.auth-page` 样式；记录共享库 V20 冲突风险与未来扩展预留；验证记录：clean verify 512 用例、npm test 68、playwright 20 与真实浏览器 E2E 全部通过。 |
+| 2026-08-13 | 合并他人提交（de4acce，携带 V20 `review_conflict_audit` 迁移）后为避免 Flyway 版本号撞车，将本计划 users 迁移由 V20 重编号为 `V21__create_users_table_and_admin.sql`（内容不变），并同步更新本文档与持久化集成测试中的版本号引用。 |
