@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Autowired;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -136,6 +137,20 @@ public class MyBatisRequirementReviewLaunchCommandStore implements RequirementRe
     public void release(RequirementId requirementId, String idempotencyKey, UUID ownerToken) {
         mapper.releaseLaunchCommand(
                 requirementId.value().toString(), idempotencyKey, ownerToken.toString());
+    }
+
+    @Override
+    @Transactional
+    public boolean invalidateCompleted(
+            RequirementId requirementId,
+            String idempotencyKey,
+            String requestFingerprint,
+            ReviewId reviewId) {
+        return mapper.invalidateCompletedLaunchCommand(
+                requirementId.value().toString(),
+                idempotencyKey,
+                requestFingerprint,
+                reviewId.value().toString()) == 1;
     }
 
     private LocalDateTime utc(Instant instant) {

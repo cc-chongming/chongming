@@ -12,7 +12,7 @@ import org.apache.ibatis.annotations.Select;
  * first-write-wins; topics carry mutable state so upserting overwrites the latest snapshot; turns,
  * judge decisions and the Gate draft are also idempotent upserts.
  *
- * @author wangli
+ * @author zyj
  */
 @Mapper
 public interface DebatePersistenceMapper {
@@ -63,6 +63,26 @@ public interface DebatePersistenceMapper {
                 closed_at = VALUES(closed_at)
             """)
     int upsertTopic(@Param("row") TopicRow row);
+
+    @Insert("""
+            <script>
+            INSERT INTO review_debate_topic
+                (topic_id, review_id, subject_key, claim_ids_json, status, current_round, resolution, closed_at, created_at)
+            VALUES
+            <foreach collection="rows" item="row" separator=",">
+                (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.claimIdsJson}, #{row.status},
+                 #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
+            </foreach>
+            ON DUPLICATE KEY UPDATE
+                subject_key = VALUES(subject_key),
+                claim_ids_json = VALUES(claim_ids_json),
+                status = VALUES(status),
+                current_round = VALUES(current_round),
+                resolution = VALUES(resolution),
+                closed_at = VALUES(closed_at)
+            </script>
+            """)
+    int upsertTopics(@Param("rows") List<TopicRow> rows);
 
     @Select("""
             SELECT topic_id AS topicId, review_id AS reviewId, subject_key AS subjectKey,
@@ -190,7 +210,7 @@ public interface DebatePersistenceMapper {
     GateDraftRow findGateDraft(@Param("reviewId") String reviewId);
 
     /**
-     * @author wangli
+     * @author zyj
      */
     record ClaimRow(
             String claimId,
@@ -207,7 +227,7 @@ public interface DebatePersistenceMapper {
     }
 
     /**
-     * @author wangli
+     * @author zyj
      */
     record TopicRow(
             String topicId,
@@ -222,7 +242,7 @@ public interface DebatePersistenceMapper {
     }
 
     /**
-     * @author wangli
+     * @author zyj
      */
     record TurnRow(
             String turnId,
@@ -241,7 +261,7 @@ public interface DebatePersistenceMapper {
     }
 
     /**
-     * @author wangli
+     * @author zyj
      */
     record JudgeDecisionRow(
             String topicId,
@@ -253,7 +273,7 @@ public interface DebatePersistenceMapper {
     }
 
     /**
-     * @author wangli
+     * @author zyj
      */
     record GateDraftRow(
             String reviewId,

@@ -3,9 +3,21 @@ package ai.cc.chongming.review.infrastructure.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.mysql.cj.jdbc.MysqlDataSource;
+import ai.cc.chongming.review.domain.model.ReviewConflictAudit;
+import ai.cc.chongming.review.domain.model.ReviewConflictAudit.Disposition;
+import ai.cc.chongming.review.domain.model.DebateTopic;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.DebatePersistenceMapper;
+import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewConflictAuditPersistenceMapper;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewReportMapper;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPlatformProjectionMapper;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.RuntimeTracePersistenceMapper;
+import ai.cc.chongming.review.infrastructure.persistence.repository.MyBatisReviewConflictAuditStore;
+import ai.cc.chongming.review.infrastructure.persistence.repository.MyBatisReviewDebateStore;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -13,8 +25,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.Configuration;
@@ -76,7 +90,8 @@ class ReviewPersistenceMigrationIntegrationTests {
                     "context_scout_conclusion",
                     "requirement_review_launch_command",
                     "review_assessment",
-                    "review_dispatch_command");
+                    "review_dispatch_command",
+                    "review_conflict_audit");
             Map<String, String> expectedLongTextColumns = Map.of(
                     "review_plan.plan_json", "LONGTEXT",
                     "repository_snapshot.manifest_json", "LONGTEXT",
@@ -107,6 +122,8 @@ class ReviewPersistenceMigrationIntegrationTests {
                     .containsExactly("REVIEW_ID", "ATTEMPT_NO", "ROLE_TYPE", "CHECKPOINT_KEY");
             assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command"))
                     .containsExactly("COMMAND_ID");
+            assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "review_conflict_audit"))
+                    .containsExactly("REVIEW_ID", "ATTEMPT_NO", "SUBJECT_HASH");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_assessment", "idx_review_assessment_attempt"))
                     .containsExactly("REVIEW_ID", "ATTEMPT_NO");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command", "uk_review_dispatch_idempotency"))
@@ -191,6 +208,72 @@ class ReviewPersistenceMigrationIntegrationTests {
                 assertThat(report.reportVersion()).isEqualTo(1L);
             });
             assertThat(mapper.countLatestMetadata()).isGreaterThanOrEqualTo(1L);
+        }
+    }
+
+    @Test
+    void persistsAndReplaysConflictAuditThroughTheActualMybatisMapperOnMysql56() throws SQLException {
+        MysqlDataSource dataSource = dataSource(MYSQL);
+        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO review_request "
+                    + "(review_id, request_id, submitter_id, stage, input_idempotency_key, current_attempt_no, version) VALUES ('"
+                    + reviewId.value() + "', 'request-" + reviewId.value() + "', 'reviewer', 'CONFLICT_DETECTION', 'idempotency-"
+                    + reviewId.value() + "', 1, 0)");
+        }
+        try (SqlSession session = conflictAuditMapperSessionFactory(dataSource).openSession(true)) {
+            ReviewConflictAuditPersistenceMapper mapper = session.getMapper(ReviewConflictAuditPersistenceMapper.class);
+            MyBatisReviewConflictAuditStore first = new MyBatisReviewConflictAuditStore(mapper, new ObjectMapper());
+            ClaimId claimId = new ClaimId(UUID.randomUUID());
+            first.replaceBatch(reviewId, 1, List.of(
+                    new ReviewConflictAudit(
+                            reviewId,
+                            1,
+                            "auth.token_policy",
+                            List.of(claimId),
+                            "contradictory conclusions",
+                            Disposition.DETECTED,
+                            Instant.parse("2026-08-11T02:00:00Z")),
+                    new ReviewConflictAudit(
+                            reviewId,
+                            1,
+                            "auth.retry_policy",
+                            List.of(),
+                            "single risk only",
+                            Disposition.NO_CONFLICT,
+                            Instant.parse("2026-08-11T02:00:00Z"))));
+            first.finalizeAttempt(
+                    reviewId, 1, List.of("AUTH.TOKEN_POLICY"), Instant.parse("2026-08-11T02:01:00Z"));
+
+            MyBatisReviewConflictAuditStore reconstructed =
+                    new MyBatisReviewConflictAuditStore(mapper, new ObjectMapper());
+            assertThat(reconstructed.findByReviewAttempt(reviewId, 1))
+                    .extracting(ReviewConflictAudit::subjectKey, ReviewConflictAudit::disposition)
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple("auth.retry_policy", Disposition.NO_CONFLICT),
+                            org.assertj.core.groups.Tuple.tuple("auth.token_policy", Disposition.REGISTERED));
+            assertThat(reconstructed.findByReviewAttempt(reviewId, 1))
+                    .filteredOn(record -> record.subjectKey().equals("auth.token_policy"))
+                    .singleElement()
+                    .satisfies(record -> {
+                        assertThat(record.claimIds()).containsExactly(claimId);
+                        assertThat(record.updatedAt()).isEqualTo(Instant.parse("2026-08-11T02:01:00Z"));
+                    });
+
+            reconstructed.replaceBatch(reviewId, 2, List.of());
+            assertThat(reconstructed.findByReviewAttempt(reviewId, 2)).isEmpty();
+
+            MyBatisReviewDebateStore debateStore = new MyBatisReviewDebateStore(
+                    session.getMapper(DebatePersistenceMapper.class), new ObjectMapper());
+            DebateTopic firstTopic = new DebateTopic(
+                    new TopicId(UUID.randomUUID()), reviewId, "auth.token_policy", List.of(claimId));
+            DebateTopic secondTopic = new DebateTopic(
+                    new TopicId(UUID.randomUUID()), reviewId, "auth.retry_policy", List.of());
+            debateStore.saveTopics(List.of(firstTopic, secondTopic));
+            assertThat(debateStore.findTopics(reviewId))
+                    .extracting(DebateTopic::subjectKey)
+                    .containsExactlyInAnyOrder("auth.token_policy", "auth.retry_policy");
         }
     }
 
@@ -325,6 +408,14 @@ class ReviewPersistenceMigrationIntegrationTests {
         Environment environment = new Environment("runtime-trace", new JdbcTransactionFactory(), dataSource);
         Configuration configuration = new Configuration(environment);
         configuration.addMapper(RuntimeTracePersistenceMapper.class);
+        return new SqlSessionFactoryBuilder().build(configuration);
+    }
+
+    private SqlSessionFactory conflictAuditMapperSessionFactory(MysqlDataSource dataSource) {
+        Environment environment = new Environment("conflict-audit-mapper", new JdbcTransactionFactory(), dataSource);
+        Configuration configuration = new Configuration(environment);
+        configuration.addMapper(ReviewConflictAuditPersistenceMapper.class);
+        configuration.addMapper(DebatePersistenceMapper.class);
         return new SqlSessionFactoryBuilder().build(configuration);
     }
 

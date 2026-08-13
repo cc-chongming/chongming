@@ -122,12 +122,45 @@ public class ContextScoutConclusionService {
         }
         List<String> values = new ArrayList<>();
         node.forEach(item -> {
-            String value = text(item);
+            String value = textItem(item);
             if (value != null) {
                 values.add(value);
             }
         });
         return List.copyOf(values);
+    }
+
+    /**
+     * The Scout frequently emits structured items such as {@code {path, evidence, note}} or
+     * {@code {risk, evidence, note}}; flattening their readable fields keeps the conclusion grid
+     * populated instead of silently dropping every non-string element.
+     */
+    private static String textItem(JsonNode item) {
+        if (item == null) {
+            return null;
+        }
+        if (item.isTextual()) {
+            return item.textValue().isBlank() ? null : item.textValue();
+        }
+        if (item.isObject()) {
+            StringBuilder builder = new StringBuilder();
+            appendFields(builder, item, "path", "risk", "constraint", "entryPoint", "name", "title", "summary");
+            appendFields(builder, item, "note", "evidence");
+            return builder.length() == 0 ? null : builder.toString();
+        }
+        return null;
+    }
+
+    private static void appendFields(StringBuilder builder, JsonNode item, String... fields) {
+        for (String field : fields) {
+            JsonNode value = item.get(field);
+            if (value != null && value.isTextual() && !value.textValue().isBlank()) {
+                if (builder.length() > 0) {
+                    builder.append(" — ");
+                }
+                builder.append(value.textValue().strip());
+            }
+        }
     }
 
     private static Map<String, List<String>> roleScopes(JsonNode node) {
@@ -137,7 +170,13 @@ public class ContextScoutConclusionService {
         Map<String, List<String>> scopes = new LinkedHashMap<>();
         node.properties().forEach(entry -> {
             if (!entry.getKey().isBlank()) {
-                scopes.put(entry.getKey(), textList(entry.getValue()));
+                JsonNode value = entry.getValue();
+                if (value != null && value.isObject()) {
+                    String single = textItem(value);
+                    scopes.put(entry.getKey(), single == null ? List.of() : List.of(single));
+                } else {
+                    scopes.put(entry.getKey(), textList(value));
+                }
             }
         });
         return Map.copyOf(scopes);

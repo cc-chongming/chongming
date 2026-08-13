@@ -121,6 +121,21 @@ class MyBatisRequirementReviewLaunchCommandStoreTests {
                 LocalDateTime.ofInstant(now.plusSeconds(30), ZoneOffset.UTC));
     }
 
+    @Test
+    void invalidatesACompletedReservationByFingerprintAndReview() {
+        RequirementMapper mapper = mock(RequirementMapper.class);
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        when(mapper.invalidateCompletedLaunchCommand(
+                requirementId.value().toString(),
+                "launch-1",
+                "a".repeat(64),
+                reviewId.value().toString()))
+                .thenReturn(1);
+
+        assertThat(store(mapper).invalidateCompleted(
+                requirementId, "launch-1", "a".repeat(64), reviewId)).isTrue();
+    }
+
     private MyBatisRequirementReviewLaunchCommandStore store(RequirementMapper mapper) {
         return new MyBatisRequirementReviewLaunchCommandStore(
                 mapper, Clock.fixed(now, ZoneOffset.UTC), Duration.ofSeconds(30));

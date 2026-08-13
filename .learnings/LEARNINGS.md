@@ -632,3 +632,84 @@ AgentScope Director 不能在核心角色注册之前同步耗尽首轮对话；
 - Tags: finalizer, model-gateway, failure-handling, protocol
 
 ---
+
+## [LRN-20260811-001] persistence
+
+**Logged**: 2026-08-11T12:10:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: review-convergence
+
+### Summary
+
+冲突检测的候选、已登记、已跳过和无冲突处置属于可恢复业务事实，不能只存在于服务内存 Map；否则报告计数虽能在单进程内正确，重启后仍会丢失一一对应审计链。
+
+### Suggested Action
+
+类似“检测结果 + 后续处置”的跨阶段状态应通过独立领域 Store 批量替换、批量更新和一次读取恢复，内存/MyBatis 双实现保持同一契约，并用重建服务实例的测试验证恢复，而不是只测试同实例缓存。查询和处置必须显式携带 attemptNo；用 `MAX(attempt_no)` 推断会在当前 attempt 结果为空时错误回落到旧数据。
+
+多主题登记的“原子”不能只靠 Service 方法名或循环外校验：Store 必须提供真正的批量写契约，MyBatis 用单条批量 SQL，应用层再用外层事务把主题批次与审计终结纳入同一提交边界。领域阶段与事件必须在这两类持久化写成功后推进。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-024 phase 7 audit
+- Related Files: src/main/java/ai/cc/chongming/review/domain/repository/ReviewConflictAuditStore.java, src/main/java/ai/cc/chongming/review/application/ConflictDetectionService.java
+- Tags: conflict-audit, persistence, replay, batch-query
+
+---
+
+## [LRN-20260811-002] frontend-testing
+
+**Logged**: 2026-08-11T12:10:00+08:00
+**Priority**: high
+**Status**: active
+**Area**: playwright
+
+### Summary
+
+Vite 开发环境中的宽泛 `**/api/**` 路由 Mock 会误拦截 `/src/api/review-api.js` 模块请求，返回 JSON 后导致页面以 MIME 错误空白；E2E Mock 必须只匹配真实后端 API 根路径。
+
+### Suggested Action
+
+Playwright route 使用带主机/API 根边界的正则；版本冲突重试场景不要依赖会随 DOM 重建清空的原生 file `required` 状态，文件必填由应用提交逻辑校验，并用保留的 File 对象验证重试。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-024 phase 7 E2E recovery
+- Related Files: frontend/tests/review-workbench.e2e.js, frontend/src/views/RequirementDetailView.vue
+- Tags: playwright, vite, route-mock, file-input, retry
+
+---
+
+## [LRN-20260812-001] idempotency
+
+**Logged**: 2026-08-12T10:45:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: requirement-platform
+
+### Summary
+
+评审受理被嵌入需求启动命令时，内容去重键必须包含需求归属范围；跨需求复用同一 review root 会把正常提交误报为 `REVIEW_ALREADY_BOUND`。
+
+### Details
+
+草稿启动入口已经按 Requirement 和 `Idempotency-Key` 管理命令幂等，但下层 `ReviewIntakeService` 仍只按提交人、仓库、分支/提交和 Markdown 哈希去重。两个不同草稿上传同一文件时，下层会返回第一条需求的 reviewId，原子绑定层随后正确拒绝跨需求覆盖并产生 409。修复方式是让需求启动传入稳定的 `requirement:{requirementId}` 归属范围，并把它加入进程内与持久化受理键；范围为空时不增加任何键组件，以保持旧 `/api/reviews` 的历史去重键兼容。旧逻辑还可能在绑定失败前把错误 reviewId 写成完成态启动预约，因此重放路径必须识别该 review 是否缺失、已非 `PENDING` 或已归属其他需求，并以 Requirement、幂等键、指纹和 reviewId 四项精确匹配的条件删除旧预约后重新受理，避免误删并发命令，也避免要求人工清理数据库。
+
+### Suggested Action
+
+组合多个幂等层时，逐层列出“重放主体”和“唯一键”。内容相同不代表业务主体相同；下层内容去重必须接受上层归属范围，且需分别覆盖同主体重放、跨主体同内容、进程重启、数据库唯一键，以及修复上线前已污染的完成态幂等记录。
+
+### Metadata
+
+- Source: live_api_failure
+- Related Files: src/main/java/ai/cc/chongming/review/application/ReviewIntakeRequest.java, src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java, src/main/java/ai/cc/chongming/review/application/RequirementReviewLaunchService.java
+- Tags: requirement, review, idempotency, ownership-scope, persistence
+- See Also: LRN-20260801-002, LRN-20260804-001
+
+### Resolution
+
+- **Resolved**: 2026-08-12T10:45:00+08:00
+- **Notes**: IDEA MCP 编译通过；定向测试覆盖跨需求隔离、同需求重放、持久化键隔离和启动命令范围传递。
+
+---

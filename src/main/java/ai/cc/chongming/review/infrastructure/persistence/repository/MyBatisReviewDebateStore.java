@@ -40,7 +40,7 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.TurnId;
  * so claims, topics, turns, judge decisions and the AI Gate draft survive a restart. Mutable topic
  * state is re-saved on every mutation (the in-memory store relies on the shared object reference).
  *
- * @author wangli
+ * @author zyj
  */
 @Repository
 @ConditionalOnProperty(prefix = "review.persistence", name = "enabled", havingValue = "true")
@@ -95,8 +95,23 @@ public class MyBatisReviewDebateStore implements ReviewDebateStore {
     @Override
     @Transactional
     public void saveTopic(DebateTopic topic) {
-        Objects.requireNonNull(topic, "topic must not be null");
-        mapper.upsertTopic(new DebatePersistenceMapper.TopicRow(
+        mapper.upsertTopic(toTopicRow(Objects.requireNonNull(topic, "topic must not be null")));
+    }
+
+    @Override
+    @Transactional
+    public void saveTopics(List<DebateTopic> topics) {
+        Objects.requireNonNull(topics, "topics must not be null");
+        if (topics.isEmpty()) {
+            return;
+        }
+        mapper.upsertTopics(topics.stream()
+                .map(topic -> toTopicRow(Objects.requireNonNull(topic, "topic must not be null")))
+                .toList());
+    }
+
+    private DebatePersistenceMapper.TopicRow toTopicRow(DebateTopic topic) {
+        return new DebatePersistenceMapper.TopicRow(
                 topic.id().value().toString(),
                 topic.reviewId().value().toString(),
                 topic.subjectKey(),
@@ -105,7 +120,7 @@ public class MyBatisReviewDebateStore implements ReviewDebateStore {
                 topic.currentRound(),
                 topic.resolution(),
                 topic.closedAt() == null ? null : topic.closedAt().atOffset(ZoneOffset.UTC).toLocalDateTime(),
-                java.time.LocalDateTime.now(ZoneOffset.UTC)));
+                java.time.LocalDateTime.now(ZoneOffset.UTC));
     }
 
     @Override

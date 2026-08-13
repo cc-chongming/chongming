@@ -122,6 +122,26 @@ public class InMemoryRequirementReviewLaunchCommandStore implements RequirementR
                 existing.ownerToken.equals(ownerToken) && existing.reviewId == null ? null : existing);
     }
 
+    @Override
+    public boolean invalidateCompleted(
+            RequirementId requirementId,
+            String idempotencyKey,
+            String requestFingerprint,
+            ReviewId reviewId) {
+        CommandKey key = new CommandKey(requirementId, idempotencyKey);
+        String fingerprint = requireText(requestFingerprint, "requestFingerprint");
+        ReviewId targetReviewId = Objects.requireNonNull(reviewId, "reviewId must not be null");
+        boolean[] invalidated = {false};
+        commands.computeIfPresent(key, (ignored, existing) -> {
+            if (fingerprint.equals(existing.requestFingerprint) && targetReviewId.equals(existing.reviewId)) {
+                invalidated[0] = true;
+                return null;
+            }
+            return existing;
+        });
+        return invalidated[0];
+    }
+
     private static String requireText(String value, String name) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");

@@ -39,6 +39,9 @@ function conclusionFor(role) {
     if (counts.NOT_APPLICABLE) parts.push(`不适用 ${counts.NOT_APPLICABLE}`);
     return parts.length ? `结论：${parts.join(' · ')}` : null;
 }
+function assessmentsFor(role) {
+    return (props.assessments ?? []).filter((entry) => entry?.role === role);
+}
 function message(event) {
     return event.payload?.publicSummary ?? event.payload?.statement ?? event.payload?.reasonSummary
         ?? `${event.actorRole ?? 'Director'} 执行了 ${event.type}`;
@@ -50,7 +53,7 @@ function message(event) {
         <div class="panel-heading"><div><p class="eyebrow">Director 主持流程</p><h2 id="roundtable-title">评审圆桌</h2></div><span class="topic-status">{{ phase }}</span></div>
         <ol class="stage-rail" aria-label="评审阶段"><li>初审立论</li><li>冲突识别</li><li>多 Agent 辩论</li><li>Judge 收束</li><li>人工 Gate</li></ol>
         <div class="roundtable-layout">
-            <aside><h3>角色席位</h3><button v-for="role in roles" :key="role.role" class="role-seat" type="button" @click="emit('inspect-role', role.role)"><strong>{{ role.role }}</strong><span>{{ role.type }} · 查看执行过程</span><span v-if="conclusionFor(role.role)" class="seat-asmt">{{ conclusionFor(role.role) }}</span></button></aside>
+            <aside><h3>角色席位</h3><button v-for="role in roles" :key="role.role" class="role-seat" type="button" @click="emit('inspect-role', role.role)"><strong>{{ role.role }}</strong><span>{{ role.type }} · 查看执行过程</span><span v-if="conclusionFor(role.role)" class="seat-asmt">{{ conclusionFor(role.role) }}</span><span v-for="assessment in assessmentsFor(role.role)" :key="`${assessment.checkpointKey}:${assessment.status}`" class="seat-asmt-detail" :data-status="assessment.status">{{ assessment.summary }}</span></button></aside>
             <div class="director-narrative"><h3>主持人叙事</h3><ol><li v-for="event in narrative" :key="event.sequence"><strong>{{ event.actorRole ?? 'DIRECTOR' }}</strong><span>{{ message(event) }}</span></li><li v-if="!narrative.length" class="empty-note">等待 Director 创建计划并分派角色。</li></ol></div>
         </div>
     </section>

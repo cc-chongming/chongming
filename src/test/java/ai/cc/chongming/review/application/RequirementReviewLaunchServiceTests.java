@@ -104,6 +104,10 @@ class RequirementReviewLaunchServiceTests {
         assertThat(result.phase()).isEqualTo("STARTED");
         assertThat(result.recoverable()).isFalse();
         assertThat(result.liveUrl()).isEqualTo("/reviews/" + reviewId.value() + "/live");
+        ArgumentCaptor<ReviewIntakeRequest> intakeRequest = ArgumentCaptor.forClass(ReviewIntakeRequest.class);
+        verify(intakeService).intake(intakeRequest.capture());
+        assertThat(intakeRequest.getValue().idempotencyScope())
+                .isEqualTo("requirement:" + requirementId.value());
         ArgumentCaptor<ReviewCommandService.StartReviewCommand> startCommand =
                 ArgumentCaptor.forClass(ReviewCommandService.StartReviewCommand.class);
         verify(reviewCommandService).start(org.mockito.ArgumentMatchers.eq(reviewId), startCommand.capture());
@@ -146,6 +150,134 @@ class RequirementReviewLaunchServiceTests {
                     assertThat(exception.recoverable()).isFalse();
                 });
 
+        verify(reviewCommandService, never()).start(any(), any());
+    }
+
+    @Test
+    void repairsACompletedReservationThatPointsToAnotherRequirementsReview() {
+        ReviewId foreignReviewId = new ReviewId(UUID.randomUUID());
+        ReviewId replacementReviewId = new ReviewId(UUID.randomUUID());
+        Requirement draft = draft();
+        Requirement foreignRequirement = Requirement.draft(
+                new RequirementId(UUID.randomUUID()), "Foreign", "Description", "creator", null, "cx-ai", "P1");
+        foreignRequirement.submitForReview(foreignReviewId, new RequirementLifecycleStateMachine());
+        when(requirementRepository.findById(requirementId)).thenReturn(Optional.of(draft));
+        when(requirementRepository.findByReviewId(foreignReviewId)).thenReturn(Optional.of(foreignRequirement));
+        when(reviewRegistry.find(foreignReviewId)).thenReturn(Optional.of(Review.pending(foreignReviewId)));
+        when(intakeService.intake(any()))
+                .thenReturn(intakeResult(foreignReviewId, true), intakeResult(replacementReviewId, false));
+        when(requirementCommandService.submitForReview(requirementId, foreignReviewId, 0L)).thenThrow(
+                new RequirementDomainException(RequirementErrorCode.REVIEW_ALREADY_BOUND, "review occupied"));
+        when(requirementCommandService.submitForReview(requirementId, replacementReviewId, 0L))
+                .thenReturn(submitted(replacementReviewId));
+        when(reviewRegistry.find(replacementReviewId)).thenReturn(Optional.of(Review.pending(replacementReviewId)));
+        when(reviewCommandService.start(any(), any())).thenReturn(
+                new ReviewCommandService.StartReviewResult(replacementReviewId.value(), 1, 3L, "PLANNING", false));
+
+        assertThatThrownBy(() -> service.launch(requirementId, command(0L)))
+                .isInstanceOf(RequirementReviewLaunchException.class)
+                .satisfies(failure -> assertThat(((RequirementReviewLaunchException) failure).code())
+                        .isEqualTo("REVIEW_ALREADY_BOUND"));
+        RequirementReviewLaunchService.LaunchResult result = service.launch(requirementId, command(0L));
+
+        assertThat(result.reviewId()).isEqualTo(replacementReviewId.value());
+        verify(intakeService, times(2)).intake(any());
+    }
+
+    @Test
+    void repairsACompletedReservationForAnUnboundReviewThatAlreadyStarted() {
+        ReviewId startedReviewId = new ReviewId(UUID.randomUUID());
+        ReviewId replacementReviewId = new ReviewId(UUID.randomUUID());
+        Requirement draft = draft();
+        when(requirementRepository.findById(requirementId)).thenReturn(Optional.of(draft));
+        when(requirementRepository.findByReviewId(startedReviewId)).thenReturn(Optional.empty());
+        when(reviewRegistry.find(startedReviewId)).thenReturn(Optional.of(
+                Review.restore(startedReviewId, ReviewStage.PLANNING, 1, 3L, List.of(), Map.of())));
+        when(intakeService.intake(any()))
+                .thenReturn(intakeResult(startedReviewId, true), intakeResult(replacementReviewId, false));
+        when(requirementCommandService.submitForReview(requirementId, startedReviewId, 0L)).thenThrow(
+                new RequirementDomainException(RequirementErrorCode.REVIEW_ALREADY_BOUND, "review not pending"));
+        when(requirementCommandService.submitForReview(requirementId, replacementReviewId, 0L))
+                .thenReturn(submitted(replacementReviewId));
+        when(reviewRegistry.find(replacementReviewId)).thenReturn(Optional.of(Review.pending(replacementReviewId)));
+        when(reviewCommandService.start(any(), any())).thenReturn(
+                new ReviewCommandService.StartReviewResult(replacementReviewId.value(), 1, 3L, "PLANNING", false));
+
+        assertThatThrownBy(() -> service.launch(requirementId, command(0L)))
+                .isInstanceOf(RequirementReviewLaunchException.class)
+                .satisfies(failure -> assertThat(((RequirementReviewLaunchException) failure).code())
+                        .isEqualTo("REVIEW_ALREADY_BOUND"));
+        RequirementReviewLaunchService.LaunchResult result = service.launch(requirementId, command(0L));
+
+        assertThat(result.reviewId()).isEqualTo(replacementReviewId.value());
+        verify(intakeService, times(2)).intake(any());
+    }
+
+    @Test
+    void preservesACompletedReservationWhenAConcurrentNodeAlreadyBoundAndStartedIt() {
+        Requirement staleDraft = draft();
+        Requirement currentOwner = submitted(reviewId);
+        Review planningReview = Review.restore(reviewId, ReviewStage.PLANNING, 1, 3L, List.of(), Map.of());
+        when(requirementRepository.findById(requirementId))
+                .thenReturn(Optional.of(staleDraft), Optional.of(currentOwner));
+        when(requirementRepository.findByReviewId(reviewId)).thenReturn(Optional.of(currentOwner));
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.of(planningReview));
+        useCompletedReservation(reviewId);
+
+        RequirementReviewLaunchService.LaunchResult result = service.launch(requirementId, command(0L));
+
+        assertThat(result.reviewId()).isEqualTo(reviewId.value());
+        assertThat(result.stage()).isEqualTo("PLANNING");
+        assertThat(result.replayed()).isTrue();
+        verify(intakeService, never()).intake(any());
+        verify(requirementCommandService, never())
+                .submitForReview(any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(reviewCommandService, never()).start(any(), any());
+    }
+
+    @Test
+    void replaysWhenConcurrentBindingCompletesAfterTheRequirementRefresh() {
+        Requirement staleDraft = draft();
+        Requirement currentOwner = submitted(reviewId);
+        Review planningReview = Review.restore(reviewId, ReviewStage.PLANNING, 1, 3L, List.of(), Map.of());
+        when(requirementRepository.findById(requirementId))
+                .thenReturn(Optional.of(staleDraft), Optional.of(staleDraft), Optional.of(currentOwner));
+        when(requirementRepository.findByReviewId(reviewId)).thenReturn(Optional.of(currentOwner));
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.of(planningReview));
+        when(requirementCommandService.submitForReview(requirementId, reviewId, 0L)).thenThrow(
+                new RequirementDomainException(RequirementErrorCode.VERSION_CONFLICT, "concurrent binding"));
+        useCompletedReservation(reviewId);
+
+        RequirementReviewLaunchService.LaunchResult result = service.launch(requirementId, command(0L));
+
+        assertThat(result.reviewId()).isEqualTo(reviewId.value());
+        assertThat(result.stage()).isEqualTo("PLANNING");
+        assertThat(result.replayed()).isTrue();
+        verify(intakeService, never()).intake(any());
+        verify(requirementCommandService).submitForReview(requirementId, reviewId, 0L);
+        verify(reviewCommandService, never()).start(any(), any());
+    }
+
+    @Test
+    void replaysWhenConcurrentStartMakesTheReviewNonPendingDuringBinding() {
+        Requirement staleDraft = draft();
+        Requirement currentOwner = submitted(reviewId);
+        Review planningReview = Review.restore(reviewId, ReviewStage.PLANNING, 1, 3L, List.of(), Map.of());
+        when(requirementRepository.findById(requirementId))
+                .thenReturn(Optional.of(staleDraft), Optional.of(staleDraft), Optional.of(currentOwner));
+        when(requirementRepository.findByReviewId(reviewId)).thenReturn(Optional.of(currentOwner));
+        when(reviewRegistry.find(reviewId)).thenReturn(Optional.of(planningReview));
+        when(requirementCommandService.submitForReview(requirementId, reviewId, 0L)).thenThrow(
+                new RequirementDomainException(RequirementErrorCode.REVIEW_ALREADY_BOUND, "review not pending"));
+        useCompletedReservation(reviewId);
+
+        RequirementReviewLaunchService.LaunchResult result = service.launch(requirementId, command(0L));
+
+        assertThat(result.reviewId()).isEqualTo(reviewId.value());
+        assertThat(result.stage()).isEqualTo("PLANNING");
+        assertThat(result.replayed()).isTrue();
+        verify(intakeService, never()).intake(any());
+        verify(requirementCommandService).submitForReview(requirementId, reviewId, 0L);
         verify(reviewCommandService, never()).start(any(), any());
     }
 

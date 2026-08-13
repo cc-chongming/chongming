@@ -7,7 +7,7 @@
 
 ## 0. 背景与执行规则
 
-当前仓库已完成 Spring Boot 与 AgentScope 2.0.0 兼容性工程基线，包含配置契约、Adapter/Fake 和 Harness 合约测试；尚未形成评审领域代码。项目采用单体模块，但能力横跨 AgentScope
+当前仓库已完成 Spring Boot 与 AgentScope 2.0.0 兼容性工程基线，并已形成评审领域、受控多 Agent 编排、五态 Assessment、冲突辩论、Gate、人工决策及工作台闭环。项目采用单体模块，但能力横跨 AgentScope
 Harness、
 MySQL、MyBatis、SSE、Vue 3/Vite 前端（静态产物部署）、模型网关和通知 MCP，因此计划统一放在项目根 `docs/` 下。
 
@@ -15,7 +15,7 @@ MySQL、MyBatis、SSE、Vue 3/Vite 前端（静态产物部署）、模型网关
 
 - 每个专项计划是一个最小交付单元，建议对应一个分支或 PR；分支名使用 `codex/aireview-plan-xxx`。
 - 开始专项前确认其前置计划已达到退出标准；允许使用已冻结接口 Mock 并行开发。
-- 新建或修改 Java 类必须包含 `[AIREVIEW-PLAN-XXX#段号]` 来源标记和 `@author wangli`。
+- 新建或修改 Java 类必须包含 `[AIREVIEW-PLAN-XXX#段号]` 来源标记和 `@author zyj`。
 - 每个功能遵循测试先行：先提交失败测试，再实现，再重构；单元与集成覆盖率目标不低于 80%。
 - 每完成一段，同步更新计划段状态、文件清单、变更记录和实际偏差。
 - Java 编辑、构建、测试和问题检查优先使用 IDEA MCP；禁止在循环中逐条查询数据库。
@@ -40,6 +40,7 @@ MySQL、MyBatis、SSE、Vue 3/Vite 前端（静态产物部署）、模型网关
 | PLAN-013 | 安全、权限、审计与可观测性                | PLAN-002、003，贯穿实施    | A-D  | 越权、注入、密钥、指标和日志检查通过             |
 | PLAN-014 | 评测基线、故障注入与质量门禁               | PLAN-005 至 013       | E    | 6 组数据集、单/多 Agent 对比、恢复演练       |
 | PLAN-015 | Demo、答辩与 AI 开发证据交付           | PLAN-011 至 014       | F    | 一键演示、故障预案、视频与证据包完成             |
+| PLAN-024 | 评审确定性覆盖与编排收敛                  | PLAN-008 至 012       | E    | 确定性三路径、五态报告、人工通知闭环与全量回放通过     |
 
 ## 2. 依赖关系
 
@@ -66,6 +67,11 @@ flowchart LR
     P11 --> P14["014 评测与故障注入"]
     P12 --> P14
     P13 --> P14
+    P8 --> P24["024 确定性覆盖与编排收敛"]
+    P9 --> P24
+    P11 --> P24
+    P12 --> P24
+    P24 --> P14
     P14 --> P15["015 Demo 与答辩交付"]
 ```
 
@@ -111,7 +117,7 @@ flowchart LR
 每个专项计划只有同时满足以下条件才能标记完成：
 
 1. 计划中所有必做段为 ✅，文件清单与实际一致。
-2. 代码含正确计划引用和 `@author wangli`。
+2. 代码含正确计划引用和 `@author zyj`。
 3. IDEA 构建 `isSuccess=true`，文件 problems 无 ERROR。
 4. 新增测试先失败后通过；单元、Web、MySQL 集成或合约测试与风险匹配。
 5. 无明文密钥，无目录逃逸，无绕过 ProtocolGuard 的业务写入。
@@ -141,6 +147,7 @@ flowchart LR
 | `docs/AIREVIEW-PLAN-014-评测故障注入与质量门禁.md`          | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-015-Demo答辩与交付证据.md`          | #1   | ⏳  |
 | `docs/AIREVIEW-PLAN-017-主持式多Agent评审观察台与AGUI运行流.md` | #1   | ⏳  |
+| `docs/AIREVIEW-PLAN-024-评审确定性覆盖与编排收敛.md`            | #1   | ✅ 代码与确定性验收完成；MySQL/真实模型验收待环境与授权 |
 
 ### 5.2 修改
 

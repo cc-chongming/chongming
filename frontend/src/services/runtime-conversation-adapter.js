@@ -8,22 +8,14 @@ const FAILED_VALUE = /^(?:ERROR|FAILED|FAILURE|DENIED|INTERRUPTED|CANCELLED)$/i;
 
 function roleFor(runId, roles) {
     if (roles.has(runId)) return roles.get(runId);
-    const suffix = String(runId ?? '').split(':').at(-1);
+    let suffix = String(runId ?? '').split(':').at(-1);
     if (!suffix) return 'AGENT';
     if (suffix.toLowerCase().includes('context-scout')) return 'CONTEXT_SCOUT';
+    // Child harness run ids embed the attempt prefix (review-{uuid}-attempt-{n}-product);
+    // only the trailing agent label identifies the role.
+    const attemptMatch = suffix.match(/-attempt-\d+-(.+)$/i);
+    if (attemptMatch) suffix = attemptMatch[1];
     return suffix.replace(/-finalizer$/i, '').replaceAll('-', '_').toUpperCase();
-}
-
-function knownRoles(events) {
-    const roles = new Map();
-    (events ?? []).forEach((event) => {
-        if (!event?.runId || event.type !== 'CUSTOM') return;
-        if (![RUNTIME_IDENTITY_EVENT, RUNTIME_LIFECYCLE_EVENT].includes(event.name)) return;
-        if (typeof event.value?.role === 'string' && event.value.role.trim()) {
-            roles.set(event.runId, event.value.role.trim().toUpperCase());
-        }
-    });
-    return roles;
 }
 
 function eventKey(event, prefix) {
@@ -116,6 +108,10 @@ export function createLatestOnlyLoadQueue(disposeCurrent = () => {}, setReady = 
 }
 
 function toolStatus(observation, currentStatus) {
+    // The terminal status is authoritative: older persisted observations can carry a stale
+    // "failed" phase for tools that actually succeeded (todo_write, wait_async_results, ...).
+    const status = String(observation?.status ?? currentStatus ?? 'RUNNING').toUpperCase();
+    if (status === 'SUCCESS') return 'SUCCESS';
     const outputState = observation?.output?.state
         ?? observation?.output?.status
         ?? observation?.output?.resultState
@@ -123,19 +119,71 @@ function toolStatus(observation, currentStatus) {
     if (FAILED_VALUE.test(String(observation?.phase ?? '')) || FAILED_VALUE.test(String(outputState ?? ''))) {
         return 'ERROR';
     }
-    const status = observation?.status ?? currentStatus ?? 'RUNNING';
-    return FAILED_VALUE.test(String(status)) ? String(status).toUpperCase() : status;
+    return FAILED_VALUE.test(status) ? status : observation?.status ?? currentStatus ?? 'RUNNING';
 }
 
 /**
  * Reduces ordered AG-UI events into the public transcript. Hidden reasoning is intentionally
  * discarded, while tool diagnostics remain available in masked, collapsed UI rows.
+ *
+ * A long replay can hold tens of thousands of events and the live page rebuilds the transcript
+ * on every arrival batch. The previous reduction is cached and reused whenever the new event
+ * array extends the cached one, so replayed history is reduced exactly once and each new batch
+ * only costs its own size instead of the whole history.
  */
+let transcriptCache = { events: null, filtered: null, items: [], itemsByKey: new Map(), roles: new Map() };
+
 export function buildRuntimeConversation(events) {
-    const roles = knownRoles(events);
-    const items = [];
-    const itemsByKey = new Map();
+    const list = events ?? [];
+    const cached = transcriptCache;
+    // Fast paths: the live page re-evaluates on every reactive flush even when no new event
+    // arrived (push keeps the same array reference), and a same-reference extension never needs
+    // an element-by-element prefix comparison.
+    if (cached.events === list && cached.consumed === list.length && cached.filtered) {
+        return cached.filtered;
+    }
+    let start = 0;
+    let items;
+    let itemsByKey;
+    let roles;
+    let cachedHit = false;
+    if (cached.events === list) {
+        cachedHit = true;
+    } else if (cached.events !== null
+        && cached.events.length <= list.length
+        && cached.events.every((event, index) => list[index] === event)) {
+        cachedHit = true;
+    }
+    if (cachedHit) {
+        start = cached.events === list ? cached.consumed ?? cached.events.length : cached.events.length;
+        items = cached.items;
+        itemsByKey = cached.itemsByKey;
+        roles = cached.roles;
+    } else {
+        items = [];
+        itemsByKey = new Map();
+        roles = new Map();
+    }
+    collectRoles(list, start, roles);
     const handledEvents = new Set();
+    reduceEvents(list, start, items, itemsByKey, roles, handledEvents);
+    const filtered = items.filter((item) => (item.kind === 'tool' && item.toolCallId) || item.content.trim() || item.kind === 'notice');
+    transcriptCache = { events: list, filtered, items, itemsByKey, roles, consumed: list.length };
+    return filtered;
+}
+
+function collectRoles(events, start, roles) {
+    for (let index = start; index < events.length; index += 1) {
+        const event = events[index];
+        if (!event?.runId || event.type !== 'CUSTOM') continue;
+        if (![RUNTIME_IDENTITY_EVENT, RUNTIME_LIFECYCLE_EVENT].includes(event.name)) continue;
+        if (typeof event.value?.role === 'string' && event.value.role.trim()) {
+            roles.set(event.runId, event.value.role.trim().toUpperCase());
+        }
+    }
+}
+
+function reduceEvents(events, start, items, itemsByKey, roles, handledEvents) {
 
     function add(key, item) {
         const existing = itemsByKey.get(key);
@@ -159,27 +207,28 @@ export function buildRuntimeConversation(events) {
         });
     }
 
-    (events ?? []).forEach((event) => {
-        if (!event?.type) return;
-        if (isReasoningEvent(event)) return;
+    for (let eventIndex = start; eventIndex < events.length; eventIndex += 1) {
+        const event = events[eventIndex];
+        if (!event?.type) continue;
+        if (isReasoningEvent(event)) continue;
         const replayKey = event.sequence != null
             ? `${event.sequence}:${event.type}:${event.runId ?? ''}`
             : event.id != null ? `${event.id}:${event.type}` : null;
-        if (replayKey && handledEvents.has(replayKey)) return;
+        if (replayKey && handledEvents.has(replayKey)) continue;
         if (replayKey) handledEvents.add(replayKey);
 
         if (event.type === 'TEXT_MESSAGE_START') {
             agentItem(event, 'message', eventKey(event, 'message'));
-            return;
+            continue;
         }
         if (event.type === 'TEXT_MESSAGE_CONTENT') {
             const item = agentItem(event, 'message', eventKey(event, 'message'));
             item.content += typeof event.delta === 'string' ? event.delta : '';
-            return;
+            continue;
         }
         if (event.type === 'TEXT_MESSAGE_END') {
             agentItem(event, 'message', eventKey(event, 'message')).status = 'completed';
-            return;
+            continue;
         }
         if (event.type === 'TOOL_CALL_START') {
             const item = agentItem(event, 'tool', eventKey(event, 'tool'));
@@ -189,12 +238,19 @@ export function buildRuntimeConversation(events) {
             item.output = null;
             item.status = 'RUNNING';
             item.elapsedMs = null;
-            return;
+            continue;
         }
         if (event.type === 'TOOL_CALL_RESULT') {
-            const item = agentItem(event, 'tool', eventKey(event, 'tool'));
+            // Result events can carry a separate messageId (reply id); keying on it would fork a
+            // ghost "unknown tool" item beside the one created by TOOL_CALL_START, so merge by
+            // toolCallId first. An orphan result without a matching tool row adds no public
+            // value and is skipped.
+            const toolCallId = event.toolCallId ?? null;
+            const item = (toolCallId ? itemsByKey.get(`tool:${event.runId ?? 'unknown'}:${toolCallId}`) : null)
+                ?? itemsByKey.get(eventKey(event, 'tool'));
+            if (item == null || item.kind !== 'tool') continue;
             if (item.output == null && event.content != null) item.output = maskSensitiveValue(event.content);
-            return;
+            continue;
         }
         if (event.type === 'CUSTOM' && event.name === TOOL_OBSERVATION_EVENT && event.value?.toolCallId) {
             const observation = event.value;
@@ -207,7 +263,7 @@ export function buildRuntimeConversation(events) {
             item.phase = observation.phase ?? item.phase;
             item.status = toolStatus(observation, item.status);
             item.elapsedMs = observation.elapsedMs ?? item.elapsedMs ?? null;
-            return;
+            continue;
         }
         if (event.type === 'RUN_ERROR') {
             const id = `notice:${event.runId ?? 'unknown'}:${event.id ?? event.sequence ?? items.length}`;
@@ -215,9 +271,7 @@ export function buildRuntimeConversation(events) {
             item.content = maskSensitiveValue(event.message ?? 'Agent 运行异常结束。');
             item.status = 'error';
         }
-    });
-
-    return items.filter((item) => item.kind === 'tool' || item.content.trim() || item.kind === 'notice');
+    }
 }
 
 export const runtimeConversationEvents = {

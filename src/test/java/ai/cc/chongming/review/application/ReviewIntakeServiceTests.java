@@ -14,6 +14,7 @@ import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementParser;
 import ai.cc.chongming.review.infrastructure.document.MarkdownRequirementValidator;
 import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPersistenceMapper;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,15 +25,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mock.web.MockMultipartFile;
 
 /**
  * Tests immutable workspace snapshots and deterministic duplicate intake handling.
  *
- * @author wangli
+ * @author zyj
  */
 class ReviewIntakeServiceTests {
 
@@ -63,6 +66,21 @@ class ReviewIntakeServiceTests {
                 .contains("\"snapshotId\"")
                 .contains(created.snapshot().contentHash())
                 .contains("\"parserVersion\" : \"markdown-line-parser-v1\"");
+    }
+
+    @Test
+    void isolatesMatchingInputAcrossRequirementScopes() {
+        ReviewIntakeService service = newService();
+
+        ReviewIntakeResult firstRequirement = service.intake(request(false, "requirement:first"));
+        ReviewIntakeResult secondRequirement = service.intake(request(false, "requirement:second"));
+        ReviewIntakeResult firstRequirementReplay = service.intake(request(false, "requirement:first"));
+
+        assertThat(secondRequirement.snapshot().reviewId())
+                .isNotEqualTo(firstRequirement.snapshot().reviewId());
+        assertThat(firstRequirementReplay.snapshot().reviewId())
+                .isEqualTo(firstRequirement.snapshot().reviewId());
+        assertThat(firstRequirementReplay.reused()).isTrue();
     }
 
     @Test
@@ -111,8 +129,8 @@ class ReviewIntakeServiceTests {
                     results.getFirst().snapshot().snapshotId());
             assertThat(results).filteredOn(ReviewIntakeResult::reused).hasSize(5);
             assertThat(Files.walk(workspaceRoot)
-                            .filter(path -> path.getFileName().toString().equals("snapshot-manifest.json"))
-                            .toList())
+                    .filter(path -> path.getFileName().toString().equals("snapshot-manifest.json"))
+                    .toList())
                     .hasSize(1);
         } finally {
             executor.shutdownNow();
@@ -154,7 +172,39 @@ class ReviewIntakeServiceTests {
 
         service.intake(request(false));
 
-        verify(mapper).insertReviewRequest(any(ReviewPersistenceMapper.ReviewRequestRow.class));
+        ArgumentCaptor<ReviewPersistenceMapper.ReviewRequestRow> row =
+                ArgumentCaptor.forClass(ReviewPersistenceMapper.ReviewRequestRow.class);
+        verify(mapper).insertReviewRequest(row.capture());
+        assertThat(row.getValue().inputIdempotencyKey())
+                .isEqualTo("intake:58360dfd9a8820a57fb49afc1af26666456441f1916a75f02f5a480dbb8b436b");
+    }
+
+    @Test
+    void persistsDistinctIdempotencyKeysForDifferentRequirementScopes() {
+        ReviewPersistenceMapper mapper = mock(ReviewPersistenceMapper.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ReviewPersistenceMapper> mapperProvider = mock(ObjectProvider.class);
+        when(mapperProvider.getIfAvailable()).thenReturn(mapper);
+        when(mapper.insertReviewRequest(any())).thenReturn(1);
+        RequirementSnapshotStore store = new RequirementSnapshotStore(
+                new ReviewProperties(workspaceRoot.toString(), 8, 2));
+        ReviewIntakeService service = new ReviewIntakeService(
+                new MarkdownRequirementValidator(),
+                new MarkdownRequirementParser(),
+                store,
+                ReviewRegistry.noop(),
+                mapperProvider,
+                true);
+
+        service.intake(request(false, "requirement:first"));
+        service.intake(request(false, "requirement:second"));
+
+        ArgumentCaptor<ReviewPersistenceMapper.ReviewRequestRow> rows =
+                ArgumentCaptor.forClass(ReviewPersistenceMapper.ReviewRequestRow.class);
+        verify(mapper, org.mockito.Mockito.times(2)).insertReviewRequest(rows.capture());
+        assertThat(rows.getAllValues())
+                .extracting(ReviewPersistenceMapper.ReviewRequestRow::inputIdempotencyKey)
+                .doesNotHaveDuplicates();
     }
 
     @Test
@@ -193,6 +243,10 @@ class ReviewIntakeServiceTests {
     }
 
     private ReviewIntakeRequest request(boolean forceNewAttempt) {
+        return request(forceNewAttempt, null);
+    }
+
+    private ReviewIntakeRequest request(boolean forceNewAttempt, String idempotencyScope) {
         MockMultipartFile file = new MockMultipartFile(
                 "requirementFile",
                 "requirements.md",
@@ -204,6 +258,8 @@ class ReviewIntakeServiceTests {
                 "main",
                 "abc123",
                 "user-001",
-                forceNewAttempt);
+                forceNewAttempt,
+                idempotencyScope,
+                IntakeCancellation.neverCancelled());
     }
 }

@@ -14,6 +14,11 @@ test('renders the platform shell with grouped navigation, breadcrumb and live co
             })
         });
     });
+    await page.route('**/api/repositories', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ id: 'cx-ai', displayName: 'CX AI' }])
+    }));
     await page.route('**/api/requirements**', (route) => route.fulfill({
         status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], total: 0, page: 1, size: 20 })
     }));
@@ -41,10 +46,9 @@ test('renders the platform shell with grouped navigation, breadcrumb and live co
     await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toBeVisible();
     await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toHaveCount(0);
 
-    await page.locator('.nav-item', { hasText: '新建需求' }).click();
+    await page.getByRole('link', { name: '＋ 新建需求' }).click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('新建需求');
-    await expect(page.locator('.nav-item.active', { hasText: '新建需求' })).toBeVisible();
-    await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toHaveCount(0);
+    await expect(page.locator('.nav-item.active', { hasText: '需求库' })).toBeVisible();
 
     await page.locator('.nav-item', { hasText: '评审列表' }).click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('评审列表');

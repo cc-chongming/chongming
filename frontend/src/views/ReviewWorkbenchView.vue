@@ -31,6 +31,10 @@ const aiGateDraft = computed(() => resolveAiGateDraft(
 const roundtableRoles = computed(() => {
     const roles = new Map(store.roles.value.map((role) => [role.role, role]));
     roles.set('DIRECTOR', roles.get('DIRECTOR') ?? { role: 'DIRECTOR', type: '主持中' });
+    store.assessmentView.value.assessments.forEach((assessment) => {
+        if (!assessment?.role) return;
+        roles.set(assessment.role, roles.get(assessment.role) ?? { role: assessment.role, type: '已提交检查点结论' });
+    });
     runtimeTrace.byRole.value.forEach((events, role) => {
         roles.set(role, { ...(roles.get(role) ?? {}), role, type: events.length ? '执行中' : '等待事件' });
     });

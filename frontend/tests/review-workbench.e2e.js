@@ -8,6 +8,25 @@ const topicId = '20000000-0000-0000-0000-000000000001';
 const claimId = '30000000-0000-0000-0000-000000000001';
 const evidenceId = '50000000-0000-0000-0000-000000000001';
 
+test.beforeEach(async ({ page }) => {
+    await page.route('**/api/dashboard', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            pendingRequirementCount: 0,
+            activeReviewCount: 0,
+            requirementStatusCounts: {},
+            activeReviews: [],
+            recentActivities: []
+        })
+    }));
+    await page.route('**/api/repositories', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+    }));
+});
+
 test('renders a replayable debate workbench without executing report content', async ({ page }) => {
     await page.route('**/api/reviews/**', async (route) => {
         const requestUrl = new URL(route.request().url());
@@ -74,7 +93,10 @@ test('renders the live review page as the full-flow workspace with phase-specifi
             return json({
                 reviewId, attempt: 1, stage: 'INITIAL_REVIEW', progress: 40, lastSequence: 2, reviewVersion: 4,
                 occurredAt: '2026-08-04 15:25:57', gate: { result: 'PASS', status: 'DRAFT', reasonSummary: 'AI 判断可以通过。' },
-                activatedRoles: [{ role: 'PRODUCT', agentLabel: 'product-reviewer', initialReviewCompleted: false }]
+                activatedRoles: [
+                    { role: 'PRODUCT', agentLabel: 'product-reviewer', initialReviewCompleted: false },
+                    { role: 'TESTING', agentLabel: 'testing-reviewer', initialReviewCompleted: false }
+                ]
             });
         }
         if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
@@ -108,7 +130,7 @@ test('renders the live review page as the full-flow workspace with phase-specifi
 
     await expect(page.getByText('需求评审全流程', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '评审流程' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '运行调试' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '运行调试' })).toBeVisible();
 
     // 默认停留在当前阶段：只展示实际激活或有正式 Claim 的动态角色。
     await expect(page.getByRole('heading', { name: /独立审查/ })).toBeVisible();
@@ -139,7 +161,7 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await page.getByRole('button', { name: /人工决策/ }).click();
     await expect(page.getByText('系统已暂停 AI 输出，最终结论必须由人工在工作台明确选择并提交')).toBeVisible();
     await expect(page.getByText('人工结论与 AI Gate 草案不同')).toBeVisible();
-    await expect(page.getByText('范围需要补齐')).toBeVisible();
+    await expect(page.getByLabel('评审结论链').getByText('范围需要补齐', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: '进入人工决策' })).toBeVisible();
 });
 
@@ -169,7 +191,7 @@ test('removes the temporary draft when the uploaded Markdown already has a revie
     });
 
     await page.goto('/index.html#/requirements/create');
-    await page.getByLabel('需求标题').fill('重复快照测试');
+    await page.getByPlaceholder('简短描述需求内容').fill('重复快照测试');
     await expect(page.getByLabel('目标仓库')).toHaveValue('cx-ai');
     await page.locator('input[type="file"][accept*=".md"]').setInputFiles({
         name: 'repeat.md', mimeType: 'text/markdown', buffer: Buffer.from('# 已有评审的需求')
@@ -235,7 +257,7 @@ test('launches an unbound draft from its detail page with a configured repositor
         createdAt: '2026-08-10T00:00:00Z', updatedAt: '2026-08-10T00:00:00Z'
     };
     const launchRequests = [];
-    await page.route('**/api/**', async (route) => {
+    await page.route(/\/api\/(?:dashboard|repositories|requirements|reviews)(?:\/|\?|$)/, async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();
@@ -306,7 +328,7 @@ test('refreshes a draft and rotates the command key after a version conflict', a
     const requirementId = '93000000-0000-0000-0000-000000000001';
     let reads = 0;
     const launches = [];
-    await page.route('**/api/**', async (route) => {
+    await page.route(/\/api\/(?:dashboard|repositories|requirements|reviews)(?:\/|\?|$)/, async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();

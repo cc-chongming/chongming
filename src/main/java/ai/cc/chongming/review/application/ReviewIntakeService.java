@@ -12,6 +12,7 @@ import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
 import ai.cc.chongming.review.infrastructure.document.StoredRequirementSnapshot;
 import ai.cc.chongming.review.infrastructure.document.ValidatedMarkdown;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPersistenceMapper;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -22,6 +23,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -98,6 +100,7 @@ public class ReviewIntakeService {
             RequirementDocument document = parser.parse(markdown.normalizedFile(), request.cancellation());
             IntakeKey key = new IntakeKey(
                     request.submitter().trim(),
+                    request.idempotencyScope(),
                     request.repositoryPath().trim(),
                     normalizeOptional(request.branch()),
                     normalizeOptional(request.commit()),
@@ -162,7 +165,7 @@ public class ReviewIntakeService {
     /**
      * Resolves the immutable intake snapshot that owns a currently running review attempt.
      *
-     * @author wangli
+     * @author zyj
      */
     public RequirementSnapshot requireSnapshot(ReviewId reviewId, int attemptNo) {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
@@ -181,9 +184,9 @@ public class ReviewIntakeService {
     /**
      * [AIREVIEW-PLAN-010#1.7] Materializes the accepted input for a retry attempt while retaining the original input.
      *
-     * @param reviewId review owning both attempts
+     * @param reviewId          review owning both attempts
      * @param previousAttemptNo terminal attempt whose input is reused
-     * @param retryAttemptNo fresh pending attempt
+     * @param retryAttemptNo    fresh pending attempt
      * @return the immutable retry input snapshot
      */
     public RequirementSnapshot copySnapshotForRetry(ReviewId reviewId, int previousAttemptNo, int retryAttemptNo) {
@@ -272,15 +275,21 @@ public class ReviewIntakeService {
     }
 
     /**
-     * Stable deduplication key scoped to submitter, repository snapshot identity and content hash.
+     * Stable deduplication key scoped to the owning command, submitter, repository snapshot identity and content hash.
      *
-     * @author wangli
+     * @author zyj
      */
     private record IntakeKey(
-            String submitter, String repositoryPath, String branch, String commit, String contentHash) {
+            String submitter,
+            String idempotencyScope,
+            String repositoryPath,
+            String branch,
+            String commit,
+            String contentHash) {
 
         private String persistenceKey() {
-            String source = component(submitter) + component(repositoryPath) + component(branch)
+            String scopeComponent = idempotencyScope == null ? "" : component("scope:" + idempotencyScope);
+            String source = component(submitter) + scopeComponent + component(repositoryPath) + component(branch)
                     + component(commit) + component(contentHash);
             try {
                 byte[] digest = MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8));

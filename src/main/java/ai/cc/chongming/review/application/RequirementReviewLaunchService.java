@@ -123,6 +123,18 @@ public class RequirementReviewLaunchService {
         UUID ownerToken = UUID.randomUUID();
         Reservation reservation = launchCommandStore.reserve(
                 requirementId, command.idempotencyKey(), requestFingerprint, ownerToken);
+        if (reservation.status() == ReservationStatus.REPLAY
+                && isInvalidCompletedReservation(requirement, reservation.reviewId())) {
+            if (!launchCommandStore.invalidateCompleted(
+                    requirementId,
+                    command.idempotencyKey(),
+                    requestFingerprint,
+                    reservation.reviewId())) {
+                throw RequirementReviewLaunchException.launchInProgress();
+            }
+            reservation = launchCommandStore.reserve(
+                    requirementId, command.idempotencyKey(), requestFingerprint, ownerToken);
+        }
         if (reservation.status() == ReservationStatus.CONFLICT) {
             throw RequirementReviewLaunchException.idempotencyKeyReused(
                     requirement.reviewId() == null ? null : requirement.reviewId().value());
@@ -131,13 +143,25 @@ public class RequirementReviewLaunchService {
             throw RequirementReviewLaunchException.launchInProgress();
         }
         if (reservation.status() == ReservationStatus.REPLAY) {
-            return continueReservedLaunch(requirement, reservation.reviewId(), command);
+            return continueReservedLaunch(requireRequirement(requirementId), reservation.reviewId(), command);
         }
         if (requirement.reviewId() != null) {
             launchCommandStore.release(requirement.id(), command.idempotencyKey(), ownerToken);
             throw RequirementReviewLaunchException.alreadyBound(requirement.reviewId().value());
         }
         return executeReservedLaunch(requirement, command, requestFingerprint, ownerToken);
+    }
+
+    private boolean isInvalidCompletedReservation(Requirement requirement, ReviewId reservedReviewId) {
+        if (requirement.reviewId() != null || reservedReviewId == null) {
+            return false;
+        }
+        Requirement owner = requirementRepository.findByReviewId(reservedReviewId).orElse(null);
+        if (owner != null) {
+            return !owner.id().equals(requirement.id());
+        }
+        Review reservedReview = reviewRegistry.find(reservedReviewId).orElse(null);
+        return reservedReview == null || reservedReview.stage() != ReviewStage.PENDING;
     }
 
     private LaunchResult executeReservedLaunch(
@@ -152,6 +176,7 @@ public class RequirementReviewLaunchService {
                     command.commit(),
                     command.submitter(),
                     false,
+                    "requirement:" + requirement.id().value(),
                     heartbeat));
             heartbeat.checkCancelled();
             ReviewId targetReviewId = intake.snapshot().reviewId();
@@ -300,6 +325,16 @@ public class RequirementReviewLaunchService {
             try {
                 return requirementCommandService.submitForReview(requirement.id(), targetReviewId, expectedVersion);
             } catch (RequirementDomainException exception) {
+                if (exception.errorCode() == RequirementErrorCode.VERSION_CONFLICT
+                        || exception.errorCode() == RequirementErrorCode.REVIEW_ALREADY_BOUND) {
+                    Requirement latest = requireRequirement(requirement.id());
+                    if (targetReviewId.equals(latest.reviewId())) {
+                        return latest;
+                    }
+                    if (latest.reviewId() != null) {
+                        throw RequirementReviewLaunchException.alreadyBound(latest.reviewId().value());
+                    }
+                }
                 if (exception.errorCode() == RequirementErrorCode.REVIEW_ALREADY_BOUND) {
                     throw RequirementReviewLaunchException.reviewBindingConflict(targetReviewId.value());
                 }

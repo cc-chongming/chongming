@@ -164,6 +164,17 @@ public interface RequirementMapper {
             @Param("idempotencyKey") String idempotencyKey,
             @Param("ownerToken") String ownerToken);
 
+    @Delete("""
+            DELETE FROM requirement_review_launch_command
+            WHERE requirement_id = #{requirementId} AND idempotency_key = #{idempotencyKey}
+              AND request_fingerprint = #{requestFingerprint} AND review_id = #{reviewId}
+            """)
+    int invalidateCompletedLaunchCommand(
+            @Param("requirementId") String requirementId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("requestFingerprint") String requestFingerprint,
+            @Param("reviewId") String reviewId);
+
     /**
      * @author zyj
      */

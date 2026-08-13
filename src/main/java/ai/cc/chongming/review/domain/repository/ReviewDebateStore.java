@@ -16,7 +16,7 @@ import java.util.Optional;
 /**
  * [AIREVIEW-PLAN-010#1.3] Stores immutable Claim/Turn facts and mutable topic state behind the debate application boundary.
  *
- * @author wangli
+ * @author zyj
  */
 public interface ReviewDebateStore {
 
@@ -27,6 +27,11 @@ public interface ReviewDebateStore {
     List<Claim> findClaims(ReviewId reviewId);
 
     void saveTopic(DebateTopic topic);
+
+    /**
+     * Persists one validated topic batch atomically.
+     */
+    void saveTopics(List<DebateTopic> topics);
 
     Optional<DebateTopic> findTopic(ReviewId reviewId, TopicId topicId);
 

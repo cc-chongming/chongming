@@ -136,7 +136,7 @@ reasoning。
 Idempotency-Key。现有 createReview、submitRequirement、startReview 保持兼容。
 
 1. 重复点击或网络重试不得创建第二个 Review。
-2. 相同 Markdown 已有评审时不得绑定已占用 Review，返回可识别冲突及既有 reviewId。
+2. intake 去重必须以 Requirement 为归属范围：同一 Requirement 的同一输入继续复用，两个不同 Requirement 即使 Markdown、提交人和仓库完全相同，也必须创建不同 Review root；不得先复用另一需求的 reviewId 再返回伪业务冲突。
 3. intake 或绑定成功而启动失败时保留可恢复状态；重试同一命令继续启动。
 4. 乐观锁冲突刷新 Requirement 后要求重新确认。
 5. 成功后进入待评审或评审中并跳转 /reviews/{reviewId}/live。
@@ -375,6 +375,8 @@ OpenAiCompatibleModelClient 当前固定 stream=false，需要：
 | docs/AIREVIEW-PLAN-023-评审入口与公开对话体验收口.md                                                                             | #0  | ✅  |
 | src/main/java/ai/cc/chongming/review/api/RepositoryOptionController.java                                            | #2  | ⏳  |
 | src/main/java/ai/cc/chongming/review/application/RequirementReviewLaunchService.java                                | #3  | ⏳  |
+| src/main/java/ai/cc/chongming/review/application/ReviewIntakeRequest.java                                           | #3  | ✅  |
+| src/main/java/ai/cc/chongming/review/application/ReviewIntakeService.java                                           | #3  | ✅  |
 | src/main/java/ai/cc/chongming/review/domain/model/ContextScoutConclusion.java                                       | #5  | ⏳  |
 | src/main/java/ai/cc/chongming/review/domain/repository/ContextScoutConclusionStore.java                             | #5  | ⏳  |
 | src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisContextScoutConclusionStore.java  | #5  | ⏳  |
@@ -382,6 +384,7 @@ OpenAiCompatibleModelClient 当前固定 stream=false，需要：
 | src/main/resources/db/migration/V17__create_context_scout_conclusion_table.sql                                      | #5  | ⏳  |
 | src/test/java/ai/cc/chongming/review/api/RepositoryOptionControllerTests.java                                       | #2  | ⏳  |
 | src/test/java/ai/cc/chongming/review/application/RequirementReviewLaunchServiceTests.java                           | #3  | ⏳  |
+| src/test/java/ai/cc/chongming/review/application/ReviewIntakeServiceTests.java                                      | #3  | ✅  |
 | frontend/src/components/ScoutConclusionPanel.vue                                                                    | #5  | ⏳  |
 | frontend/src/components/ReviewClaimList.vue                                                                         | #6  | ⏳  |
 | frontend/src/components/ReviewConversationDrawer.vue                                                                | #7  | ⏳  |
@@ -495,3 +498,4 @@ OpenAiCompatibleModelClient 当前固定 stream=false，需要：
 |------------|--------------------------------------------------------------------------------------------------|
 | 2026-08-10 | 创建 PLAN-023，统一规划仓库下拉、草稿发起、浅色 /live、Scout 持久化结论、Claim 与结论链可读化、全 Agent AI 对话、右侧全局对话抽屉、工具默认折叠与真实流式。 |
 | 2026-08-10 | 开始实施；通过 IDEA MCP 确认现有迁移最高为 V16，将 Scout 结论迁移由计划中的 V15 调整为 V17，并并行推进入口、Scout、流式与 /live 实现。 |
+| 2026-08-12 | 修复草稿提交同一 Markdown 时误复用其他需求 Review 的 409：受理幂等键增加 Requirement 归属范围；同需求重放仍复用、跨需求创建独立 Review root，且未带范围的旧 `/api/reviews` 去重键保持兼容。对旧逻辑已写入且指向缺失、非 `PENDING` 或已归属其他需求 Review 的错误完成态启动预约增加精确条件失效与自动重建，同一 `Idempotency-Key` 重试可恢复，无需人工清库；补充内存、MyBatis、持久化键与启动编排回归。 |
