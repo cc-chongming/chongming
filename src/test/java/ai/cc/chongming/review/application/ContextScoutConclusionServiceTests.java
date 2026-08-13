@@ -64,6 +64,37 @@ class ContextScoutConclusionServiceTests {
     }
 
     @Test
+    void flattensStructuredObjectItemsIntoReadableConclusionLines() {
+        ContextScoutConclusionStore store = mock(ContextScoutConclusionStore.class);
+        ContextScoutConclusionService service = new ContextScoutConclusionService(
+                store, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        String result = """
+                {
+                  "summary": "定时任务代码集中在 agentos 模块。",
+                  "moduleRoots": [{"path": "ai-app/ai-app-agentos", "evidence": "glob命中", "note": "需求相关代码全部集中于此"}],
+                  "entryPoints": [{"path": "ScheduledTaskController.java", "note": "13个端点"}],
+                  "constraints": [{"path": "ScheduledTaskServiceImpl.java", "evidence": "全部方法经远程转发"}],
+                  "risks": [{"risk": "调度核心不可验证", "note": "远程实现不在快照内"}],
+                  "evidencePaths": ["ScheduledTaskController.java（已读取）"],
+                  "roleScopes": {"普通用户": {"evidence": "按登录用户隔离", "note": "跨用户可见性由 core 侧保证"}}
+                }
+                """;
+
+        ContextScoutConclusion conclusion = service.capture(reviewId, 1, result);
+
+        assertThat(conclusion.moduleRoots()).containsExactly(
+                "ai-app/ai-app-agentos — 需求相关代码全部集中于此 — glob命中");
+        assertThat(conclusion.entryPoints()).containsExactly("ScheduledTaskController.java — 13个端点");
+        assertThat(conclusion.constraints()).containsExactly(
+                "ScheduledTaskServiceImpl.java — 全部方法经远程转发");
+        assertThat(conclusion.risks()).containsExactly("调度核心不可验证 — 远程实现不在快照内");
+        assertThat(conclusion.evidencePaths()).containsExactly("ScheduledTaskController.java（已读取）");
+        assertThat(conclusion.roleScopes()).containsEntry(
+                "普通用户", java.util.List.of("跨用户可见性由 core 侧保证 — 按登录用户隔离"));
+    }
+
+    @Test
     void preservesMalformedPublicOutputAsAReadableFallback() {
         ContextScoutConclusionStore store = mock(ContextScoutConclusionStore.class);
         ContextScoutConclusionService service = new ContextScoutConclusionService(

@@ -56,7 +56,7 @@ watch(conversation, () => {
     <section :class="['live-agent-conversation', { compact }]" aria-label="评审 Agent 公开对话">
         <div ref="scrollPanel" class="live-agent-scroll" @scroll.passive="updateFollowState">
             <ol v-if="conversation.length" class="live-agent-timeline" aria-live="polite">
-                <li v-for="item in conversation" :key="item.id" :class="['live-agent-entry', `is-${item.kind}`]">
+                <li v-for="item in conversation" :key="item.id" v-memo="[item.kind, item.content, item.status, item.phase, item.toolName, item.elapsedMs]" :class="['live-agent-entry', `is-${item.kind}`]">
                     <template v-if="item.kind === 'message'">
                         <div class="agent-avatar" :data-role="item.role" aria-hidden="true">{{ roleInitial(item.role) }}</div>
                         <article class="agent-dialogue">

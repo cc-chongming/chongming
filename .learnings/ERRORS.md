@@ -696,6 +696,44 @@ Keep Playwright channel selection configurable for developer machines, and use t
 
 ### Resolution
 - **Resolved**: 2026-08-10T16:35:00+08:00
-- **Notes**: Verified the light `/live` layout, conclusion chain, hidden reasoning, and default-collapsed tool details in the in-app browser.
+- **Notes**: `playwright.config.js` now accepts `PLAYWRIGHT_EXECUTABLE_PATH`; using the cached Chromium headless shell completed the full 13-case suite. A later `playwright install chromium` attempt also stalled because the requested revision was unavailable, so E2E must not depend on a just-in-time browser download in this environment.
+
+---
+
+## [ERR-20260811-009] Invoke-WebRequest could not call IDEA MCP stream endpoint
+
+**Logged**: 2026-08-11T12:10:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: tooling
+
+### Summary
+PowerShell `Invoke-WebRequest` raised a `NullReferenceException` when calling the IDEA MCP Streamable HTTP endpoint, even though the endpoint was available.
+
+### Resolution
+Use `System.Net.Http.HttpClient`, perform MCP `initialize`, preserve the returned `mcp-session-id`, send `notifications/initialized`, and then call `tools/call`. On older PowerShell, load `System.Net.Http` explicitly before constructing `HttpClient`.
+
+### Metadata
+- Reproducible: yes
+- Related Files: E:\plus\ECC\.agents\skills\idea-mcp-http\SKILL.md
+
+---
+
+## [ERR-20260811-010] IDEA terminal inherited Java 8 for a Java 21 project
+
+**Logged**: 2026-08-11T12:10:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: build
+
+### Summary
+Long Maven verification launched from the IDEA terminal inherited Java 8 and also hit the terminal tool's 60-second limit, while the project requires Java 21.
+
+### Resolution
+Use IDEA MCP `build_project` for the IDE compilation signal. For the longer full Maven suite, explicitly point task-local `JAVA_HOME` and `Path` to `D:\Tool\Java21` without changing global environment variables.
+
+### Metadata
+- Reproducible: yes
+- Related Files: pom.xml, mvnw.cmd
 
 ---

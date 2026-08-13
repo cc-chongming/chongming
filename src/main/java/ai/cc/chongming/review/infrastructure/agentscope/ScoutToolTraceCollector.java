@@ -72,17 +72,25 @@ public final class ScoutToolTraceCollector implements MiddlewareBase {
     private void captureEvent(AgentEvent event) {
         if (event instanceof ToolResultTextDeltaEvent delta) {
             TraceState state = traces.get(delta.getToolCallId());
-            if (state != null && state.toolName.equals(delta.getToolCallName())) {
+            if (state != null && nameCompatible(state.toolName, delta.getToolCallName())) {
                 state.append(delta.getDelta());
             }
             return;
         }
         if (event instanceof ToolResultEndEvent end) {
             TraceState state = traces.get(end.getToolCallId());
-            if (state != null && state.toolName.equals(end.getToolCallName())) {
+            if (state != null && nameCompatible(state.toolName, end.getToolCallName())) {
                 state.complete(end.getState());
             }
         }
+    }
+
+    /**
+     * Some lifecycle events omit the tool name; matching then falls back to the captured call id
+     * alone so a normal completion is never stranded in the RUNNING state.
+     */
+    private static boolean nameCompatible(String capturedName, String eventName) {
+        return eventName == null || eventName.isBlank() || capturedName.equals(eventName);
     }
 
     private static Map<String, Object> copyInput(Map<String, Object> input) {
@@ -125,7 +133,9 @@ public final class ScoutToolTraceCollector implements MiddlewareBase {
         }
 
         private synchronized void complete(ToolResultState terminalState) {
-            state = terminalState == null ? ToolResultState.ERROR : terminalState;
+            // A lifecycle end without an explicit state means the tool finished normally; only
+            // explicit failure states must surface as errors.
+            state = terminalState == null ? ToolResultState.SUCCESS : terminalState;
             completedAtNanos = System.nanoTime();
         }
 

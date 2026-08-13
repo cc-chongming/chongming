@@ -23,7 +23,7 @@ import org.springframework.stereotype.Repository;
  * [AIREVIEW-PLAN-010#1.3] Deterministic process-local implementation used only when review
  * persistence is disabled; the MyBatis store takes over when it is enabled.
  *
- * @author wangli
+ * @author zyj
  */
 @Repository
 @ConditionalOnProperty(prefix = "review.persistence", name = "enabled", havingValue = "false", matchIfMissing = true)
@@ -63,7 +63,29 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
 
     @Override
     public void saveTopic(DebateTopic topic) {
-        topics.computeIfAbsent(topic.reviewId(), ignored -> new ConcurrentHashMap<>()).putIfAbsent(topic.id(), topic);
+        saveTopics(List.of(topic));
+    }
+
+    @Override
+    public void saveTopics(List<DebateTopic> topicBatch) {
+        if (topicBatch == null) {
+            throw new NullPointerException("topics must not be null");
+        }
+        if (topicBatch.isEmpty()) {
+            return;
+        }
+        ReviewId reviewId = java.util.Objects.requireNonNull(topicBatch.getFirst(), "topic must not be null").reviewId();
+        for (DebateTopic topic : topicBatch) {
+            if (!reviewId.equals(java.util.Objects.requireNonNull(topic, "topic must not be null").reviewId())) {
+                throw new IllegalArgumentException("topic batch crosses review boundary");
+            }
+        }
+        topics.compute(reviewId, (ignored, existing) -> {
+            Map<TopicId, DebateTopic> replacement = new ConcurrentHashMap<>(
+                    existing == null ? Map.of() : existing);
+            topicBatch.forEach(topic -> replacement.putIfAbsent(topic.id(), topic));
+            return replacement;
+        });
     }
 
     @Override

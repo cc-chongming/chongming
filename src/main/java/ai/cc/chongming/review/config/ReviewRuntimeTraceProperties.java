@@ -15,13 +15,13 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "review.runtime-trace.persistence")
 public record ReviewRuntimeTraceProperties(
         @DefaultValue("true") boolean enabled,
-        @DefaultValue("1000") @Min(1) int maxEvents) {
+        @DefaultValue("20000") @Min(1) int maxEvents) {
 
     @ConstructorBinding
     public ReviewRuntimeTraceProperties {
     }
 
     public ReviewRuntimeTraceProperties(boolean enabled) {
-        this(enabled, 1000);
+        this(enabled, 20000);
     }
 }

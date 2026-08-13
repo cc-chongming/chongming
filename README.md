@@ -43,11 +43,12 @@ The project draws from two production-oriented open-source directions: AgentScop
 | Requirement lifecycle platform | Implementation ready; runtime acceptance pending | Dashboard, requirement CRUD/lifecycle, review/report lists, and the V11 MySQL 5.6 migration are available under `/api/dashboard`, `/api/requirements/**`, `/api/reviews`, and `/api/reports` |
 | State machine, role authorization, idempotent commands | Implemented | Invalid stages, unauthorized roles, and replayed commands are rejected or safely replayed server-side |
 | OpenAI-compatible model gateway | Implemented | Per-role model profiles, timeouts/backoff, and Tool Calls; a real model ID is required |
-| Local repository reads | Connected to role Harness | Roles can list, search, and read bounded lines from a server-frozen, allow-listed repository snapshot; evidence submission is still pending |
-| Initial review | Connected to runtime | Four core roles submit Claims, then the flow reaches conflict detection |
-| Debate, Judge, and Gate draft | Connected to runtime | Director, roles, and Judge use restricted tools; one attempt currently supports one active debate topic |
+| Local repository reads | Connected to role Harness | Roles only receive opaque `fileRef` values for their authorized snapshot scope; unauthorized paths are neither exposed nor charged against the read budget |
+| Initial review | Connected to runtime | Four core roles submit required five-state Assessments plus Claims, so both confirmed findings and risks remain visible |
+| Debate, Judge, and Gate draft | Connected to runtime | The Director orchestrates high-level actions while server guards validate targeted commands; multiple conflict topics can be registered atomically and converge without an empty second round |
 | Domain events and SSE | Implemented | Sequenced events, historical replay, heartbeat, and incremental reconnect are supported |
 | Human review, reports, notifications | Core flow available | External notification MCP and production persistence still need real-contract integration |
+| PLAN-024 deterministic convergence | Verified in deterministic suites | Maven 483 run with 0 failures/errors (11 environment skips), Vitest 55/55, Playwright 13/13; MySQL 5.6 and real-model runtime acceptance remain environment/authorization gated |
 | MySQL command writes and multi-instance recovery | Not complete | The review aggregate and runtime dispatcher still have in-process boundaries |
 | Security audit, evaluation, fault injection | Not complete | These are release gates, not substitutes for a local demo |
 
@@ -57,7 +58,7 @@ The project draws from two production-oriented open-source directions: AgentScop
 flowchart LR
     A["Markdown requirement"] --> B["Create review / freeze snapshot"]
     B --> C["Director plans"]
-    C --> D["Core-role Claims"]
+    C --> D["Core-role Assessments + Claims"]
     D --> E["Conflict detection"]
     E --> F["Constrained debate: challenge / rebuttal / evidence"]
     F --> G["Judge and Gate draft"]
@@ -154,7 +155,6 @@ The current version is suitable for local integration, demonstrations, and proto
 
 - Commit Claim, Debate, Judge, Gate, and domain events in one MySQL transaction.
 - Implement database leases, startup scanning, resumable Agent work, and failure-to-human escalation.
-- Batch-orchestrate multiple conflicting topics instead of the current single-active-topic limitation.
 - Connect real read-only repository snapshot/evidence scopes and complete model smoke tests and authorization audit.
 - Complete MySQL replay load tests, security audit, fault injection, and evaluation baselines.
 
@@ -193,4 +193,3 @@ docs/                            Technical design, integration contracts, and ph
 ## Contributing
 
 Every implementation change should update its matching `AIREVIEW-PLAN-xxx`, test evidence, and `.learnings/` entry. Run tests appropriate to the change before submitting; frontend changes must also rebuild the embedded static assets. See [AGENTS.md](AGENTS.md) for the detailed rules.
- 

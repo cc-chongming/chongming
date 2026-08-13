@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * [AIREVIEW-PLAN-010#1.3] Verifies the durable debate store round-trips every field so the conflict,
  * debate, judge and Gate-draft projections survive a restart.
  *
- * @author wangli
+ * @author zyj
  */
 class MyBatisReviewDebateStoreTests {
 
@@ -196,7 +196,7 @@ class MyBatisReviewDebateStoreTests {
         return new MyBatisReviewDebateStore(new FakeDebatePersistenceMapper(), new ObjectMapper());
     }
 
-    /** @author wangli */
+    /** @author zyj */
     private static final class FakeDebatePersistenceMapper implements DebatePersistenceMapper {
 
         private final Map<String, ClaimRow> claims = new LinkedHashMap<>();
@@ -225,6 +225,12 @@ class MyBatisReviewDebateStoreTests {
         public int upsertTopic(TopicRow row) {
             topics.put(row.topicId(), row);
             return 1;
+        }
+
+        @Override
+        public int upsertTopics(List<TopicRow> rows) {
+            rows.forEach(row -> topics.put(row.topicId(), row));
+            return rows.size();
         }
 
         @Override

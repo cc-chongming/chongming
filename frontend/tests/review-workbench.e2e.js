@@ -24,6 +24,25 @@ test.beforeEach(async ({ page }) => {
     }));
 });
 
+test.beforeEach(async ({ page }) => {
+    await page.route('**/api/dashboard', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            pendingRequirementCount: 0,
+            activeReviewCount: 0,
+            requirementStatusCounts: {},
+            activeReviews: [],
+            recentActivities: []
+        })
+    }));
+    await page.route('**/api/repositories', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+    }));
+});
+
 test('renders a replayable debate workbench without executing report content', async ({ page }) => {
     await page.route('**/api/reviews/**', async (route) => {
         const requestUrl = new URL(route.request().url());
@@ -127,6 +146,7 @@ test('renders the live review page as the full-flow workspace with phase-specifi
 
     await expect(page.getByText('需求评审全流程', { exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '评审流程' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '运行调试' })).toBeVisible();
     await expect(page.getByRole('button', { name: '收起观察' })).toBeVisible();
 
     // 默认停留在当前阶段：只展示实际激活或有正式 Claim 的动态角色。
@@ -161,6 +181,7 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await expect(page.getByText('人工结论与 AI Gate 草案不同')).toBeVisible();
     // 结论文案会在结论链、人工理由与 Gate 版本历史多处展示。
     await expect(page.getByText('范围需要补齐').first()).toBeVisible();
+    await expect(page.getByLabel('评审结论链').getByText('范围需要补齐', { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: '进入人工决策' })).toBeVisible();
 });
 
@@ -256,8 +277,7 @@ test('launches an unbound draft from its detail page with a configured repositor
         createdAt: '2026-08-10T00:00:00Z', updatedAt: '2026-08-10T00:00:00Z'
     };
     const launchRequests = [];
-    // 谓词限定只拦截 /api/ 请求，避免 glob 误伤 Vite 的 /src/api/*.js 模块请求。
-    await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    await page.route(/\/api\/(?:dashboard|repositories|requirements|reviews)(?:\/|\?|$)/, async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();
@@ -328,7 +348,7 @@ test('refreshes a draft and rotates the command key after a version conflict', a
     const requirementId = '93000000-0000-0000-0000-000000000001';
     let reads = 0;
     const launches = [];
-    await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
+    await page.route(/\/api\/(?:dashboard|repositories|requirements|reviews)(?:\/|\?|$)/, async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const method = route.request().method();

@@ -153,6 +153,18 @@ const roundTurns = computed(() => debateTopics.value
     .flatMap((topic) => (topic.turns ?? []).map((turn) => ({ ...turn, subject: topic.subjectKey })))
     .filter((turn) => (turn.round ?? 1) === selectedRound.value));
 const judgements = computed(() => debateTopics.value.filter((topic) => topic.judgement));
+// Topics that already escalated to the judging layer but carry no judgement yet; showing them in
+// the conclusion chain keeps the human-decision view honest while the stage machine lags behind.
+const pendingJudgementTopics = computed(() => debateTopics.value.filter(
+    (topic) => !topic.judgement && ['ESCALATED', 'RESOLVED', 'SETTLED'].includes(topic.status ?? '')));
+const HUMAN_REACHABLE_STAGES = new Set(['JUDGING', 'WAITING_HUMAN', 'NOTIFYING', 'COMPLETED']);
+const humanPhaseReachable = computed(() => HUMAN_REACHABLE_STAGES.has(stage.value));
+const stageLabel = {
+    PENDING: '待处理', SNAPSHOTTING: '快照中', PLANNING: '规划中', INITIAL_REVIEW: '初审中',
+    CONFLICT_DETECTION: '冲突检测', DEBATE_ROUND_1: '辩论第 1 轮', DEBATE_ROUND_2: '辩论第 2 轮',
+    JUDGING: '裁决中', WAITING_HUMAN: '待人工决策', NOTIFYING: '通知中',
+    COMPLETED: '已完成', CANCELLED: '已取消', FAILED: '已失败'
+};
 const debateSubject = computed(() => debateTopics.value[0]?.subjectKey ?? null);
 const gateDraft = computed(() => store.state.summary?.gate ?? null);
 const gateOverride = computed(() => gateDifference(gateDraft.value, store.state.humanGateVersions));
@@ -193,11 +205,14 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
             ? claimOverview(claims)
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'
             : latest ? itemSummary(latest) : activated ? '角色已激活，等待公开运行事件。' : '等待 Director 分配评审任务。',
+            : latest ? itemSummary(latest) : '角色已激活，等待公开运行事件。',
         claims,
         items
     };
 }));
-const planCards = computed(() => store.state.plans ?? []);
+// The /plans projection also carries scout/initial-review milestones; only plan events render as
+// plan cards, otherwise non-plan rows appear as empty "v—" cards.
+const planCards = computed(() => (store.state.plans ?? []).filter((plan) => plan.type === 'PLAN_CREATED' || plan.type === 'PLAN_REVISED'));
 const streamEmpty = computed(() => {
     if (liveRunState.value.emptyState) return liveRunState.value.emptyState;
     if (activePhase.value === 'director') {
@@ -214,13 +229,19 @@ const streamEmpty = computed(() => {
 const factTimeline = computed(() => store.events.value.slice().reverse().map((event) => ({
     ...event, title: eventTitle(event), detail: eventDetail(event)
 })));
+const DEBUG_VISIBLE_LIMIT = 400;
 const debugItems = computed(() => {
     const visibleEvents = runtimeTrace.state.events.filter((event) => !isReasoningEvent(event));
+    // A long replay can carry tens of thousands of events; rendering every one as a debug row
+    // freezes the drawer, so only the most recent window is shown.
+    const truncatedCount = Math.max(0, visibleEvents.length - DEBUG_VISIBLE_LIMIT);
+    const shownEvents = truncatedCount ? visibleEvents.slice(-DEBUG_VISIBLE_LIMIT) : visibleEvents;
     const lastEvent = visibleEvents.at(-1);
     return [
         { id: 'runtime-connection', role: 'SYSTEM', summary: `连接状态：${runtimeTrace.state.status}` },
         { id: 'runtime-cursor', role: 'SYSTEM', summary: `当前游标：${lastEvent?.sequence ?? lastEvent?.id ?? '尚无事件'}` },
-        ...visibleEvents.map((event, index) => ({
+        ...(truncatedCount ? [{ id: 'runtime-debug-truncated', role: 'SYSTEM', summary: `更早的 ${truncatedCount} 条运行事件已省略，仅展示最近 ${DEBUG_VISIBLE_LIMIT} 条。` }] : []),
+        ...shownEvents.map((event, index) => ({
             id: `debug:${event.id ?? event.sequence ?? index}`,
             role: event.value?.role ?? String(event.runId ?? '').split(':').at(-1)?.toUpperCase() ?? 'SYSTEM',
             summary: runtimeDebugSummary(event)
@@ -531,8 +552,11 @@ onUnmounted(() => loadQueue.dispose());
 
                 <!-- ── 人工决策 ── -->
                 <template v-else-if="activePhase === 'human'">
+                    <p v-if="!humanPhaseReachable" class="flow-human-not-ready" role="status">
+                        评审尚未进入人工决策阶段（当前阶段：{{ stageLabel[stage] ?? stage }}）。Judge 提交裁决并形成 Gate 草案后，流程会自动推进到这里。
+                    </p>
                     <section class="flow-conclusion-chain" aria-label="评审结论链">
-                        <article><span>1</span><div><small>Judge 议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
+                        <article><span>1</span><div><small>Judge 议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else-if="pendingJudgementTopics.length">{{ pendingJudgementTopics.length }} 个议题已升级，等待 Judge 裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
                         <i aria-hidden="true">↓</i>
                         <article><span>2</span><div><small>确定性 AI Gate 草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><p v-if="gateDraft?.reasonSummary">{{ gateDraft.reasonSummary }}</p></div></article>
                         <i aria-hidden="true">↓</i>

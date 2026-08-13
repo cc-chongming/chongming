@@ -52,6 +52,22 @@ class InMemoryRequirementReviewLaunchCommandStoreTests {
     }
 
     @Test
+    void invalidatesOnlyTheMatchingCompletedReservation() {
+        InMemoryRequirementReviewLaunchCommandStore store = new InMemoryRequirementReviewLaunchCommandStore();
+        UUID owner = UUID.randomUUID();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        store.reserve(requirementId, "launch-1", "a".repeat(64), owner);
+        store.complete(requirementId, "launch-1", "a".repeat(64), owner, reviewId);
+
+        assertThat(store.invalidateCompleted(
+                requirementId, "launch-1", "b".repeat(64), reviewId)).isFalse();
+        assertThat(store.invalidateCompleted(
+                requirementId, "launch-1", "a".repeat(64), reviewId)).isTrue();
+        assertThat(store.reserve(requirementId, "launch-1", "a".repeat(64), UUID.randomUUID()).status())
+                .isEqualTo(ReservationStatus.ACQUIRED);
+    }
+
+    @Test
     void letsANewOwnerRecoverAnExpiredReservation() {
         Instant now = Instant.parse("2026-08-10T08:00:00Z");
         MutableClock clock = new MutableClock(now);

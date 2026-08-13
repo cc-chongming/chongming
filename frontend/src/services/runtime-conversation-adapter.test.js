@@ -74,12 +74,26 @@ describe('runtime conversation adapter', () => {
         expect(isReasoningEvent({ type: 'TEXT_MESSAGE_CONTENT' })).toBe(false);
     });
 
-    it('treats a failed phase or failed result state as failure even when status says success', () => {
+    it('treats an authoritative SUCCESS terminal status as success even with a stale failed phase', () => {
         const [tool] = buildRuntimeConversation([
             {
                 type: 'CUSTOM', runId: 'runtime-1:DIRECTOR', name: 'chongming.tool-call.v1',
                 value: {
-                    toolCallId: 'call-1', toolName: 'open_debate_topic', phase: 'failed', status: 'SUCCESS',
+                    toolCallId: 'call-1', toolName: 'todo_write', phase: 'failed', status: 'SUCCESS',
+                    output: { summary: '0 open todo(s)' }
+                }
+            }
+        ]);
+
+        expect(tool.status).toBe('SUCCESS');
+    });
+
+    it('keeps explicit failure terminal states as failure', () => {
+        const [tool] = buildRuntimeConversation([
+            {
+                type: 'CUSTOM', runId: 'runtime-1:DIRECTOR', name: 'chongming.tool-call.v1',
+                value: {
+                    toolCallId: 'call-2', toolName: 'open_debate_topic', phase: 'failed', status: 'ERROR',
                     output: { state: 'ERROR', errorCode: 'ILLEGAL_STATE_TRANSITION' }
                 }
             }
@@ -135,6 +149,35 @@ describe('runtime conversation adapter', () => {
         ]);
 
         expect(message.content).toBe('退回修改。');
+    });
+
+    it('maps child harness run ids with attempt prefixes back to their base role', () => {
+        const conversation = buildRuntimeConversation([
+            { type: 'TEXT_MESSAGE_START', runId: 'review-1-attempt-1:review-1-attempt-1-product', messageId: 'answer-1', sequence: 1 },
+            { type: 'TEXT_MESSAGE_CONTENT', runId: 'review-1-attempt-1:review-1-attempt-1-product', messageId: 'answer-1', delta: '初审完成。', sequence: 2 },
+            { type: 'TEXT_MESSAGE_END', runId: 'review-1-attempt-1:review-1-attempt-1-product', messageId: 'answer-1', sequence: 3 }
+        ]);
+
+        expect(conversation).toEqual([
+            expect.objectContaining({ role: 'PRODUCT', content: '初审完成。' })
+        ]);
+    });
+
+    it('merges tool results by toolCallId instead of forking a ghost unknown-tool row', () => {
+        const conversation = buildRuntimeConversation([
+            { type: 'TOOL_CALL_START', runId: 'runtime-1:DIRECTOR', toolCallId: 'call-9', toolCallName: 'close_debate_topic', sequence: 1 },
+            {
+                type: 'TOOL_CALL_RESULT', runId: 'runtime-1:DIRECTOR', toolCallId: 'call-9',
+                messageId: 'reply-9', content: '工具执行结束', sequence: 2
+            },
+            { type: 'TOOL_CALL_RESULT', runId: 'runtime-1:DIRECTOR', messageId: 'orphan-reply', content: '孤立结果', sequence: 3 }
+        ]);
+
+        expect(conversation).toHaveLength(1);
+        expect(conversation[0]).toMatchObject({
+            kind: 'tool', toolCallId: 'call-9', toolName: 'close_debate_topic', output: '工具执行结束'
+        });
+        expect(conversation.some((item) => item.toolName === 'unknown_tool')).toBe(false);
     });
 
     it('keeps neutral claims separate from support and opposition', () => {

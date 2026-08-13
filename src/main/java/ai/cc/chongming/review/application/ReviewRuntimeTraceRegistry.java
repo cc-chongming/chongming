@@ -50,7 +50,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Component
 public class ReviewRuntimeTraceRegistry {
 
-    private static final int DEFAULT_MAX_EVENTS_PER_RUNTIME = 1000;
+    private static final int DEFAULT_MAX_EVENTS_PER_RUNTIME = 20000;
 
     /** Custom event names carrying PLAN-024 observability metrics. */
     static final String FAILURE_METRIC_EVENT_NAME = "chongming.runtime-metrics.failure.v1";

@@ -3,6 +3,8 @@ package ai.cc.chongming.review.debate;
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.EvidenceLedgerService;
 import ai.cc.chongming.review.application.JudgeService;
+import ai.cc.chongming.review.application.ConflictDetectionService;
+import ai.cc.chongming.review.application.ReviewEventPublisher;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.exception.ReviewErrorCode;
 import ai.cc.chongming.review.domain.model.Claim;
@@ -10,9 +12,14 @@ import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.GateDecision;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.protocol.DebateStateMachine;
+import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
+import ai.cc.chongming.review.domain.repository.ReviewConflictAuditStore;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
+import ai.cc.chongming.review.infrastructure.assessment.InMemoryReviewAssessmentStore;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -27,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * multi-topic registration with a single stage migration, directed rebuttal identity and
  * round-two convergence without an empty round.
  *
- * @author wangli
+ * @author zyj
  */
 class DebateGoldenPathIntegrationTests {
 
@@ -92,7 +99,7 @@ class DebateGoldenPathIntegrationTests {
     /** [AIREVIEW-PLAN-024#方案4 验证矩阵] N 个候选原子登记 N 主题，阶段只迁移一次，重复调用幂等。 */
     @Test
     void registersMultipleTopicsAtomicallyWithExactlyOneStageMigration() {
-        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        BatchOnlyReviewDebateStore store = new BatchOnlyReviewDebateStore();
         DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
         Review review = conflictDetectionReview();
         Claim authSupport = claim(review.id(), RoleType.PRODUCT, ClaimPosition.SUPPORT, "authentication");
@@ -113,6 +120,7 @@ class DebateGoldenPathIntegrationTests {
         assertThat(result.replayed()).isFalse();
         assertThat(result.topics()).hasSize(2);
         assertThat(store.findTopics(review.id())).hasSize(2);
+        assertThat(store.batchWrites).isEqualTo(1);
         assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
 
         // Replaying the same idempotency key returns the registered topics without a second migration.
@@ -124,7 +132,39 @@ class DebateGoldenPathIntegrationTests {
         assertThat(replayed.replayed()).isTrue();
         assertThat(replayed.topics()).hasSize(2);
         assertThat(store.findTopics(review.id())).hasSize(2);
+        assertThat(store.batchWrites).isEqualTo(1);
         assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+    }
+
+    @Test
+    void leavesReviewAndTopicsUntouchedWhenConflictAuditFinalizationFails() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        ConflictDetectionService conflicts = new ConflictDetectionService(
+                new InMemoryReviewAssessmentStore(), store, new FailingConflictAuditStore());
+        DebateService debateService = new DebateService(
+                store,
+                new EvidenceLedgerService(),
+                new DebateStateMachine(),
+                new ReviewProtocolGuard(),
+                ReviewEventPublisher.noop(),
+                conflicts);
+        Review review = conflictDetectionReview();
+        Claim support = claim(review.id(), RoleType.PRODUCT, ClaimPosition.SUPPORT);
+        Claim oppose = claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE);
+        store.saveClaim(support);
+        store.saveClaim(oppose);
+        DebateToolCommands.RegisterTopics command = new DebateToolCommands.RegisterTopics(
+                metadata(review, "audit-failure"),
+                RoleType.DIRECTOR,
+                List.of(new DebateToolCommands.TopicProposal(
+                        "authentication", List.of(support.claimId(), oppose.claimId()))));
+
+        assertThatThrownBy(() -> debateService.registerTopics(review, command))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("audit unavailable");
+        assertThat(store.findTopics(review.id())).isEmpty();
+        assertThat(review.stage()).isEqualTo(ReviewStage.CONFLICT_DETECTION);
+        assertThat(review.commandResults()).doesNotContainKey(command.metadata().idempotencyKey());
     }
 
     /** [AIREVIEW-PLAN-024#方案4 验证矩阵] 定向反驳：只有 challenge.targetRole 可回应，第三方被拒且状态不变。 */
@@ -276,5 +316,48 @@ class DebateGoldenPathIntegrationTests {
 
     private ReviewCommandMetadata metadata(Review review, String key) {
         return new ReviewCommandMetadata(review.id(), review.version(), new IdempotencyKey(key));
+    }
+
+    /** @author zyj */
+    private static final class BatchOnlyReviewDebateStore extends InMemoryReviewDebateStore {
+
+        private int batchWrites;
+
+        @Override
+        public void saveTopic(DebateTopic topic) {
+            throw new AssertionError("multi-topic registration must use one batch write");
+        }
+
+        @Override
+        public void saveTopics(List<DebateTopic> topics) {
+            batchWrites++;
+            super.saveTopics(topics);
+        }
+    }
+
+    /** @author zyj */
+    private static final class FailingConflictAuditStore implements ReviewConflictAuditStore {
+
+        @Override
+        public void replaceBatch(
+                ReviewId reviewId,
+                int attemptNo,
+                Collection<ai.cc.chongming.review.domain.model.ReviewConflictAudit> records) {
+        }
+
+        @Override
+        public void finalizeAttempt(
+                ReviewId reviewId,
+                int attemptNo,
+                Collection<String> registeredSubjectKeys,
+                Instant updatedAt) {
+            throw new IllegalStateException("audit unavailable");
+        }
+
+        @Override
+        public List<ai.cc.chongming.review.domain.model.ReviewConflictAudit> findByReviewAttempt(
+                ReviewId reviewId, int attemptNo) {
+            return List.of();
+        }
     }
 }

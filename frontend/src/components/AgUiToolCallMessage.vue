@@ -12,13 +12,18 @@ const labels = {
 
 const toolLabel = computed(() => labels[props.item.toolName] ?? props.item.toolName ?? '未知工具');
 const effectiveStatus = computed(() => {
+    // The terminal status is authoritative over the lifecycle phase: stale persisted
+    // observations can carry phase=failed for tools that actually succeeded.
+    const status = String(props.item.status ?? 'RUNNING').toUpperCase();
+    if (status === 'SUCCESS') return 'SUCCESS';
     const phase = String(props.item.phase ?? '').toUpperCase();
     const outputState = String(props.item.output?.state ?? props.item.output?.status ?? props.item.output?.resultState ?? '').toUpperCase();
     if (['FAILED', 'ERROR'].includes(phase) || ['FAILED', 'ERROR', 'DENIED', 'INTERRUPTED'].includes(outputState)) return 'ERROR';
-    return String(props.item.status ?? 'RUNNING').toUpperCase();
+    return status;
 });
 const statusLabel = computed(() => ({
-    RUNNING: '进行中', SUCCESS: '已完成', ERROR: '失败', FAILED: '失败', DENIED: '已拒绝', INTERRUPTED: '已中断'
+    RUNNING: '进行中', STREAMING: '进行中', SUCCESS: '已完成', COMPLETED: '已完成',
+    ERROR: '失败', FAILED: '失败', DENIED: '已拒绝', INTERRUPTED: '已中断'
 }[effectiveStatus.value] ?? effectiveStatus.value ?? '未知状态'));
 const maskedInput = computed(() => maskSensitiveValue(props.item.input));
 const maskedOutput = computed(() => maskSensitiveValue(props.item.output));

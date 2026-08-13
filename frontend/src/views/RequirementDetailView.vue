@@ -408,7 +408,7 @@ onMounted(refreshRepositoryAvailability);
                 <h2 id="requirement-launch-title">发起评审</h2>
                 <p class="muted">草稿不保存 Markdown 原文，请重新上传需求文档。提交后将创建、绑定并启动一次评审。</p>
                 <form class="review-form compact" @submit.prevent="launchReview">
-                    <label class="full">评审需求文档（.md）<input type="file" accept=".md,text/markdown" required @change="onLaunchFileChange" /></label>
+                    <label class="full">评审需求文档（.md）<input type="file" accept=".md,text/markdown" @change="onLaunchFileChange" /></label>
                     <RepositorySelect v-model="launchForm.repositoryPath" class="full" required />
                     <label>分支<input v-model="launchForm.branch" placeholder="main" /></label>
                     <label>Commit（可选）<input v-model="launchForm.commit" placeholder="40 位 SHA" /></label>

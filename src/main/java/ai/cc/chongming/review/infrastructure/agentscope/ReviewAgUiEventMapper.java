@@ -144,19 +144,30 @@ public class ReviewAgUiEventMapper {
             return toolTrace(toolTraceCollector, toolCallId)
                     .map(trace -> {
                         List<AguiEvent> mapped = new java.util.ArrayList<>(standard);
+                        // The lifecycle end event carries the authoritative terminal state; the
+                        // collector copy can lag behind. Only explicit failure states map to a
+                        // failed phase so successful tools (todo_write, wait_async_results, ...)
+                        // are never presented as failures.
+                        ToolResultState terminalState = tool.getState() != null ? tool.getState() : trace.state();
                         mapped.add(toolObservation(
                                 threadId,
                                 runId,
                                 context,
                                 toolCallId,
                                 trace,
-                                trace.state() == ToolResultState.SUCCESS ? "completed" : "failed",
-                                tool.getState()));
+                                failurePhase(terminalState) ? "failed" : "completed",
+                                terminalState));
                         return List.copyOf(mapped);
                     })
                     .orElse(standard);
         }
         return List.of();
+    }
+
+    private static boolean failurePhase(ToolResultState state) {
+        return state == ToolResultState.ERROR
+                || state == ToolResultState.DENIED
+                || state == ToolResultState.INTERRUPTED;
     }
 
     private static String textKey(String runId, String replyId, String blockId) {

@@ -26,6 +26,12 @@ public interface RequirementReviewLaunchCommandStore {
 
     void release(RequirementId requirementId, String idempotencyKey, UUID ownerToken);
 
+    boolean invalidateCompleted(
+            RequirementId requirementId,
+            String idempotencyKey,
+            String requestFingerprint,
+            ReviewId reviewId);
+
     /**
      * [AIREVIEW-PLAN-023#3] Outcome of one atomic reservation attempt.
      *

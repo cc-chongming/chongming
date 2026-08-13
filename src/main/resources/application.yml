@@ -145,7 +145,10 @@ review:
     # a failure is logged and never blocks the review run or the real-time SSE stream.
     persistence:
       enabled: ${RUNTIME_TRACE_PERSISTENCE:true}
-      max-events: ${RUNTIME_TRACE_MAX_EVENTS:1000}
+      # A full multi-role review emits several thousand AG-UI events (observed 8200+ and still
+      # growing); 1000 caused sustained RUNTIME_TRACE_PERSIST_BACKPRESSURE drops and incomplete
+      # restart replay. Override with RUNTIME_TRACE_MAX_EVENTS if longer reviews hit the ceiling.
+      max-events: ${RUNTIME_TRACE_MAX_EVENTS:20000}
   sse:
     # Transport controls only; event business sequence is always assigned by the event store.
     timeout: ${REVIEW_SSE_TIMEOUT:PT30M}

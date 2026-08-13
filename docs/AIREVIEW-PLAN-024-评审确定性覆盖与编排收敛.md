@@ -1,6 +1,6 @@
 # AIREVIEW-PLAN-024：评审确定性覆盖与编排收敛
 
-> **状态**: ⏳ 待实施
+> **状态**: ✅ 代码与确定性验收完成（真实模型验收待用户授权；MySQL 5.6 实测待 Docker 环境）
 > **创建时间**: 2026-08-10
 > **目标**: 在不新增 Agent 的前提下，修正核心角色单向质疑、仓库取证越权、辩论路由失真、冲突开题不完整、Gate 缺少正向覆盖依据和完整流程未闭环等问题，使一次评审能够产出“已确认、部分满足、存在缺口、无法确认、不适用”的完整结论，并由现有 Director 可靠编排到最终完成。
 
@@ -396,11 +396,17 @@ readLines(fileRef, startLine, lineCount?)
 | `src/main/java/ai/cc/chongming/review/application/ReviewDispatchService.java` | 3 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/dispatch/InMemoryReviewDispatchStore.java` | 3 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/application/ConflictDetectionService.java` | 4 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/domain/model/ReviewConflictAudit.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/domain/repository/ReviewConflictAuditStore.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/audit/InMemoryReviewConflictAuditStore.java` | 5 | ✅ 已完成 |
 | `src/main/resources/db/migration/V19__create_review_assessment_and_dispatch_tables.sql` | 5 | ✅ 已完成 |
+| `src/main/resources/db/migration/V20__create_review_conflict_audit_table.sql` | 5 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStore.java` | 5 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewAssessmentPersistenceMapper.java` | 5 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStore.java` | 5 | ✅ 已完成 |
 | `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewDispatchPersistenceMapper.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewConflictAuditStore.java` | 5 | ✅ 已完成 |
+| `src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/ReviewConflictAuditPersistenceMapper.java` | 5 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/assessment/ReviewAssessmentContractTests.java` | 0 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/application/AssessmentServiceTests.java` | 1 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/agentscope/RepositoryFileGrantTests.java` | 2 | ✅ 已完成 |
@@ -409,8 +415,9 @@ readLines(fileRef, startLine, lineCount?)
 | `src/test/java/ai/cc/chongming/review/application/ConflictDetectionServiceTests.java` | 4 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewAssessmentStoreTests.java` | 5 | ✅ 已完成 |
 | `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewDispatchStoreTests.java` | 5 | ✅ 已完成 |
-| `src/test/java/ai/cc/chongming/review/lifecycle/ReviewQualityConvergenceIntegrationTests.java` | 7 | ⏳ 待实施 |
-| `frontend/tests/review-assessment-coverage.e2e.js` | 7 | ⏳ 待实施 |
+| `src/test/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewConflictAuditStoreTests.java` | 5 | ✅ 已完成 |
+| `src/test/java/ai/cc/chongming/review/lifecycle/ReviewQualityConvergenceIntegrationTests.java` | 7 | ✅ 已完成 |
+| `frontend/tests/review-assessment-coverage.e2e.js` | 7 | ✅ 已完成 |
 
 ### 修改文件
 
@@ -425,7 +432,7 @@ readLines(fileRef, startLine, lineCount?)
 | `RepositoryToolContext.java`、`ReadOnlyRepositoryTools.java`、`RepositorySearchIndex.java` | 2 | ✅ 方案2 已完成 |
 | `ReviewDirectorHarnessFactory.java`、`ReviewWorkflowDispatcher.java` | 3 | ✅ 已完成 |
 | `ReviewDebateToolFactory.java`、`DebateToolCommands.java` | 3-4 | ✅ 已完成（方案3：写动作接入 commandId、Director 新增 dispatch_debate_action；方案4：新增 list_conflict_candidates/register_topics 工具与 RegisterTopics 批量命令，移除 open_debate_topic） |
-| `ConflictDetector.java`、`DebateService.java`、`DebateStateMachine.java` | 4 | ✅ 已完成（含 `ReviewStateMachine.java` 允许 ROUND_1→JUDGING 提前收敛，见偏差记录） |
+| `ConflictDetector.java`、`DebateService.java`、`DebateStateMachine.java` | 4、7 | ✅ 已完成（含 `ReviewStateMachine.java` 允许 ROUND_1→JUDGING 提前收敛，以及 `ReviewDebateStore`/双实现/`DebatePersistenceMapper` 的单批次主题写入） |
 | `GatePolicy.java`、`JudgeService.java` | 5 | ✅ 已完成（方案5 后端） |
 | `ReviewReportService.java`、`ReviewQueryService.java` | 5 | ✅ 已完成（方案5 后端，含 `ReviewQueryController` 新增 assessments 端点，见偏差记录） |
 | `ReviewPersistenceMapper.java`、`MyBatisReviewRepository.java` | 5 | ✅ 未修改，Assessment/Dispatch 持久化由独立 mapper/store 承载（见偏差记录） |
@@ -433,11 +440,13 @@ readLines(fileRef, startLine, lineCount?)
 | `ReviewWorkbenchView.vue`、`ReviewReportView.vue`、`ReviewRoundtable.vue` | 5 | ✅ 已完成（方案5 前端：工作台覆盖进度与四态区分、报告五区块、圆桌席位五态结论） |
 | `application.yml`、`application-local.yml` | 6 | ✅ 已完成（application.yml：role-reviewer 重试降为 1 并新增熔断配置；application-local.yml 保持现状不提交，见偏差记录） |
 | `CommercialModelGateway.java`、`ModelProfileRegistry.java`、`ReviewRuntimeTraceRegistry.java` | 6 | ✅ 已完成（attempt 边界熔断 + 五类失败计数与阶段指标；另新增 `RuntimeFailureCategory.java`，见偏差记录） |
-| 相关 Java 单元、集成和持久化测试 | 0-7 | ⏳ 部分完成（方案0-6 定向测试全部通过；方案7 确定性夹具与全链路测试待实施） |
+| 相关 Java 单元、集成和持久化测试 | 0-7 | ✅ 代码与确定性测试完成（483 项运行、0 失败/错误、11 项环境性跳过） |
 | `review-api.test.js`、`review-store.test.js`（方案5 前端单测） | 5 | ✅ 已完成（请求契约与五态状态派生；Vitest 55/55 通过） |
-| `frontend/tests/review-workbench.e2e.js`（完整 E2E 验收） | 7 | ⏳ 待实施（方案7；见偏差记录：4 项既有失败与方案5 前端无关） |
-| `src/main/resources/static/review/` | 5、7 | ✅ 方案5 前端已同步 bundle（index-Fu2F1VNG.js / index-C802buHi.css，旧 hash 已删） |
-| `docs/AIREVIEW-PLAN-001-总体实施路线图.md`、README 双语文档、`.learnings/LEARNINGS.md` | 7 | ⏳ 待实施 |
+| `frontend/tests/review-workbench.e2e.js`（完整 E2E 验收） | 7 | ✅ 已完成（连同新增覆盖用例 Playwright 13/13 通过） |
+| `ReviewLiveView.vue`、`RequirementDetailView.vue`、`platform-shell.e2e.js` | 7 | ✅ 已完成（修复运行调试页异常、版本冲突重试与导航基线） |
+| `frontend/playwright.config.js` | 7 | ✅ 已完成（支持显式指定已缓存的 Chromium executable） |
+| `src/main/resources/static/review/` | 5、7 | ✅ 已同步 bundle（index-kHDDm4OP.js / index-DgpfH-qw.css，旧 hash 已删） |
+| `docs/AIREVIEW-PLAN-001-总体实施路线图.md`、README 双语文档、`.learnings/LEARNINGS.md` | 7 | ✅ 已完成 |
 
 > 文件名是实施前的目标设计。若现有持久化聚合更适合承载 Assessment 或 Dispatch，实施时可以在不改变接口与不变量的前提下合并类型，但必须在本计划“偏差记录”和文件清单中同步说明。
 
@@ -469,9 +478,11 @@ readLines(fileRef, startLine, lineCount?)
 | Gate 覆盖 | GatePolicy 参数化测试 | 覆盖不足或高风险 UNKNOWN 不得 AI_PASS |
 | 报告计数 | Report/Query 测试 | 五态、主题和剩余风险计数均与 store 一致 |
 | 模型超时 | Gateway/Trace 测试 | 达阈值后同 attempt 直接 fallback，指标区分超时和工具拒绝 |
-| MySQL 兼容 | IDEA 构建 + 迁移集成测试 | V19 在目标 MySQL 版本可执行，读写和重放一致 |
+| MySQL 兼容 | IDEA 构建 + 迁移集成测试 | V19/V20 在目标 MySQL 版本可执行，读写和重放一致 |
 | 前端展示 | Vitest + Playwright + build | 五态可见、覆盖率正确、静态 bundle 同步 |
 | 完整闭环 | 生命周期 E2E | 最终到 COMPLETED，报告和通知均生成且版本一致 |
+
+确定性验收结果（2026-08-11）：IDEA MCP 构建成功且无 problems；Maven 全量测试 483 项运行、0 失败/错误、11 项因 Docker/MySQL 或 Windows 权限条件跳过；Vitest 55/55 通过；Playwright 13/13 通过且无未 Mock 的后端请求；Vite 生产 bundle 已同步。新增的 MySQL 5.6 真实 Mapper 往返测试会验证 V20 动态 SQL、冲突处置更新、重建回读、空 attempt 隔离以及多主题批量 upsert，但本机无 Docker，当前属于上述环境性跳过。未启动 Spring Boot 服务、未调用真实模型，真实模型耗时与外部通知契约仍待用户明确授权后验收。
 
 ## 量化验收标准
 
@@ -516,6 +527,8 @@ readLines(fileRef, startLine, lineCount?)
 | 2026-08-11 | 方案5 前端完成：`review-api.js` 新增 `GET /api/reviews/{reviewId}/assessments` 查询与 `parseAssessmentsView` 五态字段归一化（计数保持服务端原值）；`review-store.js` 纳入 assessments 状态并派生 `assessmentCoverage`/`assessmentBreakdown`（未执行/执行但未知/确认无问题/确认有缺口）/`roleAssessmentProgress`（按角色覆盖进度与五态数量），ROLE_COMPLETED/INITIAL_REVIEW_COMPLETED/REVIEW_RETRIED 事件驱动刷新；`ReviewWorkbenchView.vue` 新增「检查点覆盖」面板（覆盖进度条、四态区分、五态数量、按角色进度，coverage 无确认项且存在 UNKNOWN 时数据驱动展示「UNKNOWN：当前评审快照未授予前端文件」）；`ReviewReportView.vue` 新增「检查点结论」区块：服务端计数 KPI、未执行清单与确定结论/部分满足/风险缺口/证据不足/不适用五个区块（按角色+检查点稳定排序）；`ReviewRoundtable.vue` 角色席位最小融入五态结论行。验证：Vitest 55/55 通过；`npm run build` 后同步 `src/main/resources/static/review/`（新 hash index-Fu2F1VNG.js/index-C802buHi.css，旧 hash index-BWz8nMFG.js/index-DsY3MXsH.css 删除，index.html 更新）；Playwright 10 项中 6 项通过，4 项失败经基线（stash 后重跑）确认为方案5 前端前已存在的既有失败（见偏差记录），完整 E2E 验收归属方案7。 |
 | 2026-08-11 | 方案6 完成：`role-reviewer` 从“30 秒、2 次重试”调整为“30 秒、1 次重试”（单角色最坏等待约 60 秒），其他 profile 不动；新增运行级（attempt 边界）熔断：键为 `traceId+provider/model/profile`，连续瞬时失败达阈值（默认 2，`review.model-gateway.circuit-breaker.failure-threshold`，可设 0 禁用）后本 attempt 后续同 profile 调用直接走配置的 fallback 并记录熔断原因（`model_circuit_breaker_route/open`），每 `probe-interval`（默认 3）次路由后发起一次半开探测（`model_circuit_breaker_probe/probe_failed/recovered`），探测成功即闭合；不跨评审/不跨 attempt、无持久熔断；仅瞬时（可重试）故障计数，既有单次 provider fallback 逻辑保持不变；`ReviewRuntimeTraceRegistry` 新增五类独立失败计数（MODEL_TIMEOUT/NON_JSON_RESPONSE/TOOL_PARAMETER_REJECTED/REPOSITORY_ACCESS_DENIED/READ_BUDGET_EXHAUSTED，新增 `RuntimeFailureCategory` 枚举，禁止归并为统一“模型降级”）与六类阶段指标记录 API（阶段耗时、角色首 token、工具成功/失败次数、Assessment 覆盖完成时间、派发等待时间、每轮有效动作数），指标以 AG-UI Custom 事件复用 PLAN-022 持久化管道，重启水合时从持久化事件重建、缺失字段读为默认值（向后兼容，无 RuntimeTraceStore 结构变更）；本阶段未改角色输出 token 上限，亦未发现需下调的配置截断风险。定向测试：ModelGatewayContractTests 10（新增 3：达阈值后同 attempt 直走 fallback 且不触碰 primary、不跨 attempt 熔断、半开探测恢复闭合）、OpenAiCompatibleModelClientTests 9（新增 1：超时分类为 MODEL_CALL_TIMEOUT）、ReviewRuntimeTraceRegistryTests 11（新增 3：五类计数独立、阶段指标重启后重建、PLAN-024 前旧轨迹指标默认零值）全部通过；全量测试 476 运行 0 失败 10 环境性跳过（REVIEW_PERSISTENCE_ENABLED=false，MySQL/Docker 不可用，已知环境条件）。 |
 
+| 2026-08-11 | 方案7 完成：新增 `ReviewQualityConvergenceIntegrationTests`，确定性覆盖无冲突 AI_PASS、双主题定向质询/反驳后 CONDITIONAL、高风险 UNKNOWN 经人工 PASS→报告 v1→通知 SENT→COMPLETED 三条链路；将冲突候选处置审计从进程内 Map 补齐为 `ReviewConflictAuditStore` 双实现与 V20 表，显式隔离 attempt，终态后禁止再次检测覆盖；多主题改为单条批量 SQL/单次内存原子替换，`registerTopics` 以外层事务统一主题与审计写入；新增 MySQL 5.6 真实 Mapper 往返测试（本机无 Docker 环境性跳过）；新增前端五态/覆盖率与 WAITING_HUMAN→NOTIFYING→COMPLETED E2E，并修复 live 页运行时异常、需求版本冲突重试、导航与定位器基线。IDEA MCP 构建通过，Maven 483 项运行且 0 失败/错误（11 项环境性跳过）、Vitest 55/55、Playwright 13/13、生产 bundle 同步。真实模型与外部通知联调未启动，等待用户明确授权。 |
+
 ## 偏差记录
 
 - 2026-08-10：迁移文件由 `V17__create_review_assessment_and_dispatch_tables.sql` 改为 `V19__create_review_assessment_and_dispatch_tables.sql`。原因：V17（`context_scout_conclusion`）与 V18（`requirement_review_launch_command`）已被 PLAN-023 占用且 Flyway 迁移历史不可变；影响：Flyway 版本序列顺延至 V19；替代方案：重命名 PLAN-023 迁移——拒绝（迁移历史不可变）。
@@ -537,11 +550,15 @@ readLines(fileRef, startLine, lineCount?)
 - 2026-08-10（方案4）：`DebateTopic` 允许空 claimIds 列表（冲突主题可仅指向归一化 subjectKey，例如 Assessment 状态矛盾无对应 Claim 可挂）。原因：Assessment 矛盾候选不携带 Claim 引用；影响：registerTopics 校验仅对非空 claimIds 做 review 归属检查；替代方案：强制至少一个 Claim——拒绝（会阻止纯 Assessment 矛盾建题）。
 - 2026-08-10（方案4）：`InMemoryReviewDebateStore` 与 `DebatePersistenceMapper` 的 Turn 排序由 round→turnId 改为 round→createdAt→turnId，且 `DebateService` 引入单调 turn 时钟（`nextTurnInstant`）保证同评审内 Turn 时间戳严格递增。原因：turnId 为随机 UUID，等时间戳下按 UUID 排序使“EVIDENCE_REQUEST 是否已被 targetRole 应答”的判定非确定性，联跑偶发失败；影响：内存与 MyBatis 两种 store 行为一致，createdAt 成为排序一级依据；替代方案：仅加 turnId 回退不变——拒绝（根因是时序语义缺失而非比较器问题）。
 - 2026-08-10（方案4）：`DebateService.closeTopic` 事件的 round 由 `review.stage()` 派生（ROUND_2→2，否则 1），替代 `topic.currentRound()`。原因：主题在无任何 Turn 时 currentRound 为 0，违反事件 round∈[1,2] 校验；影响：仅事件元数据，领域状态不变；替代方案：允许事件 round=0——拒绝（破坏事件契约）。
-- 2026-08-10（方案4）：冲突候选/登记/跳过审计记录当前为 `ConflictDetectionService` 内存 `ConcurrentHashMap`，报告计数经 `debateMetrics` 单次批量查询派生，未改 `ReviewReportService` 报告结构。原因：审计持久化与报告文案展示属方案5；影响：进程重启后审计记录丢失（方案5 持久化后消除）；替代方案：本阶段直接建表持久化——拒绝（越界到方案5）。
+- 2026-08-10（方案4，已于 2026-08-11 方案7 收口）：冲突候选/登记/跳过审计最初仅存在于 `ConflictDetectionService` 内存 Map。收口审计发现方案5未实际消除重启丢失，因此新增 `ReviewConflictAuditStore`、内存/MyBatis 双实现及 V20 表；`ConflictDetectionService` 每次检测批量替换当前 attempt 审计、登记后批量更新处置，并按 reviewId+attemptNo 读取事实。显式 attempt 边界同时避免“新 attempt 无审计行时误回读旧 attempt”问题。影响：重启后仍能恢复 DETECTED/REGISTERED/SKIPPED/NO_CONFLICT，候选与主题一一对应可验证；替代方案：继续依赖进程内 Map 或按 MAX(attempt_no) 推断——拒绝（空结果无法表达当前 attempt，且不满足重放隔离要求）。
+- 2026-08-11（方案7审查修复）：多主题登记由循环 `saveTopic` 改为 `ReviewDebateStore.saveTopics`；MyBatis 使用单条批量 upsert，内存实现用一次 `compute` 替换，`DebateService.registerTopics` 增加外层事务并在修改 Review 阶段、发布事件前完成主题与冲突审计写入。`ConflictDetectionService.detect` 仅允许 CONFLICT_DETECTION 阶段并与同 Review 登记操作串行，防止终态审计被二次检测覆盖。影响：生产持久化下主题批次与审计加入同一 Spring 事务，失败不会提交部分主题；替代方案：保留逐条 store 事务并仅修改文档表述——拒绝（不满足原子登记不变量）。
+- 2026-08-11（方案7环境边界）：新增 MySQL 5.6 + 真实 `ReviewConflictAuditPersistenceMapper` 往返测试，覆盖 V20 动态 SQL 的非空批量、处置更新、重建回读、JSON/时间映射与空 attempt 隔离；本机无 Docker，故该用例与原有 MySQL 套件共 11 项环境性跳过。V20 删除了与复合主键前缀重复的二级索引。影响：代码级验收完成，但不能把未执行的目标数据库测试表述为已实测；替代方案：用 Fake Mapper 结果代替真实 MySQL 证据——拒绝。
 - 2026-08-11（方案5）：Assessment/Dispatch 持久化由独立的 `ReviewAssessmentPersistenceMapper`/`ReviewDispatchPersistenceMapper` + `MyBatisReviewAssessmentStore`/`MyBatisReviewDispatchStore` 承载，文件清单中的 `ReviewPersistenceMapper.java`、`MyBatisReviewRepository.java` 未修改。原因：`ReviewAssessmentStore`/`ReviewDispatchStore` 已是独立领域接口（方案0/3 定义），独立 mapper/store 与既有 `MyBatisReviewDebateStore` 条件装配模式一致，避免把无关聚合塞进 Review 主聚合仓库；影响：接口与不变量不变，装配开关同 `review.persistence.enabled`；替代方案：扩展现有 `ReviewPersistenceMapper`/`MyBatisReviewRepository`——拒绝（主聚合仓库职责膨胀且跨表批量查询耦合）。
 - 2026-08-11（方案5）：`GatePolicy` 保留 legacy 三参 `draft` 重载，`JudgeService` 采用“新增 `@Autowired` 全参构造器 + 可空依赖回退”扩展注入 `ReviewAssessmentStore`/`RolePackRegistry`。原因：兼容既有测试夹具与非覆盖场景调用点；影响：assessments/requiredCheckpointSet 缺省时 Gate 退化为原有保守优先级语义（生产装配始终注入，覆盖检查恒生效）；替代方案：直接修改原签名强制全部调用点传覆盖数据——拒绝（破坏既有调用点且与方案1 同款扩展模式不一致）。
 - 2026-08-11（方案5）：`ReviewQueryController` 新增 `GET /api/reviews/{reviewId}/assessments` 端点（方案5 文件清单仅列出 `ReviewQueryService.java`，未列 controller）。原因：工作台五态投影与覆盖率汇总需要前端消费面，服务层投影已就绪只差暴露端点；影响：仅新增只读端点，无鉴权/路由结构变化；替代方案：复用既有报告端点内嵌投影——拒绝（报告为终态产物，五态需在评审进行中实时轮询）。
-- 2026-08-11（方案5 前端）：`review-workbench.e2e.js` 10 项中 4 项失败（live 页「运行调试」按钮缺失、需求创建/发起评审三例页面超时），经在未含方案5 前端改动的基线上重跑确认同样失败，属既有问题而非本次页面结构变化引入；方案5 前端未修改这些用例涉及的 live 观察台与需求平台页面，新增 assessments 端点在既有 route 兜底下返回 `{}` 并被 `parseAssessmentsView` 容错归一化。完整 E2E 验收与修复归属方案7。原因：任务要求仅在页面结构变化导致失败时做最小适配；影响：无新增回归；替代方案：在本任务内顺手修复既有 E2E——拒绝（越界到方案7 且根因未定位）。
+- 2026-08-11（方案5 前端，已于方案7解决）：既有 4 项 E2E 失败分别来自 live 页引用未定义变量、版本冲突刷新后原生 file `required` 阻止复用已缓存 File、导航入口/控件角色变化以及过宽 API mock 拦截 Vite 源模块。方案7按根因修复运行时代码和测试契约；应用层仍校验必须选择文件。影响：Playwright 全量 13/13 通过；替代方案：仅放宽断言或跳过用例——拒绝（会隐藏真实运行时故障）。
+- 2026-08-11（方案7）：目标 Playwright Chromium revision 无法下载，系统 Chrome 又因 `spawn EACCES` 无法启动；`playwright.config.js` 增加 `PLAYWRIGHT_EXECUTABLE_PATH` 可选覆盖，本机使用已缓存 headless shell 完成 13 项全量验收。影响：默认 CI/开发机行为不变，仅受限环境显式指定 executable；替代方案：跳过 E2E——拒绝（无法形成发布证据）。
+- 2026-08-11（方案7）：计划原列 `ReviewLifecycleIntegrationTests`、`ReviewOrchestrationServiceTests`、`review-api.test.js` 与 `review-store.test.js` 为修改目标，实际未做无语义改动；三条聚合路径集中由新增 `ReviewQualityConvergenceIntegrationTests` 覆盖，错误分支复用既有定向套件，前端现有 55 项单测已覆盖 API/store 契约，新增用户链路由 E2E 承担。影响：验收语义不变，避免重复夹具与无意义 diff；替代方案：只为匹配文件清单改注释——拒绝（不增加有效覆盖）。
 - 2026-08-11（方案6）：`application-local.yml` 未修改、未提交（方案6 文件清单列有该文件）。原因：本地 `log-conversation: true` 与本地调试密钥是已接受的调试约定，且该文件处于 Git 忽略状态；影响：无，可靠性参数调整全部落在通用 `application.yml`；替代方案：把本地配置纳入提交——拒绝（违反密钥与敏感信息边界）。
 - 2026-08-11（方案6）：熔断阈值/探测间隔的配置载体为 `ModelGatewayProperties` 新增嵌套 record `CircuitBreaker`（方案6 文件清单未列该文件），并保留 5 参兼容构造器；`ModelProfileRegistry` 新增 `fallbackProfile` 解析器供熔断路由使用。原因：阈值需经配置暴露且有默认值，熔断路由目标必须是已注册并校验过的 fallback profile；影响：既有构造调用点不变，Spring 绑定需 `@ConstructorBinding` 显式标注规范构造器（多构造器 record 的绑定要求）；替代方案：把阈值放进 `ModelProfilesProperties`（per-profile）——拒绝（熔断是网关级策略，逐 profile 配置会产生双源漂移）。
 - 2026-08-11（方案6）：新增 `RuntimeFailureCategory` 枚举（方案6 文件清单未列）；五类失败计数与六类阶段指标在 `ReviewRuntimeTraceRegistry` 提供记录 API（`recordFailure`/`recordMetric`/`metricsSnapshot`），以 Custom 事件复用 PLAN-022 持久化管道，模型网关与仓库工具层的具体打点接线留待后续观察台消费方案。原因：本阶段聚焦重试/熔断/指标基座；`ModelRequest` 契约不携带 runtimeId，网关层直接打点需破坏接口；影响：指标事件已可持久化、可回放、可查询快照，接线方仅需在拥有 runtimeId 的层调用现成 API；替代方案：本任务为打点扩展 `ModelRequest` 契约——拒绝（越界且影响面超出方案6 可靠性目标）。

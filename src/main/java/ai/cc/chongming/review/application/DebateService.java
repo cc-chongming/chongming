@@ -11,6 +11,7 @@ import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import ai.cc.chongming.review.infrastructure.assessment.InMemoryReviewAssessmentStore;
+import ai.cc.chongming.review.infrastructure.audit.InMemoryReviewConflictAuditStore;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
@@ -33,7 +35,7 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
  * deterministic {@link ConflictDetectionService}; topic registration is batch, idempotent and
  * atomic, and rebuttals are bound to the challenged role by identity.
  *
- * @author wangli
+ * @author zyj
  */
 @Service
 public class DebateService {
@@ -73,7 +75,8 @@ public class DebateService {
             ReviewProtocolGuard protocolGuard,
             ReviewEventPublisher eventPublisher) {
         this(debateStore, evidenceLedgerService, debateStateMachine, protocolGuard, eventPublisher,
-                new ConflictDetectionService(new InMemoryReviewAssessmentStore(), debateStore));
+                new ConflictDetectionService(
+                        new InMemoryReviewAssessmentStore(), debateStore, new InMemoryReviewConflictAuditStore()));
     }
 
     @Autowired
@@ -99,7 +102,16 @@ public class DebateService {
      * migrate from CONFLICT_DETECTION to DEBATE_ROUND_1 exactly once. Replaying the same
      * idempotency key returns the already registered topics without touching the stage again.
      */
+    @Transactional
     public RegisterTopicsResult registerTopics(Review review, DebateToolCommands.RegisterTopics command) {
+        Objects.requireNonNull(review, "review must not be null");
+        synchronized (review) {
+            return registerTopicsLocked(review, command);
+        }
+    }
+
+    private RegisterTopicsResult registerTopicsLocked(
+            Review review, DebateToolCommands.RegisterTopics command) {
         requireReview(review, command.metadata());
         if (command.actorRole() != RoleType.DIRECTOR) {
             throw new ReviewDomainException(ReviewErrorCode.UNAUTHORIZED_ROLE,
@@ -136,13 +148,17 @@ public class DebateService {
         }
         List<TopicResult> registered = new ArrayList<>();
         List<String> persistedIds = new ArrayList<>();
+        List<DebateTopic> topicsToSave = new ArrayList<>();
         for (DebateToolCommands.TopicProposal proposal : deduplicated.values()) {
             DebateTopic topic = new DebateTopic(
                     new TopicId(UUID.randomUUID()), review.id(), proposal.subjectKey(), proposal.claimIds());
-            debateStore.saveTopic(topic);
+            topicsToSave.add(topic);
             registered.add(new TopicResult(topic, false));
             persistedIds.add(topic.id().value().toString());
         }
+        conflictDetectionService.recordTopicRegistration(review,
+                deduplicated.values().stream().map(DebateToolCommands.TopicProposal::subjectKey).toList());
+        debateStore.saveTopics(topicsToSave);
         review.recordCommand(command.metadata(), String.join(",", persistedIds));
         // The stage migrates exactly once, after every topic of the batch is persisted.
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_1);
@@ -159,8 +175,6 @@ public class DebateService {
                     60,
                     Map.of("subjectKey", result.topic().subjectKey())));
         }
-        conflictDetectionService.recordTopicRegistration(review.id(),
-                deduplicated.values().stream().map(DebateToolCommands.TopicProposal::subjectKey).toList());
         return new RegisterTopicsResult(registered, false);
     }
 
@@ -385,7 +399,7 @@ public class DebateService {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "debate can be skipped only when no deterministic conflict candidate remains");
         }
-        conflictDetectionService.recordTopicRegistration(review.id(), List.of());
+        conflictDetectionService.recordTopicRegistration(review, List.of());
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
         review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_2);
@@ -546,7 +560,7 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
         }
     }
 
-    /** @author wangli */
+    /** @author zyj */
     public record TopicResult(DebateTopic topic, boolean replayed) {
     }
 
@@ -554,7 +568,7 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
      * [AIREVIEW-PLAN-024#方案4] Batch registration output: every registered topic in input order and
      * the idempotent-replay flag.
      *
-     * @author wangli
+     * @author zyj
      */
     public record RegisterTopicsResult(List<TopicResult> topics, boolean replayed) {
         public RegisterTopicsResult {
@@ -562,7 +576,7 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
         }
     }
 
-    /** @author wangli */
+    /** @author zyj */
     public record TurnResult(DebateTurn turn, boolean replayed) {
     }
 }
