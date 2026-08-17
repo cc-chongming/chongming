@@ -165,9 +165,10 @@ class ReviewCommandServiceTests {
                 java.nio.file.Path.of("build/snapshot"), "c".repeat(40), "main", false,
                 "d".repeat(64), 1, java.time.Instant.now());
         when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirement);
-        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository")).thenReturn(Optional.empty());
-        when(snapshotService.bindSnapshot(reviewId, 1, "approved-repository", requirement.contentHash(),
-                IntakeCancellation.neverCancelled())).thenReturn(repositorySnapshot);
+        when(snapshotService.findExistingSnapshot(
+                reviewId, 1, RepositorySource.configured("approved-repository"))).thenReturn(Optional.empty());
+        when(snapshotService.bindSnapshot(reviewId, 1, RepositorySource.configured("approved-repository"),
+                requirement.contentHash(), IntakeCancellation.neverCancelled())).thenReturn(repositorySnapshot);
         when(orchestrationService.start(any())).thenReturn(Mono.never());
         commandService = new ReviewCommandService(
                 reviewRegistry,
@@ -183,7 +184,8 @@ class ReviewCommandServiceTests {
 
         var order = inOrder(snapshotService, orchestrationService);
         order.verify(snapshotService, timeout(1_000)).bindSnapshot(
-                reviewId, 1, "approved-repository", requirement.contentHash(), IntakeCancellation.neverCancelled());
+                reviewId, 1, RepositorySource.configured("approved-repository"),
+                requirement.contentHash(), IntakeCancellation.neverCancelled());
         order.verify(orchestrationService, timeout(1_000)).start(any());
     }
 
@@ -192,7 +194,8 @@ class ReviewCommandServiceTests {
         ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
         RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
         when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
-        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+        when(snapshotService.findExistingSnapshot(
+                reviewId, 1, RepositorySource.configured("approved-repository")))
                 .thenReturn(Optional.of(repositorySnapshot()));
         when(orchestrationService.start(any())).thenReturn(Mono.never());
         commandService = commandService(intakeService, snapshotService);
@@ -201,7 +204,7 @@ class ReviewCommandServiceTests {
 
         verify(orchestrationService, timeout(1_000)).start(any());
         verify(snapshotService, never()).bindSnapshot(
-                any(), any(Integer.class), any(), any(), any());
+                any(), any(Integer.class), any(RepositorySource.class), any(), any());
     }
 
     @Test
@@ -210,7 +213,8 @@ class ReviewCommandServiceTests {
         RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
         RepositorySnapshot snapshot = repositorySnapshot();
         when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
-        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+        when(snapshotService.findExistingSnapshot(
+                reviewId, 1, RepositorySource.configured("approved-repository")))
                 .thenReturn(Optional.of(snapshot));
         commandService = commandService(intakeService, snapshotService);
 
@@ -218,7 +222,7 @@ class ReviewCommandServiceTests {
 
         assertThat(result).isSameAs(snapshot);
         verify(snapshotService, never()).bindSnapshot(
-                any(), any(Integer.class), any(), any(), any());
+                any(), any(Integer.class), any(RepositorySource.class), any(), any());
     }
 
     @Test
@@ -226,7 +230,8 @@ class ReviewCommandServiceTests {
         ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
         RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
         when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot());
-        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+        when(snapshotService.findExistingSnapshot(
+                reviewId, 1, RepositorySource.configured("approved-repository")))
                 .thenReturn(Optional.empty());
         commandService = commandService(intakeService, snapshotService);
         review.transitionTo(stateMachine, ReviewStage.SNAPSHOTTING);
@@ -238,7 +243,7 @@ class ReviewCommandServiceTests {
                 .hasMessageContaining("only initialize a snapshot while the attempt is PENDING");
 
         verify(snapshotService, never()).bindSnapshot(
-                any(), any(Integer.class), any(), any(), any());
+                any(), any(Integer.class), any(RepositorySource.class), any(), any());
     }
 
     @Test

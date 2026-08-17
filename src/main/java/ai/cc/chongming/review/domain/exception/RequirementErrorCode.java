@@ -15,5 +15,10 @@ public enum RequirementErrorCode {
      * [AIREVIEW-PLAN-027] The authenticated principal lacks the role or ownership required for
      * the command; surfaced as HTTP 403.
      */
-    FORBIDDEN
+    FORBIDDEN,
+    /**
+     * [AIREVIEW-PLAN-029] The requirement-supplied online repository source is invalid (unsafe
+     * URL, conflicting repository binding or missing encryption key); surfaced as HTTP 400.
+     */
+    REMOTE_SOURCE_INVALID
 }

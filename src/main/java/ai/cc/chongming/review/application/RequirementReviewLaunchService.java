@@ -116,6 +116,11 @@ public class RequirementReviewLaunchService {
 
     private LaunchResult launchSerially(RequirementId requirementId, LaunchCommand command) {
         Requirement requirement = requireRequirement(requirementId);
+        // [AIREVIEW-PLAN-029] Requirements bound to an online repository source no longer need a
+        // configured repository identity at launch time.
+        if (requirement.remoteSource() == null && (command.repositoryPath() == null || command.repositoryPath().isBlank())) {
+            throw new IllegalArgumentException("repositoryPath is required when the requirement has no online repository source");
+        }
         if (requirement.reviewId() == null) {
             requirement.requireExpectedVersion(command.expectedVersion());
         }
@@ -177,7 +182,8 @@ public class RequirementReviewLaunchService {
                     command.submitter(),
                     false,
                     "requirement:" + requirement.id().value(),
-                    heartbeat));
+                    heartbeat,
+                    requirement.remoteSource()));
             heartbeat.checkCancelled();
             ReviewId targetReviewId = intake.snapshot().reviewId();
             completeReservation(
@@ -390,7 +396,9 @@ public class RequirementReviewLaunchService {
 
         public LaunchCommand {
             Objects.requireNonNull(requirementFile, "requirementFile must not be null");
-            repositoryPath = requireText(repositoryPath, "repositoryPath");
+            // [AIREVIEW-PLAN-029] repositoryPath is optional when the bound requirement carries
+            // an online repository source; the launch service enforces the either/or rule.
+            repositoryPath = normalizeOptional(repositoryPath);
             branch = normalizeOptional(branch);
             commit = normalizeOptional(commit);
             submitter = requireText(submitter, "submitter");

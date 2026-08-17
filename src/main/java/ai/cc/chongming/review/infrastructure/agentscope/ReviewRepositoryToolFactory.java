@@ -243,12 +243,16 @@ public class ReviewRepositoryToolFactory {
         RequirementSnapshot requirementSnapshot = intakeService.requireSnapshot(
                 runtimeContext.reviewId(), runtimeContext.attemptNo());
         String key = runtimeContext.reviewId().value() + ":" + runtimeContext.attemptNo();
+        // [AIREVIEW-PLAN-029] Snapshot resolution follows the intake repository source so online
+        // repositories bind through the ad-hoc mirror engine like configured ones.
+        ai.cc.chongming.review.application.RepositorySource repositorySource =
+                ai.cc.chongming.review.application.RepositorySource.from(requirementSnapshot);
         RepositorySnapshot repositorySnapshot = snapshotsByReviewAttempt.computeIfAbsent(
                 key,
                 ignored -> snapshotService.findExistingSnapshot(
-                                runtimeContext.reviewId(), runtimeContext.attemptNo(), requirementSnapshot.repositoryPath())
+                                runtimeContext.reviewId(), runtimeContext.attemptNo(), repositorySource)
                         .orElseGet(() -> snapshotService.bindSnapshot(
-                                runtimeContext.reviewId(), runtimeContext.attemptNo(), requirementSnapshot.repositoryPath(),
+                                runtimeContext.reviewId(), runtimeContext.attemptNo(), repositorySource,
                                 requirementSnapshot.contentHash(), runtimeContext.cancellation())));
         return new RepositoryToolContext(
                 runtimeContext.runtimeId(), runtimeContext.reviewId(), roleType, repositorySnapshot, allowedPathPrefixes);

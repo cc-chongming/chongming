@@ -22,6 +22,8 @@ public final class Requirement {
     private final String creatorId;
     private String assigneeId;
     private String repositoryPath;
+    /** [AIREVIEW-PLAN-029] Requirement-supplied online repository source; mutually exclusive with repositoryPath. */
+    private RemoteRepositorySource remoteSource;
     private String priority;
     private RequirementStatus status;
     private ReviewId reviewId;
@@ -42,12 +44,31 @@ public final class Requirement {
             Instant createdAt,
             Instant updatedAt,
             long version) {
+        this(id, title, description, creatorId, assigneeId, repositoryPath, null, priority,
+                status, reviewId, createdAt, updatedAt, version);
+    }
+
+    private Requirement(
+            RequirementId id,
+            String title,
+            String description,
+            String creatorId,
+            String assigneeId,
+            String repositoryPath,
+            RemoteRepositorySource remoteSource,
+            String priority,
+            RequirementStatus status,
+            ReviewId reviewId,
+            Instant createdAt,
+            Instant updatedAt,
+            long version) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.title = required(title, "title");
         this.description = description == null ? "" : description;
         this.creatorId = required(creatorId, "creatorId");
         this.assigneeId = normalizeOptional(assigneeId);
         this.repositoryPath = normalizeOptional(repositoryPath);
+        this.remoteSource = remoteSource;
         this.priority = normalizeOptional(priority);
         this.status = Objects.requireNonNull(status, "status must not be null");
         this.reviewId = reviewId;
@@ -67,6 +88,22 @@ public final class Requirement {
             String assigneeId,
             String repositoryPath,
             String priority) {
+        return draft(id, title, description, creatorId, assigneeId, repositoryPath, null, priority);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Draft factory carrying an optional requirement-supplied online
+     * repository source instead of an administrator-configured repository identity.
+     */
+    public static Requirement draft(
+            RequirementId id,
+            String title,
+            String description,
+            String creatorId,
+            String assigneeId,
+            String repositoryPath,
+            RemoteRepositorySource remoteSource,
+            String priority) {
         Instant now = Instant.now();
         return new Requirement(
                 id,
@@ -75,6 +112,7 @@ public final class Requirement {
                 creatorId,
                 assigneeId,
                 repositoryPath,
+                remoteSource,
                 priority,
                 RequirementStatus.DRAFT,
                 null,
@@ -96,6 +134,25 @@ public final class Requirement {
             Instant createdAt,
             Instant updatedAt,
             long version) {
+        return restore(id, title, description, creatorId, assigneeId, repositoryPath, null, priority,
+                status, reviewId, createdAt, updatedAt, version);
+    }
+
+    /** [AIREVIEW-PLAN-029] Rehydration factory carrying the persisted online repository source. */
+    public static Requirement restore(
+            RequirementId id,
+            String title,
+            String description,
+            String creatorId,
+            String assigneeId,
+            String repositoryPath,
+            RemoteRepositorySource remoteSource,
+            String priority,
+            RequirementStatus status,
+            ReviewId reviewId,
+            Instant createdAt,
+            Instant updatedAt,
+            long version) {
         return new Requirement(
                 id,
                 title,
@@ -103,6 +160,7 @@ public final class Requirement {
                 creatorId,
                 assigneeId,
                 repositoryPath,
+                remoteSource,
                 priority,
                 status,
                 reviewId,
@@ -133,6 +191,11 @@ public final class Requirement {
 
     public String repositoryPath() {
         return repositoryPath;
+    }
+
+    /** [AIREVIEW-PLAN-029] Online repository source supplied at creation, or {@code null}. */
+    public RemoteRepositorySource remoteSource() {
+        return remoteSource;
     }
 
     public String priority() {
@@ -166,6 +229,21 @@ public final class Requirement {
             String repositoryPath,
             String priority,
             long expectedVersion) {
+        revise(title, description, assigneeId, repositoryPath, null, priority, expectedVersion);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Revision carrying the replacement online repository source; a
+     * {@code null} source clears it back to a configured-repository binding.
+     */
+    public void revise(
+            String title,
+            String description,
+            String assigneeId,
+            String repositoryPath,
+            RemoteRepositorySource remoteSource,
+            String priority,
+            long expectedVersion) {
         requireExpectedVersion(expectedVersion);
         if (status != RequirementStatus.DRAFT && status != RequirementStatus.RETURNED) {
             throw new RequirementDomainException(
@@ -176,6 +254,7 @@ public final class Requirement {
         this.description = description == null ? "" : description;
         this.assigneeId = normalizeOptional(assigneeId);
         this.repositoryPath = normalizeOptional(repositoryPath);
+        this.remoteSource = remoteSource;
         this.priority = normalizeOptional(priority);
         touch();
     }

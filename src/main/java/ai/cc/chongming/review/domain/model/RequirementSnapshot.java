@@ -23,7 +23,27 @@ public record RequirementSnapshot(
         String contentHash,
         String parserVersion,
         RequirementDocument document,
-        Instant createdAt) {
+        Instant createdAt,
+        RemoteRepositorySource remoteSource) {
+
+    /** [AIREVIEW-PLAN-029] Legacy constructor for configured-repository intake. */
+    public RequirementSnapshot(
+            UUID snapshotId,
+            ReviewTypes.ReviewId reviewId,
+            int attemptNo,
+            String submitter,
+            String repositoryPath,
+            String branch,
+            String commit,
+            String originalFilename,
+            String sourceHash,
+            String contentHash,
+            String parserVersion,
+            RequirementDocument document,
+            Instant createdAt) {
+        this(snapshotId, reviewId, attemptNo, submitter, repositoryPath, branch, commit, originalFilename,
+                sourceHash, contentHash, parserVersion, document, createdAt, null);
+    }
 
     public RequirementSnapshot {
         Objects.requireNonNull(snapshotId, "snapshotId must not be null");
@@ -32,13 +52,25 @@ public record RequirementSnapshot(
             throw new IllegalArgumentException("attemptNo must be positive");
         }
         requireText(submitter, "submitter");
-        requireText(repositoryPath, "repositoryPath");
+        // [AIREVIEW-PLAN-029] A requirement-supplied online repository source replaces the
+        // configured repository identity; exactly one of the two must be present.
+        if (remoteSource == null) {
+            requireText(repositoryPath, "repositoryPath");
+        }
         requireText(originalFilename, "originalFilename");
         requireHash(sourceHash, "sourceHash");
         requireHash(contentHash, "contentHash");
         requireText(parserVersion, "parserVersion");
         Objects.requireNonNull(document, "document must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Stable repository identity for snapshot keys and references: the
+     * configured repository id, or a deterministic remote identity derived from url and ref.
+     */
+    public String repositoryIdentity() {
+        return remoteSource == null ? repositoryPath : remoteSource.repositoryIdentity();
     }
 
     /**

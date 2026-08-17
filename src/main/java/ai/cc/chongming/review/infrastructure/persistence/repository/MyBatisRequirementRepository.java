@@ -3,6 +3,7 @@ package ai.cc.chongming.review.infrastructure.persistence.repository;
 import ai.cc.chongming.review.domain.exception.RequirementDomainException;
 import ai.cc.chongming.review.domain.exception.RequirementErrorCode;
 import ai.cc.chongming.review.domain.model.Requirement;
+import ai.cc.chongming.review.domain.model.RemoteRepositorySource;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
@@ -126,6 +127,7 @@ public class MyBatisRequirementRepository implements RequirementRepository {
     }
 
     private RequirementMapper.RequirementRow toRow(Requirement requirement) {
+        RemoteRepositorySource remoteSource = requirement.remoteSource();
         return new RequirementMapper.RequirementRow(
                 requirement.id().value().toString(),
                 requirement.title(),
@@ -138,10 +140,18 @@ public class MyBatisRequirementRepository implements RequirementRepository {
                 requirement.reviewId() == null ? null : requirement.reviewId().value().toString(),
                 requirement.version(),
                 requirement.createdAt().atOffset(ZoneOffset.UTC).toLocalDateTime(),
-                requirement.updatedAt().atOffset(ZoneOffset.UTC).toLocalDateTime());
+                requirement.updatedAt().atOffset(ZoneOffset.UTC).toLocalDateTime(),
+                remoteSource == null ? null : remoteSource.url(),
+                remoteSource == null ? null : remoteSource.ref(),
+                remoteSource == null ? null : remoteSource.encryptedToken());
     }
 
     private Requirement toRequirement(RequirementMapper.RequirementRow row) {
+        // [AIREVIEW-PLAN-029] Only a row with a persisted remote url rehydrates a remote source;
+        // the encrypted token travels opaquely and is only decrypted at snapshot materialization.
+        RemoteRepositorySource remoteSource = row.remoteUrl() == null
+                ? null
+                : new RemoteRepositorySource(row.remoteUrl(), row.remoteRef(), row.remoteTokenEnc());
         return Requirement.restore(
                 new RequirementId(UUID.fromString(row.id())),
                 row.title(),
@@ -149,6 +159,7 @@ public class MyBatisRequirementRepository implements RequirementRepository {
                 row.creatorId(),
                 row.assigneeId(),
                 row.repositoryPath(),
+                remoteSource,
                 row.priority(),
                 RequirementStatus.valueOf(row.status()),
                 row.reviewId() == null ? null : new ReviewId(UUID.fromString(row.reviewId())),

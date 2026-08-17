@@ -416,7 +416,67 @@ test('disables requirement creation when the server has no configured repositori
 
     await expect(page.getByRole('button', { name: '保存草稿' })).toBeDisabled();
     await expect(page.getByRole('button', { name: /提交并启动评审/ })).toBeDisabled();
-    await expect(page.getByText('当前没有可用仓库，暂不能保存或提交需求。')).toBeVisible();
+    await expect(page.getByText(/当前没有可用配置仓库/)).toBeVisible();
+});
+
+test('creates a requirement bound to a caller-supplied online repository [AIREVIEW-PLAN-029]', async ({ page }) => {
+    const requirementId = 'a1000000-0000-0000-0000-000000000001';
+    const reviewId = 'b2000000-0000-0000-0000-000000000001';
+    let requirementPayload = null;
+    let reviewFormBody = '';
+    await page.route(/\/api\/(?:repositories|requirements|reviews|tasks)(?:\/|\?|$)/, async (route) => {
+        const requestUrl = new URL(route.request().url());
+        const path = requestUrl.pathname;
+        const method = route.request().method();
+        const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path === '/api/repositories' && method === 'GET') return json([]);
+        if (path === '/api/requirements' && method === 'POST') {
+            requirementPayload = route.request().postDataJSON();
+            return json({ id: requirementId, version: 0, status: 'DRAFT' }, 201);
+        }
+        if (path === '/api/reviews' && method === 'POST') {
+            reviewFormBody = route.request().postData() ?? '';
+            return json({ reviewId, attemptNo: 1, reused: false }, 202);
+        }
+        if (path === `/api/requirements/${requirementId}/submit` && method === 'POST') {
+            return json({ id: requirementId, version: 1, status: 'PENDING_REVIEW', reviewId });
+        }
+        if (path === `/api/reviews/${reviewId}/start` && method === 'POST') {
+            return json({ reviewId, status: 'PENDING' }, 202);
+        }
+        if (path === `/api/requirements/${requirementId}` && method === 'GET') {
+            return json({
+                id: requirementId, title: '线上仓库需求', description: '', status: 'PENDING_REVIEW', creatorId: 'demo-reviewer',
+                assigneeId: null, repositoryPath: null, priority: 'P1', reviewId, version: 1,
+                remote: { url: 'https://git.example.com/group/demo.git', ref: 'main', tokenConfigured: true },
+                createdAt: '2026-08-17T00:00:00Z', updatedAt: '2026-08-17T00:00:00Z'
+            });
+        }
+        if (path.startsWith('/api/tasks')) return json({ items: [], total: 0, page: 1, size: 100 });
+        return json({ detail: 'Unexpected request' }, 404);
+    });
+
+    await page.goto('/index.html#/requirements/create');
+    await page.getByPlaceholder('简短描述需求内容').fill('线上仓库评审');
+    await page.getByRole('tab', { name: '线上仓库' }).click();
+    await page.locator('input[name="remoteUrl"]').fill('https://git.example.com/group/demo.git');
+    await page.locator('input[name="remoteRef"]').fill('main');
+    await page.locator('input[name="remoteToken"]').fill('secret-token');
+    await page.locator('input[type="file"][accept*=".md"]').setInputFiles({
+        name: 'remote.md', mimeType: 'text/markdown', buffer: Buffer.from('# 线上仓库需求')
+    });
+
+    // The empty configured-repository list must not block a remote submission.
+    await expect(page.getByRole('button', { name: /提交并启动评审/ })).toBeEnabled();
+    await page.getByRole('button', { name: /提交并启动评审/ }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/requirements/${requirementId}`));
+    expect(requirementPayload.repositoryPath).toBeNull();
+    expect(requirementPayload.remote).toEqual({
+        url: 'https://git.example.com/group/demo.git', ref: 'main', token: 'secret-token'
+    });
+    expect(reviewFormBody).toContain('remoteUrl');
+    expect(reviewFormBody).not.toContain('repositoryPath');
 });
 
 test('deletes a requirement directly from the requirement list regardless of its lifecycle status', async ({ page }) => {

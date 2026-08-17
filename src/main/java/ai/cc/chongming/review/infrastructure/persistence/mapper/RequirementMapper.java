@@ -19,10 +19,12 @@ public interface RequirementMapper {
     @Insert("""
             INSERT INTO requirement
                 (requirement_id, title, description_md, requirement_status, creator_id, assignee_id,
-                 repository_path, priority, review_id, version, created_at, updated_at)
+                 repository_path, priority, review_id, version, created_at, updated_at,
+                 remote_url, remote_ref, remote_token_enc)
             VALUES
                 (#{id}, #{title}, #{description}, #{status}, #{creatorId}, #{assigneeId},
-                 #{repositoryPath}, #{priority}, #{reviewId}, #{version}, #{createdAt}, #{updatedAt})
+                 #{repositoryPath}, #{priority}, #{reviewId}, #{version}, #{createdAt}, #{updatedAt},
+                 #{remoteUrl}, #{remoteRef}, #{remoteTokenEnc})
             """)
     int insert(RequirementRow row);
 
@@ -30,7 +32,8 @@ public interface RequirementMapper {
             UPDATE requirement
             SET title = #{row.title}, description_md = #{row.description}, requirement_status = #{row.status},
                 assignee_id = #{row.assigneeId}, repository_path = #{row.repositoryPath}, priority = #{row.priority},
-                review_id = #{row.reviewId}, version = #{row.version}, updated_at = #{row.updatedAt}
+                review_id = #{row.reviewId}, version = #{row.version}, updated_at = #{row.updatedAt},
+                remote_url = #{row.remoteUrl}, remote_ref = #{row.remoteRef}, remote_token_enc = #{row.remoteTokenEnc}
             WHERE requirement_id = #{row.id} AND version = #{expectedVersion}
             """)
     int update(@Param("row") RequirementRow row, @Param("expectedVersion") long expectedVersion);
@@ -41,7 +44,8 @@ public interface RequirementMapper {
     @Select("""
             SELECT requirement_id AS id, title, description_md AS description, requirement_status AS status,
                    creator_id AS creatorId, assignee_id AS assigneeId, repository_path AS repositoryPath,
-                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt
+                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt,
+                   remote_url AS remoteUrl, remote_ref AS remoteRef, remote_token_enc AS remoteTokenEnc
             FROM requirement WHERE requirement_id = #{requirementId}
             """)
     RequirementRow findById(@Param("requirementId") String requirementId);
@@ -49,7 +53,8 @@ public interface RequirementMapper {
     @Select("""
             SELECT requirement_id AS id, title, description_md AS description, requirement_status AS status,
                    creator_id AS creatorId, assignee_id AS assigneeId, repository_path AS repositoryPath,
-                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt
+                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt,
+                   remote_url AS remoteUrl, remote_ref AS remoteRef, remote_token_enc AS remoteTokenEnc
             FROM requirement WHERE review_id = #{reviewId}
             ORDER BY updated_at DESC LIMIT 1
             """)
@@ -59,7 +64,8 @@ public interface RequirementMapper {
             <script>
             SELECT requirement_id AS id, title, description_md AS description, requirement_status AS status,
                    creator_id AS creatorId, assignee_id AS assigneeId, repository_path AS repositoryPath,
-                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt
+                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt,
+                   remote_url AS remoteUrl, remote_ref AS remoteRef, remote_token_enc AS remoteTokenEnc
             FROM requirement
             <where>
               <if test="status != null"> requirement_status = #{status} </if>
@@ -101,7 +107,8 @@ public interface RequirementMapper {
             <script>
             SELECT requirement_id AS id, title, description_md AS description, requirement_status AS status,
                    creator_id AS creatorId, assignee_id AS assigneeId, repository_path AS repositoryPath,
-                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt
+                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt,
+                   remote_url AS remoteUrl, remote_ref AS remoteRef, remote_token_enc AS remoteTokenEnc
             FROM requirement
             <where>
               <if test="status != null"> requirement_status = #{status} </if>
@@ -282,7 +289,28 @@ public interface RequirementMapper {
             String reviewId,
             long version,
             LocalDateTime createdAt,
-            LocalDateTime updatedAt) {
+            LocalDateTime updatedAt,
+            String remoteUrl,
+            String remoteRef,
+            String remoteTokenEnc) {
+
+        /** [AIREVIEW-PLAN-029] Backward-compatible row without the remote source columns. */
+        public RequirementRow(
+                String id,
+                String title,
+                String description,
+                String status,
+                String creatorId,
+                String assigneeId,
+                String repositoryPath,
+                String priority,
+                String reviewId,
+                long version,
+                LocalDateTime createdAt,
+                LocalDateTime updatedAt) {
+            this(id, title, description, status, creatorId, assigneeId, repositoryPath, priority,
+                    reviewId, version, createdAt, updatedAt, null, null, null);
+        }
     }
 
     /**

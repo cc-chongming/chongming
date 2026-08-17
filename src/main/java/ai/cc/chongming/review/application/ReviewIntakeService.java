@@ -101,10 +101,11 @@ public class ReviewIntakeService {
             IntakeKey key = new IntakeKey(
                     request.submitter().trim(),
                     request.idempotencyScope(),
-                    request.repositoryPath().trim(),
+                    request.repositoryPath() == null ? null : request.repositoryPath().trim(),
                     normalizeOptional(request.branch()),
                     normalizeOptional(request.commit()),
-                    markdown.contentHash());
+                    markdown.contentHash(),
+                    request.remoteSource() == null ? null : request.remoteSource().identitySeed());
             synchronized (submissions) {
                 request.cancellation().checkCancelled();
                 ReviewIntakeResult existing = submissions.get(key);
@@ -127,7 +128,7 @@ public class ReviewIntakeService {
                         reviewId,
                         attemptNo,
                         request.submitter().trim(),
-                        request.repositoryPath().trim(),
+                        request.repositoryPath() == null ? null : request.repositoryPath().trim(),
                         normalizeOptional(request.branch()),
                         normalizeOptional(request.commit()),
                         markdown.safeFilename(),
@@ -135,7 +136,8 @@ public class ReviewIntakeService {
                         markdown.contentHash(),
                         MarkdownRequirementParser.PARSER_VERSION,
                         document,
-                        Instant.now());
+                        Instant.now(),
+                        request.remoteSource());
                 StoredRequirementSnapshot workspaceSnapshot = snapshotStore.store(
                         snapshot, markdown, request.cancellation());
                 ReviewIntakeResult created = new ReviewIntakeResult(snapshot, workspaceSnapshot, false);
@@ -212,14 +214,19 @@ public class ReviewIntakeService {
                     source.contentHash(),
                     source.parserVersion(),
                     source.document(),
-                    Instant.now());
+                    Instant.now(),
+                    source.remoteSource());
             snapshotStore.copyForNewAttempt(source, target, IntakeCancellation.neverCancelled());
             return target;
         }
     }
 
     private void validateMetadata(ReviewIntakeRequest request) {
-        requireText(request.repositoryPath(), "MISSING_REPOSITORY_PATH", "repositoryPath is required");
+        // [AIREVIEW-PLAN-029] An online repository source replaces the configured repository
+        // identity; exactly one of the two must be present.
+        if (request.remoteSource() == null) {
+            requireText(request.repositoryPath(), "MISSING_REPOSITORY_PATH", "repositoryPath is required");
+        }
         requireText(request.submitter(), "MISSING_SUBMITTER", "submitter is required");
     }
 
@@ -285,12 +292,13 @@ public class ReviewIntakeService {
             String repositoryPath,
             String branch,
             String commit,
-            String contentHash) {
+            String contentHash,
+            String remoteIdentity) {
 
         private String persistenceKey() {
             String scopeComponent = idempotencyScope == null ? "" : component("scope:" + idempotencyScope);
             String source = component(submitter) + scopeComponent + component(repositoryPath) + component(branch)
-                    + component(commit) + component(contentHash);
+                    + component(commit) + component(contentHash) + component(remoteIdentity);
             try {
                 byte[] digest = MessageDigest.getInstance("SHA-256").digest(source.getBytes(StandardCharsets.UTF_8));
                 return "intake:" + java.util.HexFormat.of().formatHex(digest);

@@ -112,9 +112,32 @@ public class RequirementQueryService {
             java.util.UUID reviewId,
             long version,
             String createdAt,
-            String updatedAt) {
+            String updatedAt,
+            RemoteView remote) {
+
+        /** [AIREVIEW-PLAN-029] Backward-compatible projection without the remote source. */
+        public RequirementView(
+                java.util.UUID id,
+                String title,
+                String description,
+                String status,
+                String creatorId,
+                String assigneeId,
+                String repositoryPath,
+                String priority,
+                java.util.UUID reviewId,
+                long version,
+                String createdAt,
+                String updatedAt) {
+            this(id, title, description, status, creatorId, assigneeId, repositoryPath, priority,
+                    reviewId, version, createdAt, updatedAt, null);
+        }
 
         public static RequirementView from(Requirement requirement) {
+            ai.cc.chongming.review.domain.model.RemoteRepositorySource remoteSource = requirement.remoteSource();
+            RemoteView remote = remoteSource == null
+                    ? null
+                    : new RemoteView(remoteSource.url(), remoteSource.ref(), remoteSource.encryptedToken() != null);
             return new RequirementView(
                     requirement.id().value(),
                     requirement.title(),
@@ -127,7 +150,17 @@ public class RequirementQueryService {
                     requirement.reviewId() == null ? null : requirement.reviewId().value(),
                     requirement.version(),
                     requirement.createdAt().toString(),
-                    requirement.updatedAt().toString());
+                    requirement.updatedAt().toString(),
+                    remote);
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Public online repository projection; the token is only ever reported as
+     * a boolean so cipher text can never reach a client.
+     *
+     * @author wangli
+     */
+    public record RemoteView(String url, String ref, boolean tokenConfigured) {
     }
 }

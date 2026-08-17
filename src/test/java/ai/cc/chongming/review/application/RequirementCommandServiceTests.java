@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.domain.model.Requirement;
+import ai.cc.chongming.review.domain.model.RemoteRepositorySource;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
 import ai.cc.chongming.review.domain.model.Review;
@@ -11,6 +12,7 @@ import ai.cc.chongming.review.domain.repository.ReviewRequirementLinkStore;
 import ai.cc.chongming.review.domain.security.ReviewerIdentityProvider;
 import ai.cc.chongming.review.domain.security.ReviewerIdentityProvider.Permission;
 import ai.cc.chongming.review.domain.security.ReviewerIdentityProvider.ReviewerIdentity;
+import ai.cc.chongming.review.infrastructure.repository.RemoteRepositoryUrlValidator;
 import ai.cc.chongming.review.infrastructure.review.InMemoryRequirementRepository;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRequirementLinkStore;
@@ -153,6 +155,71 @@ class RequirementCommandServiceTests {
                 assertThat(requirement.reviewId()).isNotEqualTo(rejected.reviewId());
             });
         }
+    }
+
+    @Test
+    void createsRequirementWithAnEncryptedRemoteSource() {
+        RequirementRepository repository = new InMemoryRequirementRepository();
+        ReviewerIdentityProvider identityProvider = () -> new ReviewerIdentity("product-owner", Set.of(Permission.REVIEW));
+        RequirementCommandService service = new RequirementCommandService(
+                repository, identityProvider, (reviewId, requirementId) -> true,
+                new RemoteTokenCipher("plan-029-test-key"), new RemoteRepositoryUrlValidator(true, false));
+
+        Requirement created = service.create(new RequirementCommandService.CreateRequirementCommand(
+                "线上仓库需求", "# 目标", null, null, "P1", null,
+                new RequirementCommandService.RemoteSourceCommand(
+                        "https://example.com/group/demo.git", "main", "secret-token")));
+
+        RemoteRepositorySource remoteSource = created.remoteSource();
+        assertThat(remoteSource).isNotNull();
+        assertThat(remoteSource.url()).isEqualTo("https://example.com/group/demo.git");
+        assertThat(remoteSource.ref()).isEqualTo("main");
+        assertThat(remoteSource.encryptedToken()).startsWith("v1:").doesNotContain("secret-token");
+        assertThat(created.repositoryPath()).isNull();
+    }
+
+    @Test
+    void reviseKeepsTheExistingTokenWhenUrlAndRefAreUnchanged() {
+        RequirementRepository repository = new InMemoryRequirementRepository();
+        ReviewerIdentityProvider identityProvider = () -> new ReviewerIdentity("product-owner", Set.of(Permission.REVIEW));
+        RequirementCommandService service = new RequirementCommandService(
+                repository, identityProvider, (reviewId, requirementId) -> true,
+                new RemoteTokenCipher("plan-029-test-key"), new RemoteRepositoryUrlValidator(true, false));
+        Requirement created = service.create(new RequirementCommandService.CreateRequirementCommand(
+                "线上仓库需求", "# 目标", null, null, "P1", null,
+                new RequirementCommandService.RemoteSourceCommand(
+                        "https://example.com/group/demo.git", "main", "secret-token")));
+        String originalCipherText = created.remoteSource().encryptedToken();
+
+        // Blank token with unchanged url/ref keeps the previous cipher text.
+        Requirement kept = service.revise(created.id(), new RequirementCommandService.ReviseRequirementCommand(
+                "线上仓库需求", "# 目标", null, null, "P1", created.version(),
+                new RequirementCommandService.RemoteSourceCommand("https://example.com/group/demo.git", "main", "")));
+        assertThat(kept.remoteSource().encryptedToken()).isEqualTo(originalCipherText);
+
+        // Switching the URL without a token clears the credential instead of reusing it.
+        Requirement rotated = service.revise(kept.id(), new RequirementCommandService.ReviseRequirementCommand(
+                "线上仓库需求", "# 目标", null, null, "P1", kept.version(),
+                new RequirementCommandService.RemoteSourceCommand("https://example.com/group/other.git", "main", null)));
+        assertThat(rotated.remoteSource().encryptedToken()).isNull();
+    }
+
+    @Test
+    void rejectsUnsafeRemoteUrlsAtCreation() {
+        RequirementRepository repository = new InMemoryRequirementRepository();
+        ReviewerIdentityProvider identityProvider = () -> new ReviewerIdentity("product-owner", Set.of(Permission.REVIEW));
+        RequirementCommandService service = new RequirementCommandService(
+                repository, identityProvider, (reviewId, requirementId) -> true,
+                new RemoteTokenCipher("plan-029-test-key"), new RemoteRepositoryUrlValidator(true, false));
+
+        assertThatThrownBy(() -> service.create(new RequirementCommandService.CreateRequirementCommand(
+                "非法地址", "# 目标", null, null, "P1", null,
+                new RequirementCommandService.RemoteSourceCommand("file:///D:/repositories/demo.git", null, null))))
+                .isInstanceOf(ai.cc.chongming.review.domain.exception.RequirementDomainException.class)
+                .extracting("errorCode")
+                .isEqualTo(ai.cc.chongming.review.domain.exception.RequirementErrorCode.REMOTE_SOURCE_INVALID);
+        assertThat(repository.findPage(
+                new RequirementRepository.RequirementFilter(null, null, null), 1, 10).items()).isEmpty();
     }
 
     private SubmissionResult submit(

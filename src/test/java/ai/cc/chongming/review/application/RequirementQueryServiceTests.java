@@ -3,6 +3,7 @@ package ai.cc.chongming.review.application;
 import ai.cc.chongming.review.domain.exception.RequirementDomainException;
 import ai.cc.chongming.review.domain.exception.RequirementErrorCode;
 import ai.cc.chongming.review.domain.model.Requirement;
+import ai.cc.chongming.review.domain.model.RemoteRepositorySource;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
 import ai.cc.chongming.review.domain.repository.RequirementRepository.RequirementVisibility;
@@ -64,5 +65,27 @@ class RequirementQueryServiceTests {
         assertThatThrownBy(() -> service.findById(new RequirementId(UUID.randomUUID()), hiddenScope))
                 .isInstanceOfSatisfying(RequirementDomainException.class,
                         ex -> assertThat(ex.errorCode()).isEqualTo(RequirementErrorCode.REQUIREMENT_NOT_FOUND));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] The public view exposes the online repository url and ref while the
+     * encrypted token is reduced to a boolean so cipher text can never reach a client.
+     */
+    @Test
+    void projectsTheRemoteSourceWithoutItsCipherText() {
+        InMemoryRequirementRepository repository = new InMemoryRequirementRepository();
+        Requirement requirement = Requirement.draft(
+                new RequirementId(UUID.randomUUID()), "线上仓库需求", "# 目标", "alice", null, null,
+                new RemoteRepositorySource("https://example.com/group/demo.git", "main", "v1:cipher"), "P1");
+        repository.save(requirement);
+        RequirementQueryService service = new RequirementQueryService(repository);
+
+        RequirementQueryService.RequirementView view = service.findById(requirement.id());
+
+        assertThat(view.repositoryPath()).isNull();
+        assertThat(view.remote()).isNotNull();
+        assertThat(view.remote().url()).isEqualTo("https://example.com/group/demo.git");
+        assertThat(view.remote().ref()).isEqualTo("main");
+        assertThat(view.remote().tokenConfigured()).isTrue();
     }
 }

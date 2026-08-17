@@ -176,7 +176,7 @@ class ReviewIntakeServiceTests {
                 ArgumentCaptor.forClass(ReviewPersistenceMapper.ReviewRequestRow.class);
         verify(mapper).insertReviewRequest(row.capture());
         assertThat(row.getValue().inputIdempotencyKey())
-                .isEqualTo("intake:58360dfd9a8820a57fb49afc1af26666456441f1916a75f02f5a480dbb8b436b");
+                .isEqualTo("intake:4e4f050bd72744fc3db54b0af7e1d1b964b91ef42eeade21dedf996d1d47b657");
     }
 
     @Test

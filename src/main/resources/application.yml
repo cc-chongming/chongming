@@ -59,6 +59,10 @@ review:
       #     auth:
       #       type: https-token
       #       token-env: SAMPLE_REMOTE_REPOSITORY_TOKEN
+  remote-token:
+    # [AIREVIEW-PLAN-029] AES key protecting requirement-supplied remote repository tokens; only
+    # injected through the environment. Without it, online repositories with tokens are rejected.
+    key: ${REVIEW_REMOTE_TOKEN_KEY:}
   agentscope:
     persist-session: true
     state-home: ${AGENTSCOPE_STATE_HOME:.agentscope/state}

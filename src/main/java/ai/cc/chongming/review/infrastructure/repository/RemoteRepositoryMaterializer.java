@@ -34,11 +34,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * [AIREVIEW-PLAN-028] Materializes administrator-configured remote Git repositories into
- * server-managed shallow mirrors under {@code repository-mirrors/}. The first access clones
- * {@code --depth 1 --single-branch}; later accesses reuse the mirror through a bounded fetch and
- * hard reset, and any corrupted mirror is replaced by a fresh clone. Credentials are injected
- * through process environment variables only, never through command-line arguments or logs.
+ * [AIREVIEW-PLAN-028] Materializes remote Git repositories into server-managed shallow mirrors
+ * under {@code repository-mirrors/}. [AIREVIEW-PLAN-029] Two callers share the engine:
+ * administrator-configured remote definitions (credentials through environment variables) and
+ * requirement-supplied ad-hoc sources (a decrypted access token handed over for one command).
+ * The first access clones {@code --depth 1 --single-branch}; later accesses reuse the mirror
+ * through a bounded fetch and hard reset, and any corrupted mirror is replaced by a fresh clone.
+ * Credentials are injected through process environment variables only, never through
+ * command-line arguments or logs.
  *
  * @author wangli
  */
@@ -48,6 +51,7 @@ public class RemoteRepositoryMaterializer {
     private static final Logger log = LoggerFactory.getLogger(RemoteRepositoryMaterializer.class);
     private static final int CAPTURED_OUTPUT_LIMIT = 4096;
     private static final Duration STALE_STAGING_RETENTION = Duration.ofHours(1);
+    private static final Duration ADHOC_CLONE_TIMEOUT = Duration.ofMinutes(10);
 
     private final Path mirrorsRoot;
     private final RemoteRepositoryUrlValidator urlValidator;
@@ -73,29 +77,56 @@ public class RemoteRepositoryMaterializer {
         if (remote == null) {
             throw new RepositoryAccessException(Code.REPOSITORY_NOT_CONFIGURED, "Repository is not configured as remote");
         }
-        if (urlValidator != null) {
-            urlValidator.requireSafe(remote.url());
+        urlValidator.requireSafe(remote.url());
+        RemoteTarget target = new RemoteTarget(
+                remote.url(), remote.ref(), remote.cloneTimeout(), resolveConfiguredCredentials(remote));
+        return materialize(definition.id(), target);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Ensures one requirement-supplied online repository exists locally as a
+     * clean shallow worktree. The mirror is keyed by {@code url + ref} only, so credential
+     * rotation never forks mirrors; the plain-text token is injected for the network command and
+     * discarded afterwards.
+     *
+     * @param url        validated online repository URL
+     * @param ref        optional branch, {@code null} keeps the remote default branch
+     * @param plainToken optional decrypted access token, {@code null} for public repositories
+     * @return canonical mirror worktree root ready for snapshot capture
+     */
+    public Path ensureAdhocMirror(String url, String ref, String plainToken) {
+        if (url == null || url.isBlank()) {
+            throw new RepositoryAccessException(Code.REPOSITORY_NOT_CONFIGURED, "Remote repository URL is required");
         }
-        Object lock = repositoryLocks.computeIfAbsent(definition.id(), ignored -> new Object());
+        urlValidator.requireSafe(url);
+        String effectiveRef = ref == null || ref.isBlank() ? null : ref.trim();
+        ResolvedCredentials credentials = plainToken == null || plainToken.isBlank()
+                ? null
+                : new ResolvedCredentials(AuthType.HTTPS_TOKEN, plainToken);
+        RemoteTarget target = new RemoteTarget(url.trim(), effectiveRef, ADHOC_CLONE_TIMEOUT, credentials);
+        return materialize("adhoc:" + sha256(target.url() + '\u0000' + (effectiveRef == null ? "" : effectiveRef)), target);
+    }
+
+    private Path materialize(String identity, RemoteTarget target) {
+        Object lock = repositoryLocks.computeIfAbsent(identity, ignored -> new Object());
         synchronized (lock) {
-            Path mirror = mirrorDirectory(definition.id());
-            if (isUsableMirror(mirror, remote)) {
+            Path mirror = mirrorDirectory(identity);
+            if (isUsableMirror(mirror, target)) {
                 try {
-                    updateMirror(mirror, remote);
+                    updateMirror(mirror, target);
                     return mirror.toRealPath();
                 } catch (RepositoryAccessException exception) {
-                    log.warn("REMOTE_REPOSITORY_MIRROR_UPDATE_FAILED repositoryId={} code={}",
-                            definition.id(), exception.code());
+                    log.warn("REMOTE_REPOSITORY_MIRROR_UPDATE_FAILED identity={} code={}", identity, exception.code());
                     deleteDirectoryQuietly(mirror);
                 } catch (IOException exception) {
-                    log.warn("REMOTE_REPOSITORY_MIRROR_UPDATE_FAILED repositoryId={}", definition.id(), exception);
+                    log.warn("REMOTE_REPOSITORY_MIRROR_UPDATE_FAILED identity={}", identity, exception);
                     deleteDirectoryQuietly(mirror);
                 }
             } else if (Files.exists(mirror, LinkOption.NOFOLLOW_LINKS)) {
                 // Only an unpublished/incomplete mirror is ever removed; the retry below re-clones.
                 deleteDirectoryQuietly(mirror);
             }
-            cloneMirror(definition.id(), mirror, remote);
+            cloneMirror(identity, mirror, target);
             try {
                 return mirror.toRealPath();
             } catch (IOException exception) {
@@ -105,29 +136,58 @@ public class RemoteRepositoryMaterializer {
         }
     }
 
-    private boolean isUsableMirror(Path mirror, Remote remote) {
+    /** Resolves administrator-configured credentials through their environment-variable indirection. */
+    private ResolvedCredentials resolveConfiguredCredentials(Remote remote) {
+        AuthType authType = remote.auth().type();
+        if (authType == AuthType.HTTPS_TOKEN) {
+            String token = System.getenv(remote.auth().tokenEnv());
+            if (token == null || token.isBlank()) {
+                throw new RepositoryAccessException(
+                        Code.REMOTE_AUTH_FAILED, "Remote repository credentials are not configured");
+            }
+            return new ResolvedCredentials(AuthType.HTTPS_TOKEN, token);
+        }
+        if (authType == AuthType.SSH_KEY) {
+            String keyPathEnvironment = remote.auth().keyPathEnv();
+            String keyPath = keyPathEnvironment == null ? null : System.getenv(keyPathEnvironment);
+            if (keyPath == null || keyPath.isBlank() || keyPath.contains("\"")) {
+                throw new RepositoryAccessException(
+                        Code.REMOTE_AUTH_FAILED, "Remote repository SSH key is not configured");
+            }
+            if (!Files.isRegularFile(Path.of(keyPath), LinkOption.NOFOLLOW_LINKS)) {
+                throw new RepositoryAccessException(
+                        Code.REMOTE_AUTH_FAILED, "Remote repository SSH key is not configured");
+            }
+            return new ResolvedCredentials(AuthType.SSH_KEY, keyPath);
+        }
+        return null;
+    }
+
+    private boolean isUsableMirror(Path mirror, RemoteTarget target) {
         if (!Files.isDirectory(mirror.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
             return false;
         }
-        String configuredUrl = remote.url();
-        String originUrl = runCapture(mirror, remote, Duration.ofSeconds(10), false, "remote", "get-url", "origin");
-        return configuredUrl.equals(originUrl);
+        String originUrl = runCapture(mirror, target.credentials(), Duration.ofSeconds(10), false,
+                "remote", "get-url", "origin");
+        return target.url().equals(originUrl);
     }
 
-    private void updateMirror(Path mirror, Remote remote) throws IOException {
-        String effectiveRef = remote.ref() != null
-                ? remote.ref()
-                : runCapture(mirror, remote, Duration.ofSeconds(10), false, "symbolic-ref", "--short", "-q", "HEAD");
+    private void updateMirror(Path mirror, RemoteTarget target) throws IOException {
+        String effectiveRef = target.ref() != null
+                ? target.ref()
+                : runCapture(mirror, target.credentials(), Duration.ofSeconds(10), false,
+                        "symbolic-ref", "--short", "-q", "HEAD");
         if (effectiveRef == null || effectiveRef.isBlank()) {
             throw new RepositoryAccessException(Code.REMOTE_FETCH_FAILED, "Remote repository mirror has no branch");
         }
-        runRequired(mirror, remote, remote.cloneTimeout(), true, "fetch", "--depth", "1", "--force", "--quiet", "origin");
-        runRequired(mirror, remote, remote.cloneTimeout(), false,
+        runRequired(mirror, target.credentials(), target.timeout(), true,
+                "fetch", "--depth", "1", "--force", "--quiet", "origin");
+        runRequired(mirror, target.credentials(), target.timeout(), false,
                 "checkout", "--force", "--quiet", "-B", effectiveRef, "origin/" + effectiveRef);
-        runRequired(mirror, remote, Duration.ofMinutes(2), false, "clean", "-fdx", "--quiet");
+        runRequired(mirror, target.credentials(), Duration.ofMinutes(2), false, "clean", "-fdx", "--quiet");
     }
 
-    private void cloneMirror(String repositoryId, Path mirror, Remote remote) {
+    private void cloneMirror(String identity, Path mirror, RemoteTarget target) {
         try {
             Files.createDirectories(mirrorsRoot);
             cleanStaleStaging();
@@ -135,17 +195,17 @@ public class RemoteRepositoryMaterializer {
             try {
                 List<String> arguments = new ArrayList<>(List.of(
                         "clone", "--depth", "1", "--single-branch", "--quiet"));
-                if (remote.ref() != null) {
+                if (target.ref() != null) {
                     arguments.add("--branch");
-                    arguments.add(remote.ref());
+                    arguments.add(target.ref());
                 }
                 arguments.add("--");
-                arguments.add(remote.url());
+                arguments.add(target.url());
                 arguments.add(staging.toString());
-                runGit(null, remote, remote.cloneTimeout(), true, arguments);
+                runGit(null, target.credentials(), target.timeout(), true, arguments);
                 Files.createDirectories(mirror.getParent());
                 moveDirectory(staging, mirror);
-                log.info("REMOTE_REPOSITORY_MIRROR_CLONED repositoryId={}", repositoryId);
+                log.info("REMOTE_REPOSITORY_MIRROR_CLONED identity={}", identity);
             } finally {
                 deleteDirectoryQuietly(staging);
             }
@@ -158,17 +218,19 @@ public class RemoteRepositoryMaterializer {
     }
 
     private String runCapture(
-            Path workingDirectory, Remote remote, Duration timeout, boolean networkCommand, String... arguments) {
+            Path workingDirectory, ResolvedCredentials credentials, Duration timeout,
+            boolean networkCommand, String... arguments) {
         try {
-            return runGit(workingDirectory, remote, timeout, networkCommand, List.of(arguments));
+            return runGit(workingDirectory, credentials, timeout, networkCommand, List.of(arguments));
         } catch (RepositoryAccessException exception) {
             return null;
         }
     }
 
     private void runRequired(
-            Path workingDirectory, Remote remote, Duration timeout, boolean networkCommand, String... arguments) {
-        runGit(workingDirectory, remote, timeout, networkCommand, List.of(arguments));
+            Path workingDirectory, ResolvedCredentials credentials, Duration timeout,
+            boolean networkCommand, String... arguments) {
+        runGit(workingDirectory, credentials, timeout, networkCommand, List.of(arguments));
     }
 
     /**
@@ -177,7 +239,8 @@ public class RemoteRepositoryMaterializer {
      * transfer can never stall the wait loop.
      */
     private String runGit(
-            Path workingDirectory, Remote remote, Duration timeout, boolean networkCommand, List<String> arguments) {
+            Path workingDirectory, ResolvedCredentials credentials, Duration timeout,
+            boolean networkCommand, List<String> arguments) {
         List<String> command = new ArrayList<>();
         command.add("git");
         if (workingDirectory != null) {
@@ -190,7 +253,7 @@ public class RemoteRepositoryMaterializer {
         environment.put("GIT_OPTIONAL_LOCKS", "0");
         environment.put("GIT_TERMINAL_PROMPT", "0");
         if (networkCommand) {
-            injectCredentials(environment, remote);
+            injectCredentials(environment, credentials);
         }
         long deadline = System.nanoTime() + timeout.toNanos();
         try {
@@ -234,35 +297,22 @@ public class RemoteRepositoryMaterializer {
         }
     }
 
-    private void injectCredentials(Map<String, String> environment, Remote remote) {
-        AuthType authType = remote.auth().type();
-        if (authType == AuthType.HTTPS_TOKEN) {
-            String token = System.getenv(remote.auth().tokenEnv());
-            if (token == null || token.isBlank()) {
-                throw new RepositoryAccessException(
-                        Code.REMOTE_AUTH_FAILED, "Remote repository credentials are not configured");
-            }
+    private void injectCredentials(Map<String, String> environment, ResolvedCredentials credentials) {
+        if (credentials == null) {
+            return;
+        }
+        if (credentials.type() == AuthType.HTTPS_TOKEN) {
             String basic = Base64.getEncoder().encodeToString(
-                    ("x-access-token:" + token).getBytes(StandardCharsets.UTF_8));
+                    ("x-access-token:" + credentials.secret()).getBytes(StandardCharsets.UTF_8));
             environment.put("GIT_CONFIG_COUNT", "1");
             environment.put("GIT_CONFIG_KEY_0", "http.extraheader");
             environment.put("GIT_CONFIG_VALUE_0", "Authorization: Basic " + basic);
             return;
         }
-        if (authType == AuthType.SSH_KEY) {
-            String keyPathEnvironment = remote.auth().keyPathEnv();
-            String keyPath = keyPathEnvironment == null ? null : System.getenv(keyPathEnvironment);
-            if (keyPath == null || keyPath.isBlank() || keyPath.contains("\"")) {
-                throw new RepositoryAccessException(
-                        Code.REMOTE_AUTH_FAILED, "Remote repository SSH key is not configured");
-            }
-            Path keyFile = Path.of(keyPath);
-            if (!Files.isRegularFile(keyFile, LinkOption.NOFOLLOW_LINKS)) {
-                throw new RepositoryAccessException(
-                        Code.REMOTE_AUTH_FAILED, "Remote repository SSH key is not configured");
-            }
+        if (credentials.type() == AuthType.SSH_KEY) {
             environment.put("GIT_SSH_COMMAND",
-                    "ssh -i \"" + keyPath + "\" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
+                    "ssh -i \"" + credentials.secret()
+                            + "\" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
         }
     }
 
@@ -325,8 +375,8 @@ public class RemoteRepositoryMaterializer {
         }
     }
 
-    private Path mirrorDirectory(String repositoryId) {
-        return mirrorsRoot.resolve(sha256(repositoryId)).normalize();
+    private Path mirrorDirectory(String identity) {
+        return mirrorsRoot.resolve(sha256(identity)).normalize();
     }
 
     private void moveDirectory(Path source, Path target) throws IOException {
@@ -370,5 +420,22 @@ public class RemoteRepositoryMaterializer {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
+    }
+
+    /**
+     * Unified materialization descriptor shared by configured and ad-hoc remote sources.
+     *
+     * @author wangli
+     */
+    private record RemoteTarget(String url, String ref, Duration timeout, ResolvedCredentials credentials) {
+    }
+
+    /**
+     * One resolved credential channel; {@code secret} is either a plain-text token or a key path
+     * and only ever travels through process environment variables.
+     *
+     * @author wangli
+     */
+    private record ResolvedCredentials(AuthType type, String secret) {
     }
 }

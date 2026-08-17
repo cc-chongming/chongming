@@ -2,11 +2,13 @@ package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.application.RepositoryAccessException.Code;
 import ai.cc.chongming.review.config.ReviewProperties;
+import ai.cc.chongming.review.domain.model.RemoteRepositorySource;
 import ai.cc.chongming.review.domain.model.RepositorySnapshot;
 import ai.cc.chongming.review.domain.model.SnapshotReference;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.infrastructure.repository.GitSnapshotReader;
 import ai.cc.chongming.review.infrastructure.repository.GitSnapshotReader.GitMetadata;
+import ai.cc.chongming.review.infrastructure.repository.RemoteRepositoryMaterializer;
 import ai.cc.chongming.review.infrastructure.repository.RepositoryBoundaryGuard;
 import ai.cc.chongming.review.infrastructure.repository.RepositoryBoundaryGuard.AuthorizedRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,15 +61,33 @@ public class RepositorySnapshotService {
     private final RepositoryBoundaryGuard boundaryGuard;
     private final GitSnapshotReader gitSnapshotReader;
     private final Path workspaceRoot;
+    private final RemoteRepositoryMaterializer remoteMaterializer;
+    private final RemoteTokenCipher remoteTokenCipher;
     private final ConcurrentMap<String, Object> snapshotLocks = new ConcurrentHashMap<>();
 
     public RepositorySnapshotService(
             RepositoryBoundaryGuard boundaryGuard,
             GitSnapshotReader gitSnapshotReader,
             ReviewProperties reviewProperties) {
+        this(boundaryGuard, gitSnapshotReader, reviewProperties, null, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Full constructor enabling requirement-supplied online repository
+     * sources; without the materializer and cipher only configured repositories can bind.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public RepositorySnapshotService(
+            RepositoryBoundaryGuard boundaryGuard,
+            GitSnapshotReader gitSnapshotReader,
+            ReviewProperties reviewProperties,
+            RemoteRepositoryMaterializer remoteMaterializer,
+            RemoteTokenCipher remoteTokenCipher) {
         this.boundaryGuard = Objects.requireNonNull(boundaryGuard, "boundaryGuard must not be null");
         this.gitSnapshotReader = Objects.requireNonNull(gitSnapshotReader, "gitSnapshotReader must not be null");
         this.workspaceRoot = Path.of(reviewProperties.workspaceRoot()).toAbsolutePath().normalize();
+        this.remoteMaterializer = remoteMaterializer;
+        this.remoteTokenCipher = remoteTokenCipher;
     }
 
     /**
@@ -91,13 +111,28 @@ public class RepositorySnapshotService {
             String repositoryId,
             String requirementSnapshotHash,
             IntakeCancellation cancellation) {
+        return bindSnapshot(reviewId, attemptNo, RepositorySource.configured(repositoryId),
+                requirementSnapshotHash, cancellation);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Binds one attempt to a content-addressed shared snapshot resolved from
+     * either a configured repository identity or a requirement-supplied online repository source.
+     */
+    public RepositorySnapshot bindSnapshot(
+            ReviewId reviewId,
+            int attemptNo,
+            RepositorySource source,
+            String requirementSnapshotHash,
+            IntakeCancellation cancellation) {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
         if (attemptNo < 1) {
             throw new IllegalArgumentException("attemptNo must be positive");
         }
+        Objects.requireNonNull(source, "source must not be null");
         Objects.requireNonNull(cancellation, "cancellation must not be null");
         cancellation.checkCancelled();
-        AuthorizedRepository repository = boundaryGuard.requireAuthorized(repositoryId);
+        AuthorizedRepository repository = resolveRepository(source);
         GitMetadata gitMetadata = gitSnapshotReader.read(repository.root(), cancellation);
         String worktreeFingerprint = gitMetadata.dirty()
                 ? fingerprintRepository(repository.root(), cancellation)
@@ -176,8 +211,17 @@ public class RepositorySnapshotService {
 
     /** Loads the shared snapshot selected by the immutable review reference. */
     public Optional<RepositorySnapshot> findExistingSnapshot(ReviewId reviewId, int attemptNo, String repositoryId) {
+        return findExistingSnapshot(reviewId, attemptNo, RepositorySource.configured(repositoryId));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Loads the shared snapshot selected by the immutable review reference
+     * for either repository binding kind.
+     */
+    public Optional<RepositorySnapshot> findExistingSnapshot(ReviewId reviewId, int attemptNo, RepositorySource source) {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
-        AuthorizedRepository repository = boundaryGuard.requireAuthorized(repositoryId);
+        Objects.requireNonNull(source, "source must not be null");
+        AuthorizedRepository repository = resolveRepository(source);
         Optional<SnapshotReference> reference = readReference(reviewId, attemptNo);
         if (reference.isEmpty()) {
             return Optional.empty();
@@ -260,6 +304,25 @@ public class RepositorySnapshotService {
         } catch (IOException exception) {
             throw new RepositoryAccessException(Code.SNAPSHOT_FAILED, "Shared repository snapshot cleanup failed", exception);
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Resolves one repository binding into a snapshot-ready root: configured
+     * identities travel through the boundary guard, online sources through the ad-hoc mirror
+     * engine with the decrypted access token.
+     */
+    private AuthorizedRepository resolveRepository(RepositorySource source) {
+        if (source.configuredRepositoryId() != null) {
+            return boundaryGuard.requireAuthorized(source.configuredRepositoryId());
+        }
+        if (remoteMaterializer == null || remoteTokenCipher == null) {
+            throw new RepositoryAccessException(
+                    Code.REMOTE_FETCH_FAILED, "Remote repository support is not available");
+        }
+        RemoteRepositorySource remoteSource = source.remoteSource();
+        String plainToken = remoteTokenCipher.decrypt(remoteSource.encryptedToken());
+        Path mirrorRoot = remoteMaterializer.ensureAdhocMirror(remoteSource.url(), remoteSource.ref(), plainToken);
+        return new AuthorizedRepository(source.repositoryIdentity(), mirrorRoot);
     }
 
     /**

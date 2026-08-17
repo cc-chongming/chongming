@@ -222,7 +222,8 @@ class ReviewRepositoryToolFactoryTests {
         RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
         ReadOnlyRepositoryTools repositoryTools = mock(ReadOnlyRepositoryTools.class);
         when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(requirementSnapshot);
-        when(snapshotService.findExistingSnapshot(reviewId, 1, "approved-repository"))
+        when(snapshotService.findExistingSnapshot(
+                reviewId, 1, ai.cc.chongming.review.application.RepositorySource.configured("approved-repository")))
                 .thenReturn(Optional.of(repositorySnapshot));
         ReviewRepositoryToolFactory factory = new ReviewRepositoryToolFactory(
                 intakeService, snapshotService, repositoryTools, new ReviewContextAssembler());

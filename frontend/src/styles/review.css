@@ -759,3 +759,15 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .auth-switch { color: #1456a9; font-size: .85rem; text-decoration: none; }
 .auth-switch:hover { text-decoration: underline; }
 .user-area .auth-logout { margin-left: auto; font-size: 11px; white-space: nowrap; }
+
+/* [AIREVIEW-PLAN-029] Repository source picker: configured whitelist vs online repository. */
+.repo-source-picker { display: grid; gap: .55rem; width: 100%; }
+.repo-source-tabs { display: inline-flex; align-self: flex-start; padding: .2rem; background: #eef2f7; border: 1px solid #d7dfeb; border-radius: .5rem; gap: .2rem; }
+.repo-source-tab { padding: .32rem .85rem; color: #4a5d76; background: transparent; border: 0; border-radius: .38rem; cursor: pointer; font-size: .8rem; font-weight: 600; }
+.repo-source-tab.active { color: #1456a9; background: #fff; box-shadow: 0 1px 2px rgba(20, 60, 120, .12); }
+.repo-source-tab:disabled { cursor: not-allowed; opacity: .6; }
+.repo-source-remote { display: grid; gap: .55rem; }
+.repo-source-remote label { display: grid; gap: .3rem; color: #4a5d76; font-size: .8rem; font-weight: 600; }
+.repo-source-remote input { width: 100%; padding: .5rem .65rem; color: #1c2a3a; background: #fff; border: 1px solid #cfd9e6; border-radius: .45rem; font-size: .85rem; }
+.repo-source-remote input:focus { outline: 2px solid rgba(20, 86, 169, .25); border-color: #1456a9; }
+.repo-source-remote input:disabled { background: #f3f6fa; color: #8a97a8; }

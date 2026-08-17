@@ -167,4 +167,5 @@ review:
 
 | 日期 | 变更 |
 |---|---|
-| 2026-08-17 | 创建 PLAN-028：配置层 type/remote/auth 扩展与启动期校验、URL 安全闸、托管浅克隆镜像物化（staging 原子发布、fetch 复用、损坏重克隆）、边界守卫 remote 分流、REMOTE_FETCH_FAILED/REMOTE_AUTH_FAILED 错误码、仓库选项 type 契约与前端"远程"徽标；验证记录：mvn test（*Repository* 93 项）、npm test 110、playwright 29 全部通过。 |
+| 2026-08-17 | 创建 PLAN-028：配置层 type/remote/auth 扩展与启动期校验、URL 安全闸、托管浅克隆镜像物化（staging 原子发布、fetch 复用、损坏重克隆）、边界守卫 remote 分流、REMOTE_FETCH_FAILED/REMOTE_AUTH_FAILED 错误码、仓库选项 type 契约与前端“远程”徽标；验证记录：mvn test（*Repository* 93 项）、npm test 110、playwright 29 全部通过。 |
+| 2026-08-17 | AIREVIEW-PLAN-029 复用本计划的 URL 安全闸与物化引擎，新增需求级 adhoc 远程源通道（令牌随需求加密存储）；两种仓库来源并存且互斥，本计划行为不变。 |

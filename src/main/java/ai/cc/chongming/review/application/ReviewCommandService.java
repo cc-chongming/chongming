@@ -193,7 +193,11 @@ public class ReviewCommandService {
         }
         Review review = requireReview(reviewId);
         var requirement = intakeService.requireSnapshot(reviewId, attemptNo);
-        var existing = snapshotService.findExistingSnapshot(reviewId, attemptNo, requirement.repositoryPath());
+        // [AIREVIEW-PLAN-029] The snapshot binding follows the intake repository source, which is
+        // either a configured repository identity or a requirement-supplied online source.
+        ai.cc.chongming.review.application.RepositorySource repositorySource =
+                ai.cc.chongming.review.application.RepositorySource.from(requirement);
+        var existing = snapshotService.findExistingSnapshot(reviewId, attemptNo, repositorySource);
         if (existing.isPresent()) {
             return existing.orElseThrow();
         }
@@ -201,7 +205,7 @@ public class ReviewCommandService {
             if (review.attemptNo() != attemptNo) {
                 throw new IllegalStateException("requested Scout preview attempt is not current");
             }
-            existing = snapshotService.findExistingSnapshot(reviewId, attemptNo, requirement.repositoryPath());
+            existing = snapshotService.findExistingSnapshot(reviewId, attemptNo, repositorySource);
             if (existing.isPresent()) {
                 return existing.orElseThrow();
             }
@@ -212,7 +216,7 @@ public class ReviewCommandService {
             return snapshotService.bindSnapshot(
                     reviewId,
                     attemptNo,
-                    requirement.repositoryPath(),
+                    repositorySource,
                     requirement.contentHash(),
                     IntakeCancellation.neverCancelled());
         }
@@ -237,12 +241,15 @@ public class ReviewCommandService {
             return;
         }
         var requirementSnapshot = intakeService.requireSnapshot(context.reviewId(), context.attemptNo());
+        // [AIREVIEW-PLAN-029] Snapshot binding follows the intake repository source for both
+        // configured and requirement-supplied online repositories.
+        RepositorySource repositorySource = RepositorySource.from(requirementSnapshot);
         if (snapshotService.findExistingSnapshot(
-                context.reviewId(), context.attemptNo(), requirementSnapshot.repositoryPath()).isPresent()) {
+                context.reviewId(), context.attemptNo(), repositorySource).isPresent()) {
             return;
         }
         snapshotService.bindSnapshot(
-                context.reviewId(), context.attemptNo(), requirementSnapshot.repositoryPath(),
+                context.reviewId(), context.attemptNo(), repositorySource,
                 requirementSnapshot.contentHash(), context.cancellation());
     }
 

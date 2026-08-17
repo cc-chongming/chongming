@@ -2,6 +2,7 @@ package ai.cc.chongming.review.infrastructure.document;
 
 import ai.cc.chongming.review.application.IntakeCancellation;
 import ai.cc.chongming.review.config.ReviewProperties;
+import ai.cc.chongming.review.domain.model.RemoteRepositorySource;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot;
 import ai.cc.chongming.review.domain.model.RequirementSnapshot.RequirementDocument;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
@@ -210,7 +211,10 @@ public class RequirementSnapshotStore {
                     manifest.contentHash(),
                     manifest.parserVersion(),
                     manifest.document(),
-                    Instant.parse(manifest.createdAt()));
+                    Instant.parse(manifest.createdAt()),
+                    manifest.remoteUrl() == null
+                            ? null
+                            : new RemoteRepositorySource(manifest.remoteUrl(), manifest.remoteRef(), manifest.remoteTokenEnc()));
         } catch (IOException | RuntimeException exception) {
             throw new IllegalStateException("Requirement snapshot cannot be loaded", exception);
         }
@@ -322,6 +326,8 @@ public class RequirementSnapshotStore {
 
     /**
      * JSON metadata bound to the exact raw and normalized files in an immutable attempt snapshot.
+     * [AIREVIEW-PLAN-029] Remote repository fields travel as cipher text only; historical
+     * manifests without them deserialize with a {@code null} source.
      *
      * @author wangli
      */
@@ -338,9 +344,13 @@ public class RequirementSnapshotStore {
             String contentHash,
             String parserVersion,
             String createdAt,
-            RequirementDocument document) {
+            RequirementDocument document,
+            String remoteUrl,
+            String remoteRef,
+            String remoteTokenEnc) {
 
         private static SnapshotManifest from(RequirementSnapshot snapshot) {
+            RemoteRepositorySource remote = snapshot.remoteSource();
             return new SnapshotManifest(
                     snapshot.snapshotId().toString(),
                     snapshot.reviewId().value().toString(),
@@ -354,7 +364,10 @@ public class RequirementSnapshotStore {
                     snapshot.contentHash(),
                     snapshot.parserVersion(),
                     snapshot.createdAt().toString(),
-                    snapshot.document());
+                    snapshot.document(),
+                    remote == null ? null : remote.url(),
+                    remote == null ? null : remote.ref(),
+                    remote == null ? null : remote.encryptedToken());
         }
     }
 }

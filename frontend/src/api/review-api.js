@@ -178,7 +178,8 @@ export const reviewApi = {
     }) {
         const form = new FormData();
         form.append('requirementFile', requirementFile);
-        form.append('repositoryPath', repositoryPath);
+        // [AIREVIEW-PLAN-029] Remote-bound requirements launch without a configured repository id.
+        if (repositoryPath) form.append('repositoryPath', repositoryPath);
         if (branch) form.append('branch', branch);
         if (commit) form.append('commit', commit);
         form.append('submitter', submitter);
@@ -222,13 +223,27 @@ export const reviewApi = {
         return request(withQuery('/api/reports', { page, size }));
     },
 
-    createReview({ requirementFile, repositoryPath, branch, commit, submitter, forceNewAttempt = false }) {
+    createReview({
+        requirementFile,
+        repositoryPath,
+        branch,
+        commit,
+        submitter,
+        forceNewAttempt = false,
+        remoteUrl,
+        remoteRef,
+        remoteToken
+    }) {
         const form = new FormData();
         form.append('requirementFile', requirementFile);
-        form.append('repositoryPath', repositoryPath);
+        // [AIREVIEW-PLAN-029] Configured repositories and online sources are mutually exclusive.
+        if (repositoryPath) form.append('repositoryPath', repositoryPath);
         form.append('submitter', submitter);
         if (branch) form.append('branch', branch);
         if (commit) form.append('commit', commit);
+        if (remoteUrl) form.append('remoteUrl', remoteUrl);
+        if (remoteRef) form.append('remoteRef', remoteRef);
+        if (remoteToken) form.append('remoteToken', remoteToken);
         form.append('forceNewAttempt', String(forceNewAttempt));
         return request('/api/reviews', { method: 'POST', body: form });
     },

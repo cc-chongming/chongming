@@ -4,9 +4,11 @@ import { RouterLink, useRouter } from 'vue-router';
 import { formatApiError, ReviewApiError, reviewApi } from '../api/review-api';
 import { taskApi } from '../api/task-api';
 import RepositorySelect from '../components/RepositorySelect.vue';
+import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
 
 // [AIREVIEW-PLAN-023#2] Draft repository edits use the configured repository selector.
 // [AIREVIEW-PLAN-023#3] Draft review launch is one idempotent multipart command.
+// [AIREVIEW-PLAN-029] Requirements may bind an online repository source instead.
 
 const props = defineProps({ requirementId: { type: String, required: true } });
 const router = useRouter();
@@ -28,7 +30,11 @@ const claims = ref([]);
 // Related development tasks drive the task-flow card and suppress manual lifecycle shortcuts.
 const relatedTasks = ref([]);
 const tasksLoadFailed = ref(false);
-const editForm = reactive({ title: '', description: '', assigneeId: '', repositoryPath: '', priority: 'P1' });
+const editForm = reactive({ title: '', description: '', assigneeId: '', priority: 'P1' });
+// [AIREVIEW-PLAN-029] Repository binding edited alongside the draft; token is write-only.
+const editRepoSource = ref({ mode: 'configured', repositoryPath: '', remoteUrl: '', remoteRef: '', remoteToken: '' });
+const requirementIsRemote = computed(() => !!requirement.value?.remote);
+const editIsRemote = computed(() => editRepoSource.value.mode === 'remote');
 const launchForm = reactive({
     repositoryPath: '',
     branch: 'main',
@@ -99,7 +105,13 @@ const canCancel = computed(() => requirement.value?.status === 'DRAFT');
 const canEdit = computed(() => ['DRAFT', 'RETURNED'].includes(requirement.value?.status));
 const canDelete = computed(() => requirement.value !== null);
 const canLaunchReview = computed(() => requirement.value?.status === 'DRAFT' && !requirement.value?.reviewId);
-const repositorySubmissionBlocked = computed(() => ['loading', 'empty'].includes(repositoryState.value));
+const repositorySubmissionBlocked = computed(() => (editIsRemote.value || requirementIsRemote.value)
+    ? false
+    : ['loading', 'empty'].includes(repositoryState.value));
+const editBindingReady = computed(() => editIsRemote.value
+    ? !!editRepoSource.value.remoteUrl.trim()
+    : !!editRepoSource.value.repositoryPath.trim());
+const launchBindingReady = computed(() => requirementIsRemote.value || !!launchForm.repositoryPath.trim());
 
 const scout = computed(() => reviewSummary.value?.contextScout ?? null);
 const scoutDone = computed(() => scout.value?.status === 'COMPLETED');
@@ -184,7 +196,6 @@ function openLaunchForm() {
     launchOpen.value = true;
     error.value = '';
 }
-
 function onLaunchFileChange(event) {
     launchFile.value = event.target.files?.[0] ?? null;
 }
@@ -196,19 +207,20 @@ async function launchReview() {
         error.value = '请重新上传 Markdown 格式的评审需求文档。';
         return;
     }
-    if (!launchForm.repositoryPath || !launchForm.submitter.trim() || !launchTasks().length
+    if (!launchBindingReady.value || !launchForm.submitter.trim() || !launchTasks().length
         || !launchForm.changeReason.trim() || !launchForm.initialMessage.trim()) {
         error.value = '请填写仓库、提交人、公开计划、计划原因和启动说明。';
         return;
     }
     launching.value = true;
     try {
-        if (!await ensureConfiguredRepository(launchForm.repositoryPath)) return;
+        // [AIREVIEW-PLAN-029] Remote-bound requirements reuse the requirement source at launch.
+        if (!requirementIsRemote.value && !await ensureConfiguredRepository(launchForm.repositoryPath)) return;
         const result = await reviewApi.launchRequirementReview(props.requirementId, {
             requirementFile: launchFile.value,
-            repositoryPath: launchForm.repositoryPath,
-            branch: launchForm.branch.trim(),
-            commit: launchForm.commit.trim(),
+            repositoryPath: requirementIsRemote.value ? null : launchForm.repositoryPath,
+            branch: requirementIsRemote.value ? '' : launchForm.branch.trim(),
+            commit: requirementIsRemote.value ? '' : launchForm.commit.trim(),
             submitter: launchForm.submitter.trim(),
             publicTasks: launchTasks(),
             changeReason: launchForm.changeReason.trim(),
@@ -285,9 +297,26 @@ function beginEdit() {
         title: requirement.value.title,
         description: requirement.value.description,
         assigneeId: requirement.value.assigneeId ?? '',
-        repositoryPath: requirement.value.repositoryPath ?? '',
         priority: requirement.value.priority ?? 'P1'
     });
+    // [AIREVIEW-PLAN-029] Initialize the binding picker from the current requirement source.
+    if (requirement.value.remote) {
+        editRepoSource.value = {
+            mode: 'remote',
+            repositoryPath: '',
+            remoteUrl: requirement.value.remote.url ?? '',
+            remoteRef: requirement.value.remote.ref ?? '',
+            remoteToken: ''
+        };
+    } else {
+        editRepoSource.value = {
+            mode: 'configured',
+            repositoryPath: requirement.value.repositoryPath ?? '',
+            remoteUrl: '',
+            remoteRef: '',
+            remoteToken: ''
+        };
+    }
     editing.value = true;
     error.value = '';
 }
@@ -301,14 +330,33 @@ async function saveEdit() {
     changing.value = true;
     error.value = '';
     try {
-        if (!await ensureConfiguredRepository(editForm.repositoryPath)) return;
+        // [AIREVIEW-PLAN-029] Remote edits validate the URL; configured edits keep the whitelist
+        // check. A blank token on an unchanged url/ref keeps the previous credential server-side.
+        let repositoryPayload;
+        if (editIsRemote.value) {
+            if (!editRepoSource.value.remoteUrl.trim()) {
+                error.value = '请填写线上仓库地址。';
+                return;
+            }
+            repositoryPayload = {
+                repositoryPath: null,
+                remote: {
+                    url: editRepoSource.value.remoteUrl.trim(),
+                    ref: editRepoSource.value.remoteRef.trim() || null,
+                    token: editRepoSource.value.remoteToken.trim() || null
+                }
+            };
+        } else {
+            if (!await ensureConfiguredRepository(editRepoSource.value.repositoryPath)) return;
+            repositoryPayload = { repositoryPath: editRepoSource.value.repositoryPath.trim() };
+        }
         requirement.value = await reviewApi.reviseRequirement(props.requirementId, {
             title: editForm.title.trim(),
             description: editForm.description,
             assigneeId: editForm.assigneeId,
-            repositoryPath: editForm.repositoryPath,
             priority: editForm.priority,
-            expectedVersion: requirement.value.version
+            expectedVersion: requirement.value.version,
+            ...repositoryPayload
         });
         editing.value = false;
     } catch (requestError) {
@@ -356,7 +404,7 @@ onMounted(refreshRepositoryAvailability);
 <template>
     <section class="platform-page">
         <p v-if="error" class="error-banner" role="alert">{{ error }} <RouterLink v-if="launchRecoveryReviewId" :to="`/reviews/${launchRecoveryReviewId}/live`">查看已绑定评审</RouterLink></p>
-        <p v-if="repositoryState === 'empty'" class="error-banner" role="status">当前没有可用仓库，暂不能保存或发起评审。</p>
+        <p v-if="repositoryState === 'empty' && !requirementIsRemote" class="error-banner" role="status">当前没有可用配置仓库；编辑时可切换到“线上仓库”直接填写代码地址。</p>
         <p v-if="loading" class="empty-note">正在读取需求详情…</p>
         <template v-else-if="requirement">
             <div class="rd-top">
@@ -368,6 +416,7 @@ onMounted(refreshRepositoryAvailability);
                         <span class="rd-meta-item"><span class="badge" :class="severityClass(requirement.priority)">{{ requirement.priority || '—' }}</span></span>
                         <span class="rd-meta-item">👤 {{ requirement.assigneeId || '未指派' }}</span>
                         <span v-if="requirement.repositoryPath" class="rd-meta-item">📁 {{ requirement.repositoryPath }}</span>
+                        <span v-else-if="requirement.remote" class="rd-meta-item">🌐 线上仓库 · {{ requirement.remote.url }}{{ requirement.remote.ref ? `（${requirement.remote.ref}）` : '' }}</span>
                         <span class="rd-meta-item">🕐 {{ requirement.updatedAt }}</span>
                     </div>
                 </div>
@@ -396,9 +445,15 @@ onMounted(refreshRepositoryAvailability);
                     <label class="full">需求描述<textarea v-model="editForm.description" /></label>
                     <label>优先级<select v-model="editForm.priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></label>
                     <label>负责人（可选）<input v-model="editForm.assigneeId" /></label>
-                    <RepositorySelect v-model="editForm.repositoryPath" class="full" label="仓库标识" required />
+                    <div class="form-field full">
+                        <label>仓库绑定</label>
+                        <RepositorySourcePicker
+                            v-model="editRepoSource"
+                            :token-configured="!!requirement.remote?.tokenConfigured"
+                            required />
+                    </div>
                     <div class="form-actions full">
-                        <button class="button" type="submit" :disabled="changing || repositorySubmissionBlocked || !editForm.repositoryPath">保存修改</button>
+                        <button class="button" type="submit" :disabled="changing || repositorySubmissionBlocked || !editBindingReady">保存修改</button>
                         <button class="button secondary" type="button" :disabled="changing" @click="cancelEdit">取消编辑</button>
                     </div>
                 </form>
@@ -409,15 +464,18 @@ onMounted(refreshRepositoryAvailability);
                 <p class="muted">草稿不保存 Markdown 原文，请重新上传需求文档。提交后将创建、绑定并启动一次评审。</p>
                 <form class="review-form compact" @submit.prevent="launchReview">
                     <label class="full">评审需求文档（.md）<input type="file" accept=".md,text/markdown" @change="onLaunchFileChange" /></label>
-                    <RepositorySelect v-model="launchForm.repositoryPath" class="full" required />
-                    <label>分支<input v-model="launchForm.branch" placeholder="main" /></label>
-                    <label>Commit（可选）<input v-model="launchForm.commit" placeholder="40 位 SHA" /></label>
+                    <p v-if="requirementIsRemote" class="muted full">🌐 该需求已绑定线上仓库 {{ requirement.remote.url }}，发起评审时将自动克隆该仓库。</p>
+                    <template v-else>
+                        <RepositorySelect v-model="launchForm.repositoryPath" class="full" required />
+                        <label>分支<input v-model="launchForm.branch" placeholder="main" /></label>
+                        <label>Commit（可选）<input v-model="launchForm.commit" placeholder="40 位 SHA" /></label>
+                    </template>
                     <label class="full">提交人<input v-model="launchForm.submitter" maxlength="128" required /></label>
                     <label class="full">公开评审计划（每行一项）<textarea v-model="launchForm.publicTasks" required /></label>
                     <label class="full">计划原因<input v-model="launchForm.changeReason" maxlength="512" required /></label>
                     <label class="full">启动说明<textarea v-model="launchForm.initialMessage" required /></label>
                     <div class="form-actions full">
-                        <button class="button" type="submit" :disabled="launching || repositorySubmissionBlocked || !launchForm.repositoryPath">{{ launching ? '正在发起…' : '确认发起评审' }}</button>
+                        <button class="button" type="submit" :disabled="launching || repositorySubmissionBlocked || !launchBindingReady">{{ launching ? '正在发起…' : '确认发起评审' }}</button>
                         <button class="button secondary" type="button" :disabled="launching" @click="launchOpen = false">取消</button>
                     </div>
                 </form>

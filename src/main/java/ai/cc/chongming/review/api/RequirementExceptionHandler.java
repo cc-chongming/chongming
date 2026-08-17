@@ -18,11 +18,14 @@ public class RequirementExceptionHandler {
     @ExceptionHandler(RequirementDomainException.class)
     public ProblemDetail requirementDomainFailure(RequirementDomainException exception) {
         // [AIREVIEW-PLAN-027] FORBIDDEN maps to 403 alongside the historical 404/409 contract.
+        // [AIREVIEW-PLAN-029] REMOTE_SOURCE_INVALID maps to 400 for invalid online repository input.
         HttpStatus status = exception.errorCode() == RequirementErrorCode.REQUIREMENT_NOT_FOUND
                 ? HttpStatus.NOT_FOUND
                 : exception.errorCode() == RequirementErrorCode.FORBIDDEN
                         ? HttpStatus.FORBIDDEN
-                        : HttpStatus.CONFLICT;
+                        : exception.errorCode() == RequirementErrorCode.REMOTE_SOURCE_INVALID
+                                ? HttpStatus.BAD_REQUEST
+                                : HttpStatus.CONFLICT;
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(status, exception.getMessage());
         detail.setProperty("code", exception.errorCode().name());
         return detail;

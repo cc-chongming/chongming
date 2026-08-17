@@ -109,6 +109,43 @@ class RemoteRepositoryMaterializerTests {
                 .isEqualTo(RepositoryAccessException.Code.REPOSITORY_PATH_UNSAFE);
     }
 
+    /**
+     * [AIREVIEW-PLAN-029] Requirement-supplied sources materialize through the ad-hoc channel;
+     * the mirror is keyed by url and ref only, so credential rotation reuses it.
+     */
+    @Test
+    void materializesAdhocRemoteRepositoriesKeyedByUrlAndRef() throws Exception {
+        Path bareRemote = createBareRemote("adhoc-remote", "adhoc version");
+        RemoteRepositoryMaterializer materializer = newMaterializer();
+        String url = bareRemote.toUri().toString();
+
+        Path mirror = materializer.ensureAdhocMirror(url, "main", "first-token");
+
+        assertThat(mirror).startsWith(temporaryDirectory.resolve("workspace").resolve("repository-mirrors"));
+        assertThat(Files.readString(mirror.resolve("README.md"), StandardCharsets.UTF_8))
+                .isEqualToNormalizingNewlines("adhoc version\n");
+
+        // Rotating the token must reuse the same mirror instead of forking it.
+        Path rotated = materializer.ensureAdhocMirror(url, "main", "second-token");
+        assertThat(rotated).isEqualTo(mirror);
+        try (Stream<Path> entries = Files.list(mirrorDirectoryRoot(materializer))) {
+            assertThat(entries.count()).isEqualTo(1);
+        }
+    }
+
+    /** [AIREVIEW-PLAN-029] Ad-hoc mirrors reject unsafe caller-supplied URLs before cloning. */
+    @Test
+    void rejectsUnsafeAdhocRemoteUrls() {
+        RemoteRepositoryMaterializer materializer = new RemoteRepositoryMaterializer(
+                new ReviewProperties(temporaryDirectory.resolve("workspace").toString(), 1, 1),
+                new RemoteRepositoryUrlValidator(false, false));
+
+        assertThatThrownBy(() -> materializer.ensureAdhocMirror("file:///D:/repositories/demo.git", null, null))
+                .isInstanceOf(RepositoryAccessException.class)
+                .extracting(exception -> ((RepositoryAccessException) exception).code())
+                .isEqualTo(RepositoryAccessException.Code.REPOSITORY_PATH_UNSAFE);
+    }
+
     private RemoteRepositoryMaterializer newMaterializer() {
         return new RemoteRepositoryMaterializer(
                 new ReviewProperties(temporaryDirectory.resolve("workspace").toString(), 1, 1),

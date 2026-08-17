@@ -112,6 +112,8 @@ public class RequirementCommandController {
             }
             creatorUsername = authPrincipal.username();
         }
+        RequirementCommandService.RemoteSourceCommand remote = toRemoteCommand(request.remote());
+        requireSingleRepositoryBinding(request.repositoryPath(), remote);
         return ResponseEntity.status(HttpStatus.CREATED).body(RequirementView.from(commandService.create(
                 new RequirementCommandService.CreateRequirementCommand(
                         request.title(),
@@ -119,7 +121,8 @@ public class RequirementCommandController {
                         request.assigneeId(),
                         request.repositoryPath(),
                         request.priority(),
-                        creatorUsername))));
+                        creatorUsername,
+                        remote))));
     }
 
     @PutMapping("/{requirementId}")
@@ -128,6 +131,8 @@ public class RequirementCommandController {
             @Valid @RequestBody ReviseRequirementRequest request,
             HttpServletRequest httpRequest) {
         requireOwnership(new RequirementId(requirementId), httpRequest);
+        RequirementCommandService.RemoteSourceCommand remote = toRemoteCommand(request.remote());
+        requireSingleRepositoryBinding(request.repositoryPath(), remote);
         return RequirementView.from(commandService.revise(
                 new RequirementId(requirementId),
                 new RequirementCommandService.ReviseRequirementCommand(
@@ -136,7 +141,8 @@ public class RequirementCommandController {
                         request.assigneeId(),
                         request.repositoryPath(),
                         request.priority(),
-                        request.expectedVersion())));
+                        request.expectedVersion(),
+                        remote)));
     }
 
     @PostMapping("/{requirementId}/submit")
@@ -155,7 +161,7 @@ public class RequirementCommandController {
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
             @RequestPart("requirementFile") MultipartFile requirementFile,
-            @RequestParam("repositoryPath") @NotBlank String repositoryPath,
+            @RequestParam(value = "repositoryPath", required = false) String repositoryPath,
             @RequestParam(value = "branch", required = false) String branch,
             @RequestParam(value = "commit", required = false) String commit,
             @RequestParam("submitter") @NotBlank String submitter,
@@ -222,7 +228,8 @@ public class RequirementCommandController {
             String description,
             String assigneeId,
             String repositoryPath,
-            String priority) {
+            String priority,
+            @Valid RemoteRequest remote) {
     }
 
     /**
@@ -234,7 +241,20 @@ public class RequirementCommandController {
             String assigneeId,
             String repositoryPath,
             String priority,
-            @Min(0) long expectedVersion) {
+            @Min(0) long expectedVersion,
+            @Valid RemoteRequest remote) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] Online repository binding supplied at creation or revision; the token
+     * is write-only and never echoed by any response.
+     *
+     * @author wangli
+     */
+    public record RemoteRequest(
+            @Size(max = 512) String url,
+            @Size(max = 128) String ref,
+            @Size(max = 512) String token) {
     }
 
     /**
@@ -282,6 +302,31 @@ public class RequirementCommandController {
             throw new RequirementDomainException(
                     RequirementErrorCode.FORBIDDEN, "仅需求创建者或管理员可执行该操作");
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-029] The configured-repository identity and the online source are mutually
+     * exclusive, and a remote binding must at least name its URL.
+     */
+    private void requireSingleRepositoryBinding(
+            String repositoryPath, RequirementCommandService.RemoteSourceCommand remote) {
+        boolean hasConfigured = repositoryPath != null && !repositoryPath.isBlank();
+        boolean hasRemote = remote != null && remote.url() != null && !remote.url().isBlank();
+        if (hasConfigured && hasRemote) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.REMOTE_SOURCE_INVALID, "配置仓库与线上仓库只能二选一");
+        }
+        if (remote != null && !hasRemote) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.REMOTE_SOURCE_INVALID, "线上仓库必须填写仓库地址");
+        }
+    }
+
+    private RequirementCommandService.RemoteSourceCommand toRemoteCommand(RemoteRequest request) {
+        if (request == null) {
+            return null;
+        }
+        return new RequirementCommandService.RemoteSourceCommand(request.url(), request.ref(), request.token());
     }
 
     private List<String> parsePublicTasks(String publicTasks) {
