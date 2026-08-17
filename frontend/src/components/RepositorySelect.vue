@@ -41,7 +41,7 @@ onMounted(loadRepositoryOptions);
                 {{ loading ? '正在读取仓库配置…' : loadError ? '仓库配置读取失败' : options.length ? '请选择仓库' : '暂无可用仓库' }}
             </option>
             <option v-for="repository in options" :key="repository.id" :value="repository.id">
-                {{ repository.displayName }}（{{ repository.id }}）
+                {{ repository.displayName }}（{{ repository.id }}）{{ repository.type === 'remote' ? ' · 远程' : '' }}
             </option>
         </select>
         <span v-if="unavailableRepositoryId" class="muted repository-select-note">

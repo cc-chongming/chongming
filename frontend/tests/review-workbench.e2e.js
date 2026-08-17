@@ -392,13 +392,19 @@ test('uses configured repository options on the independent review form', async 
     await page.route('**/api/repositories', (route) => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([{ id: 'cx-ai', displayName: 'CX AI' }])
+        body: JSON.stringify([
+            { id: 'cx-ai', displayName: 'CX AI', type: 'local' },
+            { id: 'demo-remote', displayName: '演示远程仓库', type: 'remote' }
+        ])
     }));
 
     await page.goto('/index.html#/create');
 
+    // [AIREVIEW-PLAN-028] Remote entries are labelled as such; the opaque id stays the value.
+    await expect(page.getByRole('option', { name: 'CX AI（cx-ai）' })).toBeAttached();
+    await expect(page.getByRole('option', { name: '演示远程仓库（demo-remote） · 远程' })).toBeAttached();
+    await page.getByLabel('目标仓库').selectOption('cx-ai');
     await expect(page.getByLabel('目标仓库')).toHaveValue('cx-ai');
-    await expect(page.getByText('CX AI（cx-ai）')).toBeAttached();
 });
 
 test('disables requirement creation when the server has no configured repositories', async ({ page }) => {

@@ -42,9 +42,23 @@ review:
   repositories:
     # `cx-ai` is looked up beside this project by default; deployments with a different layout set
     # CX_AI_REPOSITORY_ROOT locally. API callers can still supply only the opaque repository ID.
+    # [AIREVIEW-PLAN-028] Remote entries are cloned into server-managed mirrors before snapshotting.
+    # Hosts resolving to private address ranges are rejected unless allow-internal is enabled.
+    allow-internal: ${REVIEW_REPOSITORIES_ALLOW_INTERNAL:false}
     allowed:
       - id: cx-ai
         root: ${CX_AI_REPOSITORY_ROOT:../cx-ai}
+      # Remote repository example (enable by providing a real URL via the environment):
+      # - id: sample-remote
+      #   type: remote
+      #   display-name: 示例远程仓库
+      #   remote:
+      #     url: ${SAMPLE_REMOTE_REPOSITORY_URL:}
+      #     ref: main
+      #     clone-timeout: PT10M
+      #     auth:
+      #       type: https-token
+      #       token-env: SAMPLE_REMOTE_REPOSITORY_TOKEN
   agentscope:
     persist-session: true
     state-home: ${AGENTSCOPE_STATE_HOME:.agentscope/state}

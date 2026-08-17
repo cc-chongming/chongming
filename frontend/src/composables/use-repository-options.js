@@ -6,6 +6,7 @@ import { reviewApi } from '../api/review-api';
  * Historical identifiers that are no longer configured are preserved only as a read-only warning.
  *
  * [AIREVIEW-PLAN-023#2]
+ * [AIREVIEW-PLAN-028] Options also carry the source type (local/remote) for labelling only.
  */
 export function useRepositoryOptions(selectedRepository, { api = reviewApi } = {}) {
     const options = ref([]);
@@ -25,7 +26,8 @@ export function useRepositoryOptions(selectedRepository, { api = reviewApi } = {
                     id: item.id.trim(),
                     displayName: typeof item.displayName === 'string' && item.displayName.trim()
                         ? item.displayName.trim()
-                        : item.id.trim()
+                        : item.id.trim(),
+                    type: item.type === 'remote' ? 'remote' : 'local'
                 }))
                 : [];
 

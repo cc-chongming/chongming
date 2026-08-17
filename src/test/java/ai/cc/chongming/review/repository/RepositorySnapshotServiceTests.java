@@ -129,7 +129,7 @@ class RepositorySnapshotServiceTests {
     private RepositorySnapshotService newService(Path repository) {
         RepositoryBoundaryGuard guard = new RepositoryBoundaryGuard(new RepositoryAccessProperties(
                 List.of(new RepositoryAccessProperties.RepositoryDefinition(
-                        "sample-repository", repository.toString(), null))));
+                        "sample-repository", repository.toString(), null, null, null)), null, null));
         return new RepositorySnapshotService(
                 guard,
                 new GitSnapshotReader(),

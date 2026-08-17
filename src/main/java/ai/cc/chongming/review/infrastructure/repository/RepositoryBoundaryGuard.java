@@ -3,6 +3,8 @@ package ai.cc.chongming.review.infrastructure.repository;
 import ai.cc.chongming.review.application.RepositoryAccessException;
 import ai.cc.chongming.review.application.RepositoryAccessException.Code;
 import ai.cc.chongming.review.config.RepositoryAccessProperties;
+import ai.cc.chongming.review.config.RepositoryAccessProperties.RepositoryDefinition;
+import ai.cc.chongming.review.config.RepositoryAccessProperties.RepositoryDefinition.RepositoryType;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -10,28 +12,45 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
  * Resolves only administrator-configured repository identities to safe canonical roots.
+ * <p>
+ * [AIREVIEW-PLAN-028] Remote entries are materialized into server-managed mirrors first; the
+ * resulting worktree then passes the same link and Git-metadata checks as a local root.
  *
  * @author wangli
  */
 @Component
 public class RepositoryBoundaryGuard {
 
-    private final Map<String, Path> configuredRoots;
+    private final Map<String, RepositoryDefinition> configuredRepositories;
+    private final RemoteRepositoryMaterializer remoteMaterializer;
 
-    public RepositoryBoundaryGuard(RepositoryAccessProperties properties) {
+    @Autowired
+    public RepositoryBoundaryGuard(
+            RepositoryAccessProperties properties, RemoteRepositoryMaterializer remoteMaterializer) {
         Objects.requireNonNull(properties, "properties must not be null");
-        Map<String, Path> roots = new LinkedHashMap<>();
-        for (RepositoryAccessProperties.RepositoryDefinition definition : properties.allowed()) {
-            Path previous = roots.putIfAbsent(definition.id(), Path.of(definition.root()));
+        this.remoteMaterializer = remoteMaterializer;
+        this.configuredRepositories = configuredRepositories(properties);
+    }
+
+    /** [AIREVIEW-PLAN-028] Backward-compatible guard without remote repository support. */
+    public RepositoryBoundaryGuard(RepositoryAccessProperties properties) {
+        this(properties, null);
+    }
+
+    private static Map<String, RepositoryDefinition> configuredRepositories(RepositoryAccessProperties properties) {
+        Map<String, RepositoryDefinition> repositories = new LinkedHashMap<>();
+        for (RepositoryDefinition definition : properties.allowed()) {
+            RepositoryDefinition previous = repositories.putIfAbsent(definition.id(), definition);
             if (previous != null) {
                 throw new IllegalArgumentException("Duplicate repository id: " + definition.id());
             }
         }
-        this.configuredRoots = Map.copyOf(roots);
+        return Map.copyOf(repositories);
     }
 
     /**
@@ -44,11 +63,14 @@ public class RepositoryBoundaryGuard {
         if (repositoryId == null || repositoryId.isBlank()) {
             throw new RepositoryAccessException(Code.REPOSITORY_NOT_CONFIGURED, "repositoryId is required");
         }
-        Path configuredRoot = configuredRoots.get(repositoryId);
-        if (configuredRoot == null) {
+        RepositoryDefinition definition = configuredRepositories.get(repositoryId);
+        if (definition == null) {
             throw new RepositoryAccessException(Code.REPOSITORY_NOT_CONFIGURED, "Repository is not configured");
         }
-        Path lexicalRoot = configuredRoot.toAbsolutePath().normalize();
+        if (definition.type() == RepositoryType.REMOTE) {
+            return authorizeRemote(repositoryId, definition);
+        }
+        Path lexicalRoot = Path.of(definition.root()).toAbsolutePath().normalize();
         if (isUncPath(lexicalRoot) || containsLinkOrReparsePoint(lexicalRoot)) {
             throw new RepositoryAccessException(Code.REPOSITORY_PATH_UNSAFE, "Repository root is not a safe local path");
         }
@@ -60,6 +82,25 @@ public class RepositoryBoundaryGuard {
             canonicalRoot = lexicalRoot.toRealPath();
         } catch (IOException exception) {
             throw new RepositoryAccessException(Code.REPOSITORY_NOT_FOUND, "Configured repository root is unreadable", exception);
+        }
+        verifyGitMetadata(canonicalRoot);
+        return new AuthorizedRepository(repositoryId, canonicalRoot);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-028] Materializes one configured remote source and applies the same safety
+     * checks to the managed mirror worktree as to an administrator-configured local root.
+     */
+    private AuthorizedRepository authorizeRemote(String repositoryId, RepositoryDefinition definition) {
+        if (remoteMaterializer == null) {
+            throw new RepositoryAccessException(
+                    Code.REMOTE_FETCH_FAILED, "Remote repository support is not available");
+        }
+        Path mirrorRoot = remoteMaterializer.ensureMirror(definition);
+        Path canonicalRoot = mirrorRoot.toAbsolutePath().normalize();
+        if (isUncPath(canonicalRoot) || containsLinkOrReparsePoint(canonicalRoot)) {
+            throw new RepositoryAccessException(
+                    Code.REPOSITORY_PATH_UNSAFE, "Remote repository mirror is not a safe local path");
         }
         verifyGitMetadata(canonicalRoot);
         return new AuthorizedRepository(repositoryId, canonicalRoot);

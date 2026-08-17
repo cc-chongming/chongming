@@ -47,6 +47,10 @@ public class RepositoryAccessException extends RuntimeException {
         /** [AIREVIEW-PLAN-024] The requested line range is invalid; not retryable. */
         INVALID_LINE_RANGE,
         /** [AIREVIEW-PLAN-024] The role's repository read budget is exhausted. */
-        READ_BUDGET_EXHAUSTED
+        READ_BUDGET_EXHAUSTED,
+        /** [AIREVIEW-PLAN-028] Cloning or updating the administrator-configured remote repository failed. */
+        REMOTE_FETCH_FAILED,
+        /** [AIREVIEW-PLAN-028] The remote repository rejected the configured credentials; not retryable as-is. */
+        REMOTE_AUTH_FAILED
     }
 }
