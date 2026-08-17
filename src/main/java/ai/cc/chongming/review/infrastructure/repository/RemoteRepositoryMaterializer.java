@@ -252,9 +252,7 @@ public class RemoteRepositoryMaterializer {
         Map<String, String> environment = builder.environment();
         environment.put("GIT_OPTIONAL_LOCKS", "0");
         environment.put("GIT_TERMINAL_PROMPT", "0");
-        if (networkCommand) {
-            injectCredentials(environment, credentials);
-        }
+        applyGitConfig(environment, networkCommand ? credentials : null);
         long deadline = System.nanoTime() + timeout.toNanos();
         try {
             Process process = builder.start();
@@ -297,22 +295,30 @@ public class RemoteRepositoryMaterializer {
         }
     }
 
-    private void injectCredentials(Map<String, String> environment, ResolvedCredentials credentials) {
-        if (credentials == null) {
-            return;
-        }
-        if (credentials.type() == AuthType.HTTPS_TOKEN) {
+    /**
+     * Applies process-scoped Git configuration through {@code GIT_CONFIG_*} environment variables:
+     * {@code core.longpaths} always (deep Java workspaces on Windows exceed the legacy 260-char
+     * limit) and credential headers only for network commands with resolved credentials.
+     */
+    private void applyGitConfig(Map<String, String> environment, ResolvedCredentials credentials) {
+        List<String> keys = new ArrayList<>();
+        List<String> values = new ArrayList<>();
+        keys.add("core.longpaths");
+        values.add("true");
+        if (credentials != null && credentials.type() == AuthType.HTTPS_TOKEN) {
             String basic = Base64.getEncoder().encodeToString(
                     ("x-access-token:" + credentials.secret()).getBytes(StandardCharsets.UTF_8));
-            environment.put("GIT_CONFIG_COUNT", "1");
-            environment.put("GIT_CONFIG_KEY_0", "http.extraheader");
-            environment.put("GIT_CONFIG_VALUE_0", "Authorization: Basic " + basic);
-            return;
-        }
-        if (credentials.type() == AuthType.SSH_KEY) {
+            keys.add("http.extraheader");
+            values.add("Authorization: Basic " + basic);
+        } else if (credentials != null && credentials.type() == AuthType.SSH_KEY) {
             environment.put("GIT_SSH_COMMAND",
                     "ssh -i \"" + credentials.secret()
                             + "\" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
+        }
+        environment.put("GIT_CONFIG_COUNT", String.valueOf(keys.size()));
+        for (int index = 0; index < keys.size(); index++) {
+            environment.put("GIT_CONFIG_KEY_" + index, keys.get(index));
+            environment.put("GIT_CONFIG_VALUE_" + index, values.get(index));
         }
     }
 
@@ -330,7 +336,8 @@ public class RemoteRepositoryMaterializer {
             return new RepositoryAccessException(
                     Code.REMOTE_AUTH_FAILED, "Remote repository credentials were rejected");
         }
-        return new RepositoryAccessException(Code.REMOTE_FETCH_FAILED, "Remote repository could not be fetched");
+        return new RepositoryAccessException(Code.REMOTE_FETCH_FAILED,
+                "Remote repository could not be fetched" + (output == null || output.isBlank() ? "" : ": " + truncate(output)));
     }
 
     private Thread drainOutput(InputStream input, StringBuilder captured) {
