@@ -8,7 +8,10 @@ function makeJwt(payload) {
 }
 
 const longLivedToken = makeJwt({ sub: 'demo-user', exp: 4102444800 });
-const demoUser = { username: 'demo-user', displayName: '演示评审员', role: 'PRODUCT' };
+const demoUser = { username: 'demo-user', displayName: '演示评审员', role: 'PRODUCT_MANAGER' };
+
+// Captures the latest register request body for [AIREVIEW-PLAN-027] role assertions.
+const authState = { lastRegisterBody: null };
 
 function sessionBody(user = demoUser, token = longLivedToken) {
     return JSON.stringify({ token, user });
@@ -24,15 +27,18 @@ async function mockAuthRoutes(page, { loginStatus = 200, registerStatus = 200 } 
                 body: JSON.stringify({ title: 'Unauthorized', detail: '用户名或密码错误', code: 'AUTH_BAD_CREDENTIALS' })
             }
     ));
-    await page.route('**/api/auth/register', (route) => route.fulfill(
-        registerStatus === 200
-            ? { status: 200, contentType: 'application/json', body: sessionBody() }
-            : {
-                status: registerStatus,
-                contentType: 'application/json',
-                body: JSON.stringify({ title: 'Conflict', detail: '用户名已存在', code: 'AUTH_USERNAME_TAKEN' })
-            }
-    ));
+    await page.route('**/api/auth/register', (route) => {
+        authState.lastRegisterBody = route.request().postDataJSON();
+        return route.fulfill(
+            registerStatus === 200
+                ? { status: 200, contentType: 'application/json', body: sessionBody() }
+                : {
+                    status: registerStatus,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ title: 'Conflict', detail: '用户名已存在', code: 'AUTH_USERNAME_TAKEN' })
+                }
+        );
+    });
     await page.route('**/api/auth/me', (route) => route.fulfill({
         status: 200, contentType: 'application/json', body: JSON.stringify(demoUser)
     }));
@@ -168,6 +174,11 @@ test('registers a new account, signs it in and enters the dashboard', async ({ p
     await page.goto('/index.html#/register');
 
     await expect(page.locator('.auth-title')).toHaveText('注册');
+    // [AIREVIEW-PLAN-027] 角色下拉默认为开发，可选产品经理/项目经理，不含 ADMIN。
+    const roleSelect = page.locator('select[name="role"]');
+    await expect(roleSelect).toHaveValue('DEVELOPER');
+    await expect(roleSelect.locator('option')).toHaveText(['开发', '产品经理', '项目经理']);
+
     const submit = page.getByRole('button', { name: '注册' });
     await expect(submit).toBeDisabled();
     await page.locator('input[name="username"]').fill('demo-user');
@@ -177,6 +188,9 @@ test('registers a new account, signs it in and enters the dashboard', async ({ p
 
     await expect(page).toHaveURL(/#\/dashboard$/);
     await expect(page.locator('.user-area .user-name')).toHaveText('演示评审员');
+    expect(authState.lastRegisterBody).toEqual({
+        username: 'demo-user', password: 'secret', displayName: '演示评审员', role: 'DEVELOPER'
+    });
 });
 
 test('keeps the visitor on the register page when the username is taken', async ({ page }) => {

@@ -41,13 +41,14 @@ class AuthServiceTests {
 
     @Test
     void registeredUserCanLogInWithIssuedToken() {
-        AuthResult registration = authService.register("bob", "password123", "Bob");
+        AuthResult registration = authService.register("bob", "password123", "Bob", null);
 
         assertThat(registration.token()).isNotBlank();
         assertThat(registration.expiresAt()).isNotNull();
         assertThat(registration.user().username()).isEqualTo("bob");
         assertThat(registration.user().displayName()).isEqualTo("Bob");
-        assertThat(registration.user().role()).isEqualTo("USER");
+        // [AIREVIEW-PLAN-027] Registration without a role defaults to developer-level access.
+        assertThat(registration.user().role()).isEqualTo("DEVELOPER");
 
         AuthResult login = authService.login("bob", "password123");
         assertThat(login.token()).isNotBlank();
@@ -56,7 +57,7 @@ class AuthServiceTests {
 
     @Test
     void rejectsWrongPasswordWithGenericMessage() {
-        authService.register("bob", "password123", "Bob");
+        authService.register("bob", "password123", "Bob", null);
 
         assertThatThrownBy(() -> authService.login("bob", "wrong-password"))
                 .isInstanceOfSatisfying(AuthException.class, ex -> {
@@ -67,7 +68,7 @@ class AuthServiceTests {
 
     @Test
     void rejectsUnknownUserWithTheSameGenericMessageToPreventEnumeration() {
-        authService.register("bob", "password123", "Bob");
+        authService.register("bob", "password123", "Bob", null);
 
         assertThatThrownBy(() -> authService.login("mallory", "password123"))
                 .isInstanceOfSatisfying(AuthException.class, ex -> {
@@ -78,18 +79,48 @@ class AuthServiceTests {
 
     @Test
     void rejectsDuplicateUsernameOnRegistration() {
-        authService.register("bob", "password123", "Bob");
+        authService.register("bob", "password123", "Bob", null);
 
-        assertThatThrownBy(() -> authService.register("bob", "another-pass", "Bobby"))
+        assertThatThrownBy(() -> authService.register("bob", "another-pass", "Bobby", null))
                 .isInstanceOfSatisfying(AuthException.class,
                         ex -> assertThat(ex.errorCode()).isEqualTo(AuthErrorCode.USERNAME_TAKEN));
     }
 
     @Test
     void rejectsTooShortPasswordOnRegistration() {
-        assertThatThrownBy(() -> authService.register("bob", "short", null))
+        assertThatThrownBy(() -> authService.register("bob", "short", null, null))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(userRepository.findByUsername("bob")).isEmpty();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Self-registration accepts only the whitelisted non-admin roles.
+     */
+    @Test
+    void registrationAcceptsWhitelistedRoles() {
+        assertThat(authService.register("pm-user", "password123", "PM", "PRODUCT_MANAGER").user().role())
+                .isEqualTo("PRODUCT_MANAGER");
+        assertThat(authService.register("project-user", "password123", "PJ", "PROJECT_MANAGER").user().role())
+                .isEqualTo("PROJECT_MANAGER");
+        assertThat(authService.register("dev-user", "password123", "Dev", "DEVELOPER").user().role())
+                .isEqualTo("DEVELOPER");
+        assertThat(authService.register("blank-role-user", "password123", "Blank", "  ").user().role())
+                .isEqualTo("DEVELOPER");
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] ADMIN can never be self-registered; every non-whitelisted role fails
+     * the shared validation contract before any user row is created.
+     */
+    @Test
+    void registrationRejectsAdminAndUnknownRoles() {
+        assertThatThrownBy(() -> authService.register("wannabe-admin", "password123", "Admin", "ADMIN"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("role must be one of");
+        assertThatThrownBy(() -> authService.register("legacy-user", "password123", "Legacy", "USER"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(userRepository.findByUsername("wannabe-admin")).isEmpty();
+        assertThat(userRepository.findByUsername("legacy-user")).isEmpty();
     }
 
     @Test

@@ -38,8 +38,8 @@ const taskFixtures = {
 };
 
 const userList = [
-    { username: 'dev-li', displayName: '李开发', role: 'DEV' },
-    { username: 'dev-zhang', displayName: '张开发', role: 'DEV' }
+    { username: 'dev-li', displayName: '李开发', role: 'DEVELOPER' },
+    { username: 'dev-zhang', displayName: '张开发', role: 'DEVELOPER' }
 ];
 
 function json(body) {

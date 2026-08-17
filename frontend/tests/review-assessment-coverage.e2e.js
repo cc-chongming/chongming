@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         localStorage.setItem('chongming-auth', JSON.stringify({
             token: `e2e.${payload}.signature`,
-            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT' }
+            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT_MANAGER' }
         }));
     });
     // 兜底拦截：具体路由未覆盖的 /api 请求不得经 vite 代理泄漏到本地后端（其 401 会清除会话并跳登录页）。

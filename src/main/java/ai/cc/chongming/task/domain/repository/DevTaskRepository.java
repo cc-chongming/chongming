@@ -7,6 +7,7 @@ import ai.cc.chongming.task.domain.DevTaskTypes.DevTaskStatus;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Storage boundary for development tasks. {@link #save(DevTask)} applies the aggregate's
@@ -25,6 +26,15 @@ public interface DevTaskRepository {
     TaskPage findPage(TaskFilter filter, int page, int size);
 
     Map<DevTaskStatus, Long> countByStatus();
+
+    /**
+     * [AIREVIEW-PLAN-027] Requirement identifiers whose dev task is owned by the given assignee;
+     * feeds the requirement visibility scope for non-administrator viewers.
+     *
+     * @param username assignee login name; blank or unknown names yield an empty set
+     * @return requirement identifiers bound to the assignee's dev tasks
+     */
+    Set<RequirementId> findRequirementIdsByAssignee(String username);
 
     /**
      * @author wangli

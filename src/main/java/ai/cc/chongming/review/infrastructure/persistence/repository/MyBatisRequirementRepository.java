@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -78,9 +79,24 @@ public class MyBatisRequirementRepository implements RequirementRepository {
         String status = effectiveFilter.status() == null ? null : effectiveFilter.status().name();
         String assigneeId = normalize(effectiveFilter.assigneeId());
         String keyword = normalize(effectiveFilter.keyword());
-        long total = mapper.countPage(status, assigneeId, keyword);
         long offset = ((long) page - 1L) * size;
-        List<Requirement> items = mapper.findPage(status, assigneeId, keyword, offset, size).stream()
+        // [AIREVIEW-PLAN-027] Unrestricted reads keep the historical statements untouched; only
+        // viewer-scoped filters travel through the ownership-aware viewer statements.
+        if (effectiveFilter.visibility() == null) {
+            long total = mapper.countPage(status, assigneeId, keyword);
+            List<Requirement> items = mapper.findPage(status, assigneeId, keyword, offset, size).stream()
+                    .map(this::toRequirement)
+                    .toList();
+            return new RequirementPage(items, page, size, total);
+        }
+        RequirementVisibility visibility = effectiveFilter.visibility();
+        List<String> assignedIds = visibility.assignedRequirementIds().stream()
+                .map(requirementId -> requirementId.value().toString())
+                .collect(Collectors.toList());
+        long total = mapper.countPageForViewer(status, assigneeId, keyword, visibility.viewerUsername(), assignedIds);
+        List<Requirement> items = mapper.findPageForViewer(
+                        status, assigneeId, keyword, visibility.viewerUsername(), assignedIds, offset, size)
+                .stream()
                 .map(this::toRequirement)
                 .toList();
         return new RequirementPage(items, page, size, total);
@@ -91,6 +107,21 @@ public class MyBatisRequirementRepository implements RequirementRepository {
     public Map<RequirementStatus, Long> countByStatus() {
         Map<RequirementStatus, Long> counts = new EnumMap<>(RequirementStatus.class);
         mapper.countByStatus().forEach(row -> counts.put(RequirementStatus.valueOf(row.status()), row.total()));
+        return Map.copyOf(counts);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<RequirementStatus, Long> countByStatus(RequirementVisibility visibility) {
+        if (visibility == null) {
+            return countByStatus();
+        }
+        List<String> assignedIds = visibility.assignedRequirementIds().stream()
+                .map(requirementId -> requirementId.value().toString())
+                .collect(Collectors.toList());
+        Map<RequirementStatus, Long> counts = new EnumMap<>(RequirementStatus.class);
+        mapper.countByStatusForViewer(visibility.viewerUsername(), assignedIds)
+                .forEach(row -> counts.put(RequirementStatus.valueOf(row.status()), row.total()));
         return Map.copyOf(counts);
     }
 

@@ -1,12 +1,22 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { authStore } from '../stores/auth-store';
 
 const result = ref({ items: [], page: 1, size: 20, total: 0 });
 const loading = ref(false);
 const error = ref('');
 const filter = reactive({ status: '', keyword: '' });
 const counts = ref(null);
+
+// [AIREVIEW-PLAN-027] Creation is limited to ADMIN / manager roles; deletion is limited
+// to ADMIN or the requirement creator.
+const canCreate = computed(() => authStore.canCreateRequirement.value);
+function canDelete(item) {
+    const user = authStore.currentUser.value;
+    if (!user) return false;
+    return user.role === 'ADMIN' || item.creatorId === user.username;
+}
 
 const statusFilters = [
     { key: '', label: '全部' },
@@ -84,7 +94,7 @@ onMounted(async () => {
 
 <template>
     <section class="platform-page">
-        <header class="platform-page-header"><div><p class="eyebrow">Requirement</p><h1>需求库</h1></div><RouterLink class="button" to="/requirements/create">＋ 新建需求</RouterLink></header>
+        <header class="platform-page-header"><div><p class="eyebrow">Requirement</p><h1>需求库</h1></div><RouterLink v-if="canCreate" class="button" to="/requirements/create">＋ 新建需求</RouterLink></header>
 
         <div class="req-filter-bar">
             <button v-for="f in statusFilters" :key="f.key" type="button" class="req-filter" :class="{ active: filter.status === f.key }" @click="selectFilter(f.key)">
@@ -106,7 +116,7 @@ onMounted(async () => {
                         <td><span v-if="item.priority" class="badge" :class="priorityBadge[item.priority] ?? 'b-p2'">{{ item.priority }}</span><span v-else>—</span></td>
                         <td class="req-assignee">{{ item.assigneeId || '—' }}</td>
                         <td class="req-date">{{ item.updatedAt }}</td>
-                        <td><button class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td>
+                        <td><button v-if="canDelete(item)" class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td>
                     </tr>
                 </tbody>
             </table>

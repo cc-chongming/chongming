@@ -23,7 +23,7 @@ const router = createRouter({
         { path: '/register', name: 'register', component: () => import('../views/RegisterView.vue'), meta: { public: true } },
         { path: '/dashboard', name: 'dashboard', component: DashboardView },
         { path: '/requirements', name: 'requirements', component: RequirementListView },
-        { path: '/requirements/create', name: 'requirement-create', component: RequirementCreateView },
+        { path: '/requirements/create', name: 'requirement-create', component: RequirementCreateView, meta: { roles: ['ADMIN', 'PRODUCT_MANAGER', 'PROJECT_MANAGER'] } },
         { path: '/requirements/:requirementId', name: 'requirement-detail', component: RequirementDetailView, props: true },
         { path: '/tasks', name: 'tasks', component: () => import('../views/TaskListView.vue'), props: { scope: 'all' } },
         { path: '/tasks/mine', name: 'my-tasks', component: () => import('../views/TaskListView.vue'), props: { scope: 'mine' } },
@@ -42,6 +42,8 @@ const router = createRouter({
 /**
  * Auth guard: non-public routes require a locally valid token; signed-in users are kept
  * out of the auth pages. The original destination is preserved through the redirect query.
+ * [AIREVIEW-PLAN-027] Routes declaring `meta.roles` additionally require the session
+ * role to be whitelisted; others are sent back to the requirement list.
  */
 router.beforeEach((to) => {
     // Re-check the persisted session so tokens expired while the tab was closed are dropped.
@@ -54,6 +56,9 @@ router.beforeEach((to) => {
     }
     if (!authStore.isTokenValid()) {
         return { path: '/login', query: { redirect: to.fullPath } };
+    }
+    if (Array.isArray(to.meta.roles) && !to.meta.roles.includes(authStore.currentUser.value?.role)) {
+        return { path: '/requirements' };
     }
     return true;
 });

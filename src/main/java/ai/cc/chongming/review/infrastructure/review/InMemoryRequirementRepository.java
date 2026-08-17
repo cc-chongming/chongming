@@ -82,7 +82,22 @@ public class InMemoryRequirementRepository implements RequirementRepository {
         return Map.copyOf(counts);
     }
 
+    @Override
+    public Map<RequirementStatus, Long> countByStatus(RequirementVisibility visibility) {
+        if (visibility == null) {
+            return countByStatus();
+        }
+        Map<RequirementStatus, Long> counts = new EnumMap<>(RequirementStatus.class);
+        requirements.values().stream()
+                .filter(requirement -> visibleTo(requirement, visibility))
+                .forEach(requirement -> counts.merge(requirement.status(), 1L, Long::sum));
+        return Map.copyOf(counts);
+    }
+
     private boolean matches(Requirement requirement, RequirementFilter filter) {
+        if (filter.visibility() != null && !visibleTo(requirement, filter.visibility())) {
+            return false;
+        }
         if (filter.status() != null && requirement.status() != filter.status()) {
             return false;
         }
@@ -96,6 +111,15 @@ public class InMemoryRequirementRepository implements RequirementRepository {
         String keyword = filter.keyword().trim().toLowerCase(Locale.ROOT);
         return requirement.title().toLowerCase(Locale.ROOT).contains(keyword)
                 || requirement.description().toLowerCase(Locale.ROOT).contains(keyword);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] In-memory twin of the viewer SQL predicate: a requirement is visible
+     * when the viewer created it or owns a dev task bound to it.
+     */
+    private boolean visibleTo(Requirement requirement, RequirementVisibility visibility) {
+        return visibility.viewerUsername().equals(requirement.creatorId())
+                || visibility.assignedRequirementIds().contains(requirement.id());
     }
 
     private void validatePage(int page, int size) {

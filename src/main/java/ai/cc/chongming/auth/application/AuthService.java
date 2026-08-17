@@ -5,7 +5,9 @@ import ai.cc.chongming.auth.domain.AuthErrorCode;
 import ai.cc.chongming.auth.domain.AuthException;
 import ai.cc.chongming.auth.domain.User;
 import ai.cc.chongming.auth.domain.UserRepository;
+import ai.cc.chongming.auth.domain.UserRole;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -22,6 +24,15 @@ public class AuthService {
     private static final int MAX_DISPLAY_NAME_LENGTH = 64;
     private static final int MIN_PASSWORD_LENGTH = 8;
     private static final int MAX_PASSWORD_LENGTH = 128;
+
+    /**
+     * [AIREVIEW-PLAN-027] Roles a self-service registration may claim. Administrators are
+     * deliberately excluded so ADMIN accounts can never be self-registered.
+     */
+    private static final List<String> REGISTERABLE_ROLES = List.of(
+            UserRole.PRODUCT_MANAGER.code(),
+            UserRole.PROJECT_MANAGER.code(),
+            UserRole.DEVELOPER.code());
 
     /**
      * Legitimately formatted hash used when the username is unknown, so the verifier still
@@ -67,9 +78,10 @@ public class AuthService {
      * @param username    desired unique login name
      * @param password    plaintext password to hash
      * @param displayName optional display name
+     * @param role        optional role limited to the self-registerable whitelist, defaults to DEVELOPER
      * @return token plus the registered user view
      */
-    public AuthResult register(String username, String password, String displayName) {
+    public AuthResult register(String username, String password, String displayName, String role) {
         String trimmedUsername = username == null ? "" : username.trim();
         if (trimmedUsername.isEmpty() || trimmedUsername.length() > MAX_USERNAME_LENGTH) {
             throw new IllegalArgumentException("username must be 1-" + MAX_USERNAME_LENGTH + " characters");
@@ -82,11 +94,29 @@ public class AuthService {
         if (trimmedDisplayName != null && trimmedDisplayName.length() > MAX_DISPLAY_NAME_LENGTH) {
             throw new IllegalArgumentException("displayName must be at most " + MAX_DISPLAY_NAME_LENGTH + " characters");
         }
+        String effectiveRole = resolveRegisterableRole(role);
         if (userRepository.findByUsername(trimmedUsername).isPresent()) {
             throw new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用");
         }
-        User user = User.newUser(trimmedUsername, passwordHasher.hash(password), trimmedDisplayName, "USER");
+        User user = User.newUser(trimmedUsername, passwordHasher.hash(password), trimmedDisplayName, effectiveRole);
         return issue(userRepository.save(user));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Validates the optional registration role against the self-registerable
+     * whitelist; {@code ADMIN} and any other value outside the whitelist fail the shared 400
+     * contract, and an absent role defaults to {@code DEVELOPER}.
+     */
+    private String resolveRegisterableRole(String role) {
+        if (role == null || role.isBlank()) {
+            return UserRole.DEVELOPER.code();
+        }
+        String trimmed = role.trim();
+        if (!REGISTERABLE_ROLES.contains(trimmed)) {
+            throw new IllegalArgumentException(
+                    "role must be one of " + String.join(", ", REGISTERABLE_ROLES));
+        }
+        return trimmed;
     }
 
     private AuthResult issue(User user) {

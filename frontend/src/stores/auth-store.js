@@ -6,6 +6,7 @@ import {
     readAuthSession,
     saveAuthSession
 } from '../services/auth-token';
+import { canCreateRequirements } from '../services/roles';
 
 /**
  * Auth store following the review-store factory convention: dependencies (api) are injected
@@ -21,6 +22,8 @@ export function createAuthStore({ api = authApi } = {}) {
 
     const token = computed(() => state.token);
     const currentUser = computed(() => state.user);
+    // [AIREVIEW-PLAN-027] Derived requirement-creation permission based on the canonical session role.
+    const canCreateRequirement = computed(() => canCreateRequirements(state.user?.role));
 
     function applySession(session) {
         state.token = session?.token ?? null;
@@ -52,8 +55,8 @@ export function createAuthStore({ api = authApi } = {}) {
         return result;
     }
 
-    async function register(username, password, displayName) {
-        const result = await api.register(username, password, displayName);
+    async function register(username, password, displayName, role) {
+        const result = await api.register(username, password, displayName, role);
         saveAuthSession({ token: result.token, user: result.user });
         applySession({ token: result.token, user: result.user });
         return result;
@@ -66,7 +69,10 @@ export function createAuthStore({ api = authApi } = {}) {
 
     restore();
 
-    return { state, token, currentUser, login, register, logout, restore, isTokenValid };
+    return {
+        state, token, currentUser, canCreateRequirement,
+        login, register, logout, restore, isTokenValid
+    };
 }
 
 /** Shared instance used by the router guard, the app shell and the auth views. */

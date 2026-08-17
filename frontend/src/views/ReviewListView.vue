@@ -1,11 +1,15 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { authStore } from '../stores/auth-store';
 
 const result = ref({ items: [], total: 0, page: 1, size: 20 });
 const error = ref('');
 const loading = ref(false);
 const filter = reactive({ stage: '', hasReport: '' });
+
+// [AIREVIEW-PLAN-027] 发起评审入口指向需求创建流程，同样受创建权限制。
+const canCreate = computed(() => authStore.canCreateRequirement.value);
 
 const stages = ['PENDING', 'SNAPSHOTTING', 'PLANNING', 'INITIAL_REVIEW', 'CONFLICT_DETECTION', 'DEBATE_ROUND_1', 'DEBATE_ROUND_2', 'JUDGING', 'WAITING_HUMAN', 'NOTIFYING', 'COMPLETED', 'CANCELLED', 'FAILED'];
 const stageTag = {
@@ -47,7 +51,7 @@ onMounted(load);
 </script>
 
 <template>
-    <section class="platform-page"><header class="platform-page-header"><div><p class="eyebrow">Review</p><h1>评审列表</h1></div><RouterLink class="button" to="/requirements/create">发起评审</RouterLink></header>
+    <section class="platform-page"><header class="platform-page-header"><div><p class="eyebrow">Review</p><h1>评审列表</h1></div><RouterLink v-if="canCreate" class="button" to="/requirements/create">发起评审</RouterLink></header>
         <form class="filters platform-filters rv-filter-bar" @submit.prevent="load">
             <label>阶段<select v-model="filter.stage"><option value="">全部</option><option v-for="stage in stages" :key="stage">{{ stage }}</option></select></label>
             <label>报告<select v-model="filter.hasReport"><option value="">全部</option><option value="true">已有报告</option><option value="false">无报告</option></select></label>

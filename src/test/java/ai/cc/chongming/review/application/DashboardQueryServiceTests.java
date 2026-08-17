@@ -7,6 +7,7 @@ import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
+import ai.cc.chongming.review.domain.repository.RequirementRepository.RequirementVisibility;
 import ai.cc.chongming.review.infrastructure.event.InMemoryReviewEventStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryRequirementRepository;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewPlatformProjectionStore;
@@ -15,6 +16,7 @@ import ai.cc.chongming.review.infrastructure.report.InMemoryReviewReportStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -94,6 +96,41 @@ class DashboardQueryServiceTests {
         assertThat(result.activeReviews()).singleElement()
                 .extracting(DashboardQueryService.ReviewView::progress)
                 .isEqualTo(0);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Requirement status counts converge to the viewer's visibility while
+     * review projections stay platform-wide; a {@code null} visibility keeps the historical
+     * platform-wide totals.
+     */
+    @Test
+    void requirementStatusCountsConvergeToTheViewerVisibility() {
+        InMemoryRequirementRepository requirements = new InMemoryRequirementRepository();
+        Requirement own = Requirement.draft(
+                new RequirementId(UUID.randomUUID()), "自建需求", "描述", "dev-zhang", null, "cx-ai", "P1");
+        Requirement assigned = Requirement.draft(
+                new RequirementId(UUID.randomUUID()), "指派需求", "描述", "pm-wang", null, "cx-ai", "P1");
+        Requirement foreign = Requirement.draft(
+                new RequirementId(UUID.randomUUID()), "无关需求", "描述", "pm-wang", null, "cx-ai", "P2");
+        requirements.save(own);
+        requirements.save(assigned);
+        requirements.save(foreign);
+        InMemoryReviewEventStore events = new InMemoryReviewEventStore();
+        InMemoryReviewRegistry reviews = new InMemoryReviewRegistry();
+        InMemoryReviewReportStore reports = new InMemoryReviewReportStore();
+        DashboardQueryService service = new DashboardQueryService(
+                requirements, events, new InMemoryReviewPlatformProjectionStore(events, reports, reviews));
+
+        DashboardQueryService.DashboardView platformWide = service.getDashboard();
+        assertThat(platformWide.requirementStatusCounts()).containsEntry("DRAFT", 3L);
+
+        DashboardQueryService.DashboardView scoped = service.getDashboard(
+                new RequirementVisibility("dev-zhang", Set.of(assigned.id())));
+        assertThat(scoped.requirementStatusCounts()).containsEntry("DRAFT", 2L);
+
+        DashboardQueryService.DashboardView creatorOnly = service.getDashboard(
+                new RequirementVisibility("dev-zhang", Set.of()));
+        assertThat(creatorOnly.requirementStatusCounts()).containsEntry("DRAFT", 1L);
     }
 
     private ReviewEventDraft draft(ReviewId reviewId, ReviewStage stage, String summary) {

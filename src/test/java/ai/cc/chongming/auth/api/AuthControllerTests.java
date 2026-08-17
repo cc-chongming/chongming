@@ -79,7 +79,8 @@ class AuthControllerTests {
 
     @Test
     void registerWithTakenUsernameReturnsConflict() throws Exception {
-        when(authService.register("bob", "password123", "Bobby"))
+        // [AIREVIEW-PLAN-027] Bodies without a role field pass null through to the service.
+        when(authService.register("bob", "password123", "Bobby", null))
                 .thenThrow(new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用"));
 
         mockMvc.perform(post("/api/auth/register")
@@ -101,6 +102,45 @@ class AuthControllerTests {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_AUTH_REQUEST"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] The register body carries an optional role; non-whitelisted values
+     * (including ADMIN self-registration) surface the shared 400 contract.
+     */
+    @Test
+    void registerWithAdminRoleReturnsBadRequest() throws Exception {
+        when(authService.register("bob", "password123", "Bobby", "ADMIN"))
+                .thenThrow(new IllegalArgumentException("role must be one of PRODUCT_MANAGER, PROJECT_MANAGER, DEVELOPER"));
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"bob","password":"password123","displayName":"Bobby","role":"ADMIN"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_AUTH_REQUEST"))
+                .andExpect(jsonPath("$.detail").value("role must be one of PRODUCT_MANAGER, PROJECT_MANAGER, DEVELOPER"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Whitelisted roles are forwarded verbatim to the service.
+     */
+    @Test
+    void registerWithWhitelistedRoleIssuesTokenWithThatRole() throws Exception {
+        when(authService.register("bob", "password123", "Bobby", "PRODUCT_MANAGER")).thenReturn(new AuthResult(
+                "signed-token",
+                Instant.parse("2026-08-12T12:00:00Z"),
+                new UserView("bob", "Bobby", "PRODUCT_MANAGER")));
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"bob","password":"password123","displayName":"Bobby","role":"PRODUCT_MANAGER"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").value("signed-token"))
+                .andExpect(jsonPath("$.user.role").value("PRODUCT_MANAGER"));
     }
 
     @Test

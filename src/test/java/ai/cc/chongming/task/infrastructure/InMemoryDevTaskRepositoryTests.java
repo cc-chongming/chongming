@@ -119,6 +119,37 @@ class InMemoryDevTaskRepositoryTests {
         assertThat(repository.findById(stored.taskId()).orElseThrow().version()).isEqualTo(1L);
     }
 
+    /**
+     * [AIREVIEW-PLAN-027] The visibility feed returns exactly the requirement identifiers
+     * whose dev task belongs to the assignee; blank or unknown names yield an empty set.
+     */
+    @Test
+    void findRequirementIdsByAssigneeReturnsOnlyTheAssigneesRequirements() {
+        DevTask first = draft("可见性任务甲");
+        DevTask second = draft("可见性任务乙");
+        DevTask otherOwner = draft("他人任务");
+        repository.save(first);
+        repository.save(second);
+        repository.save(otherOwner);
+        DevTask firstAssigned = repository.findById(first.taskId()).orElseThrow();
+        firstAssigned.assign("dev-zhang", "admin", new DevTaskStateMachine());
+        repository.save(firstAssigned);
+        DevTask secondAssigned = repository.findById(second.taskId()).orElseThrow();
+        secondAssigned.assign("dev-zhang", "admin", new DevTaskStateMachine());
+        repository.save(secondAssigned);
+        DevTask otherAssigned = repository.findById(otherOwner.taskId()).orElseThrow();
+        otherAssigned.assign("dev-li", "admin", new DevTaskStateMachine());
+        repository.save(otherAssigned);
+
+        assertThat(repository.findRequirementIdsByAssignee("dev-zhang"))
+                .containsExactlyInAnyOrder(first.requirementId(), second.requirementId());
+        assertThat(repository.findRequirementIdsByAssignee("dev-li"))
+                .containsExactly(otherOwner.requirementId());
+        assertThat(repository.findRequirementIdsByAssignee("ghost")).isEmpty();
+        assertThat(repository.findRequirementIdsByAssignee(null)).isEmpty();
+        assertThat(repository.findRequirementIdsByAssignee("   ")).isEmpty();
+    }
+
     private DevTask draft(String title) {
         return DevTask.draft(new DevTaskId(UUID.randomUUID()), new RequirementId(UUID.randomUUID()), null, title);
     }

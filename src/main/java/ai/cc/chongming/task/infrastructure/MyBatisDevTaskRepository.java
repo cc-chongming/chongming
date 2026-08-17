@@ -15,7 +15,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -94,6 +96,18 @@ public class MyBatisDevTaskRepository implements DevTaskRepository {
         Map<DevTaskStatus, Long> counts = new EnumMap<>(DevTaskStatus.class);
         mapper.countByStatus().forEach(row -> counts.put(DevTaskStatus.valueOf(row.status()), row.total()));
         return Map.copyOf(counts);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<RequirementId> findRequirementIdsByAssignee(String username) {
+        String normalized = normalize(username);
+        if (normalized == null) {
+            return Set.of();
+        }
+        return mapper.findRequirementIdsByAssignee(normalized).stream()
+                .map(requirementId -> new RequirementId(UUID.fromString(requirementId)))
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private DevTaskMapper.DevTaskRow toRow(DevTask task) {

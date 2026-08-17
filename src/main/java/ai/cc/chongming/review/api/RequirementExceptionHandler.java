@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.api;
 
 import ai.cc.chongming.review.domain.exception.RequirementDomainException;
+import ai.cc.chongming.review.domain.exception.RequirementErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,9 +17,12 @@ public class RequirementExceptionHandler {
 
     @ExceptionHandler(RequirementDomainException.class)
     public ProblemDetail requirementDomainFailure(RequirementDomainException exception) {
-        HttpStatus status = exception.errorCode().name().equals("REQUIREMENT_NOT_FOUND")
+        // [AIREVIEW-PLAN-027] FORBIDDEN maps to 403 alongside the historical 404/409 contract.
+        HttpStatus status = exception.errorCode() == RequirementErrorCode.REQUIREMENT_NOT_FOUND
                 ? HttpStatus.NOT_FOUND
-                : HttpStatus.CONFLICT;
+                : exception.errorCode() == RequirementErrorCode.FORBIDDEN
+                        ? HttpStatus.FORBIDDEN
+                        : HttpStatus.CONFLICT;
         ProblemDetail detail = ProblemDetail.forStatusAndDetail(status, exception.getMessage());
         detail.setProperty("code", exception.errorCode().name());
         return detail;

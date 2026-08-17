@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         localStorage.setItem('chongming-auth', JSON.stringify({
             token: `e2e.${payload}.signature`,
-            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT' }
+            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT_MANAGER' }
         }));
     });
     // 兜底拦截：具体路由未覆盖的 /api 请求不得经 vite 代理泄漏到本地后端（其 401 会清除会话并跳登录页）。
@@ -75,4 +75,49 @@ test('renders the platform shell with grouped navigation, breadcrumb and live co
     await page.locator('.breadcrumb .home').click();
     await expect(page.locator('.breadcrumb .cur')).toHaveText('工作台');
     await expect(page.locator('.nav-item.active', { hasText: '工作台' })).toBeVisible();
+});
+
+// [AIREVIEW-PLAN-027] DEVELOPER 会话：需求库无新建入口，直连创建路由被重定向回需求库。
+test('hides the create entry and redirects direct create navigation for DEVELOPER sessions', async ({ page }) => {
+    await page.addInitScript(() => {
+        const payload = btoa(JSON.stringify({ sub: 'e2e-dev', exp: 4102444800 }))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        localStorage.setItem('chongming-auth', JSON.stringify({
+            token: `e2e.${payload}.signature`,
+            user: { username: 'e2e-dev', displayName: 'E2E 开发', role: 'DEVELOPER' }
+        }));
+    });
+    await page.route('**/api/dashboard', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            pendingRequirementCount: 0,
+            activeReviewCount: 0,
+            requirementStatusCounts: { DRAFT: 1, PENDING_REVIEW: 0, REVIEWING: 0, APPROVED: 0, REJECTED: 0, DEVELOPING: 0, DONE: 0 },
+            activeReviews: [],
+            recentActivities: []
+        })
+    }));
+    await page.route('**/api/requirements**', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({
+            items: [{
+                id: 'req-dev-1', title: '开发可见的需求', status: 'DRAFT', priority: 'P1',
+                assigneeId: 'e2e-dev', creatorId: 'e2e-dev', updatedAt: '2026-08-12 09:00', version: 1
+            }],
+            total: 1, page: 1, size: 20
+        })
+    }));
+
+    await page.goto('/index.html#/requirements');
+
+    await expect(page.locator('.breadcrumb .cur')).toHaveText('需求库');
+    await expect(page.getByRole('link', { name: '＋ 新建需求' })).toHaveCount(0);
+    // 创建者本人可见删除按钮（验证 creatorId 权限分支）。
+    await expect(page.getByRole('button', { name: '删除' })).toHaveCount(1);
+
+    await page.goto('/index.html#/requirements/create');
+
+    await expect(page).toHaveURL(/#\/requirements$/);
+    await expect(page.locator('.breadcrumb .cur')).toHaveText('需求库');
+    await expect(page.getByRole('link', { name: '＋ 新建需求' })).toHaveCount(0);
 });

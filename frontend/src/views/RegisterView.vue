@@ -3,11 +3,14 @@ import { ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { formatApiError, ReviewApiError } from '../api/review-api';
 import { authStore } from '../stores/auth-store';
+import { DEFAULT_REGISTRATION_ROLE, REGISTRABLE_ROLES } from '../services/roles';
 
 const router = useRouter();
 const username = ref('');
 const displayName = ref('');
 const password = ref('');
+// [AIREVIEW-PLAN-027] Self-service registration picks DEVELOPER unless changed.
+const role = ref(DEFAULT_REGISTRATION_ROLE);
 const errorMessage = ref(null);
 const submitting = ref(false);
 
@@ -17,7 +20,7 @@ async function handleSubmit() {
     submitting.value = true;
     try {
         // Registration signs the user in automatically per the backend contract.
-        await authStore.register(username.value.trim(), password.value, displayName.value.trim());
+        await authStore.register(username.value.trim(), password.value, displayName.value.trim(), role.value);
         router.push('/dashboard');
     } catch (error) {
         errorMessage.value = error instanceof ReviewApiError ? error.message : formatApiError(error);
@@ -47,6 +50,12 @@ async function handleSubmit() {
                 <label>
                     显示名
                     <input v-model.trim="displayName" type="text" name="displayName" autocomplete="nickname" required>
+                </label>
+                <label>
+                    角色
+                    <select v-model="role" name="role" required>
+                        <option v-for="option in REGISTRABLE_ROLES" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
                 </label>
                 <label>
                     密码

@@ -27,17 +27,50 @@ public class RequirementQueryService {
 
     @Transactional(readOnly = true)
     public RequirementPage findPage(String status, String assignee, String keyword, int page, int size) {
+        return findPage(status, assignee, keyword, page, size, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped page read; a {@code null} visibility keeps the
+     * historical platform-wide listing.
+     */
+    @Transactional(readOnly = true)
+    public RequirementPage findPage(
+            String status, String assignee, String keyword, int page, int size,
+            RequirementRepository.RequirementVisibility visibility) {
         RequirementRepository.RequirementPage result = requirementRepository.findPage(
-                new RequirementRepository.RequirementFilter(parseStatus(status), normalize(assignee), normalize(keyword)), page, size);
+                new RequirementRepository.RequirementFilter(
+                        parseStatus(status), normalize(assignee), normalize(keyword), visibility),
+                page, size);
         return new RequirementPage(result.items().stream().map(RequirementView::from).toList(), result.page(), result.size(), result.total());
     }
 
     @Transactional(readOnly = true)
     public RequirementView findById(RequirementId requirementId) {
-        return requirementRepository.findById(Objects.requireNonNull(requirementId, "requirementId must not be null"))
-                .map(RequirementView::from)
+        return findById(requirementId, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped detail read; requirements outside the viewer's scope
+     * surface the same {@code REQUIREMENT_NOT_FOUND} error as missing ones so existence is never
+     * leaked.
+     */
+    @Transactional(readOnly = true)
+    public RequirementView findById(RequirementId requirementId, RequirementRepository.RequirementVisibility visibility) {
+        Requirement requirement = requirementRepository
+                .findById(Objects.requireNonNull(requirementId, "requirementId must not be null"))
                 .orElseThrow(() -> new RequirementDomainException(
                         RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement was not found"));
+        if (visibility != null && !visibleTo(requirement, visibility)) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement was not found");
+        }
+        return RequirementView.from(requirement);
+    }
+
+    private boolean visibleTo(Requirement requirement, RequirementRepository.RequirementVisibility visibility) {
+        return visibility.viewerUsername().equals(requirement.creatorId())
+                || visibility.assignedRequirementIds().contains(requirement.id());
     }
 
     private RequirementStatus parseStatus(String value) {

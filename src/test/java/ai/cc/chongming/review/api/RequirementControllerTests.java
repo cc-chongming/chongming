@@ -1,5 +1,7 @@
 package ai.cc.chongming.review.api;
 
+import ai.cc.chongming.auth.api.AuthJwtFilter;
+import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
 import ai.cc.chongming.review.application.RequirementCommandService;
 import ai.cc.chongming.review.application.RequirementQueryService;
 import ai.cc.chongming.review.domain.model.Requirement;
@@ -10,11 +12,15 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +36,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * @author zyj
  */
 class RequirementControllerTests {
+
+    /** [AIREVIEW-PLAN-027] Administrator principal used by the historical unrestricted requests. */
+    private static final AuthPrincipal ADMIN_PRINCIPAL = new AuthPrincipal("admin", "管理员", "ADMIN");
 
     private RequirementCommandService commandService;
     private RequirementQueryService queryService;
@@ -64,6 +73,7 @@ class RequirementControllerTests {
         when(commandService.create(any())).thenReturn(created);
 
         mockMvc.perform(post("/api/requirements")
+                        .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, ADMIN_PRINCIPAL)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title":"统一身份同步","description":"同步基础身份","assigneeId":"bob","repositoryPath":"cx-ai","priority":"P1"}
@@ -71,12 +81,19 @@ class RequirementControllerTests {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(created.id().value().toString()))
                 .andExpect(jsonPath("$.status").value("DRAFT"));
+
+        // [AIREVIEW-PLAN-027] The authenticated administrator's username becomes the creator.
+        ArgumentCaptor<RequirementCommandService.CreateRequirementCommand> command =
+                ArgumentCaptor.forClass(RequirementCommandService.CreateRequirementCommand.class);
+        verify(commandService).create(command.capture());
+        assertThat(command.getValue().creatorUsername()).isEqualTo("admin");
     }
 
     @Test
     void exposesFilteredRequirementPage() throws Exception {
         UUID requirementId = UUID.randomUUID();
-        when(queryService.findPage("DRAFT", "bob", "身份", 1, 20)).thenReturn(new RequirementQueryService.RequirementPage(
+        // [AIREVIEW-PLAN-027] Administrators keep the platform-wide page read (null visibility).
+        when(queryService.findPage(eq("DRAFT"), eq("bob"), eq("身份"), eq(1), eq(20), isNull())).thenReturn(new RequirementQueryService.RequirementPage(
                 List.of(new RequirementQueryService.RequirementView(
                         requirementId,
                         "统一身份同步",
@@ -95,6 +112,7 @@ class RequirementControllerTests {
                 1));
 
         mockMvc.perform(get("/api/requirements")
+                        .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, ADMIN_PRINCIPAL)
                         .param("status", "DRAFT")
                         .param("assignee", "bob")
                         .param("keyword", "身份"))

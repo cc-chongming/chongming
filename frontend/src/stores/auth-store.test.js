@@ -12,7 +12,7 @@ function makeJwt(payload) {
 
 const validToken = makeJwt({ sub: 'alice', exp: 4102444800 });
 const expiredToken = makeJwt({ sub: 'alice', exp: 1000 });
-const sessionUser = { username: 'alice', displayName: 'Alice', role: 'PRODUCT' };
+const sessionUser = { username: 'alice', displayName: 'Alice', role: 'PRODUCT_MANAGER' };
 
 function installLocalStorage() {
     const backing = new Map();
@@ -79,18 +79,58 @@ describe('auth store', () => {
         const backing = installLocalStorage();
         const calls = [];
         const api = createApi({
-            register: async (username, password, displayName) => {
-                calls.push({ username, password, displayName });
-                return { token: validToken, user: { username, displayName, role: 'PRODUCT' } };
+            register: async (username, password, displayName, role) => {
+                calls.push({ username, password, displayName, role });
+                return { token: validToken, user: { username, displayName, role: role ?? 'DEVELOPER' } };
+            }
+        });
+        const store = createAuthStore({ api });
+
+        await store.register('bob', 'secret', 'Bob Chen', 'PRODUCT_MANAGER');
+
+        expect(calls).toEqual([{ username: 'bob', password: 'secret', displayName: 'Bob Chen', role: 'PRODUCT_MANAGER' }]);
+        expect(store.currentUser.value).toEqual({ username: 'bob', displayName: 'Bob Chen', role: 'PRODUCT_MANAGER' });
+        expect(backing.get(STORAGE_KEY)).toContain('Bob Chen');
+    });
+
+    it('omits the role from the registration request when none is selected', async () => {
+        installLocalStorage();
+        const calls = [];
+        const api = createApi({
+            register: async (username, password, displayName, role) => {
+                calls.push({ username, password, displayName, role });
+                return { token: validToken, user: { username, displayName, role: 'DEVELOPER' } };
             }
         });
         const store = createAuthStore({ api });
 
         await store.register('bob', 'secret', 'Bob Chen');
 
-        expect(calls).toEqual([{ username: 'bob', password: 'secret', displayName: 'Bob Chen' }]);
-        expect(store.currentUser.value).toEqual({ username: 'bob', displayName: 'Bob Chen', role: 'PRODUCT' });
-        expect(backing.get(STORAGE_KEY)).toContain('Bob Chen');
+        expect(calls).toEqual([{ username: 'bob', password: 'secret', displayName: 'Bob Chen', role: undefined }]);
+    });
+
+    it.each([
+        ['ADMIN', true],
+        ['PRODUCT_MANAGER', true],
+        ['PROJECT_MANAGER', true],
+        ['DEVELOPER', false],
+        ['USER', false],
+        ['PRODUCT', false],
+        [undefined, false]
+    ])('derives canCreateRequirement from session role %s -> %s', async (role, expected) => {
+        installLocalStorage();
+        const api = createApi({
+            login: async () => ({ token: validToken, user: { username: 'alice', displayName: 'Alice', role } })
+        });
+        const store = createAuthStore({ api });
+
+        expect(store.canCreateRequirement.value).toBe(false);
+        await store.login('alice', 'secret');
+
+        expect(store.canCreateRequirement.value).toBe(expected);
+
+        store.logout();
+        expect(store.canCreateRequirement.value).toBe(false);
     });
 
     it('clears the in-memory session and the persisted storage on logout', async () => {

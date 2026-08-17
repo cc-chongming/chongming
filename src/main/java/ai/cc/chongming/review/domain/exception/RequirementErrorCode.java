@@ -10,5 +10,10 @@ public enum RequirementErrorCode {
     ILLEGAL_LIFECYCLE_TRANSITION,
     REVIEW_ALREADY_BOUND,
     VERSION_CONFLICT,
-    REQUIREMENT_HAS_ACTIVE_TASK
+    REQUIREMENT_HAS_ACTIVE_TASK,
+    /**
+     * [AIREVIEW-PLAN-027] The authenticated principal lacks the role or ownership required for
+     * the command; surfaced as HTTP 403.
+     */
+    FORBIDDEN
 }

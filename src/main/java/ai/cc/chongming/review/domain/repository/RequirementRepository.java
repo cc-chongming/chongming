@@ -6,7 +6,9 @@ import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * [AIREVIEW-PLAN-021#2] Storage boundary for requirements and their cross-review association.
@@ -35,9 +37,40 @@ public interface RequirementRepository {
     Map<RequirementStatus, Long> countByStatus();
 
     /**
+     * [AIREVIEW-PLAN-027] Status counts restricted to one viewer's visibility scope; a
+     * {@code null} visibility keeps the historical platform-wide totals.
+     *
+     * @param visibility viewer scope or {@code null} for all requirements
+     * @return per-status counts visible to the viewer
+     */
+    Map<RequirementStatus, Long> countByStatus(RequirementVisibility visibility);
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped visibility component: a requirement is visible when the
+     * viewer created it or owns a dev task bound to it. {@code null} visibility means the full
+     * platform-wide set (administrators and demo profiles without authentication).
+     *
+     * @author wangli
+     */
+    record RequirementVisibility(String viewerUsername, Set<RequirementId> assignedRequirementIds) {
+        public RequirementVisibility {
+            viewerUsername = Objects.requireNonNull(viewerUsername, "viewerUsername must not be null");
+            assignedRequirementIds = assignedRequirementIds == null ? Set.of() : Set.copyOf(assignedRequirementIds);
+        }
+    }
+
+    /**
      * @author zyj
      */
-    record RequirementFilter(RequirementStatus status, String assigneeId, String keyword) {
+    record RequirementFilter(
+            RequirementStatus status, String assigneeId, String keyword, RequirementVisibility visibility) {
+
+        /**
+         * [AIREVIEW-PLAN-027] Legacy constructor delegating to an unrestricted (platform-wide) read.
+         */
+        public RequirementFilter(RequirementStatus status, String assigneeId, String keyword) {
+            this(status, assigneeId, keyword, null);
+        }
     }
 
     /**

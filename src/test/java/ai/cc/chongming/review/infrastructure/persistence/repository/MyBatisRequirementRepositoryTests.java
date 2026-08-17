@@ -14,12 +14,17 @@ import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RequirementRepository.RequirementFilter;
+import ai.cc.chongming.review.domain.repository.RequirementRepository.RequirementVisibility;
 import ai.cc.chongming.review.infrastructure.persistence.mapper.RequirementMapper;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.any;
 
 /**
  * [AIREVIEW-PLAN-021#2] Covers the durable aggregate conversion and optimistic-write boundary without MySQL.
@@ -119,6 +124,70 @@ class MyBatisRequirementRepositoryTests {
 
         assertThatIllegalArgumentException().isThrownBy(() -> repository.findPage(null, 0, 20));
         assertThatIllegalArgumentException().isThrownBy(() -> repository.findPage(null, 1, 101));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped filters travel through the ownership-aware statements
+     * with the assigned identifier set converted to strings.
+     */
+    @Test
+    void viewerScopedPageUsesTheVisibilityStatementsWithAssignedIdentifiers() {
+        RequirementMapper mapper = mock(RequirementMapper.class);
+        RequirementMapper.RequirementRow row = row(RequirementStatus.DRAFT, null, 0L);
+        RequirementId assignedId = new RequirementId(UUID.randomUUID());
+        when(mapper.countPageForViewer("DRAFT", null, null, "dev-zhang", List.of(assignedId.value().toString())))
+                .thenReturn(1L);
+        when(mapper.findPageForViewer("DRAFT", null, null, "dev-zhang", List.of(assignedId.value().toString()), 0L, 20))
+                .thenReturn(List.of(row));
+        MyBatisRequirementRepository repository = new MyBatisRequirementRepository(mapper);
+
+        var page = repository.findPage(
+                new RequirementFilter(RequirementStatus.DRAFT, null, null,
+                        new RequirementVisibility("dev-zhang", Set.of(assignedId))),
+                1, 20);
+
+        assertThat(page.total()).isEqualTo(1L);
+        assertThat(page.items()).hasSize(1);
+        verify(mapper, never()).countPage(any(), any(), any());
+        verify(mapper, never()).findPage(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] An empty assigned set still travels through the viewer statements;
+     * the SQL collapses to the creator condition alone.
+     */
+    @Test
+    void viewerScopedPageWithEmptyAssignedSetStillUsesViewerStatements() {
+        RequirementMapper mapper = mock(RequirementMapper.class);
+        when(mapper.countPageForViewer(null, null, null, "dev-zhang", List.of())).thenReturn(0L);
+        when(mapper.findPageForViewer(null, null, null, "dev-zhang", List.of(), 0L, 20)).thenReturn(List.of());
+        MyBatisRequirementRepository repository = new MyBatisRequirementRepository(mapper);
+
+        var page = repository.findPage(
+                new RequirementFilter(null, null, null, new RequirementVisibility("dev-zhang", Set.of())), 1, 20);
+
+        assertThat(page.total()).isZero();
+        verify(mapper).countPageForViewer(null, null, null, "dev-zhang", List.of());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Dashboard counts honour the same viewer predicate; {@code null}
+     * visibility delegates to the historical platform-wide statement.
+     */
+    @Test
+    void viewerScopedStatusCountsUseTheViewerGroupedStatement() {
+        RequirementMapper mapper = mock(RequirementMapper.class);
+        RequirementId assignedId = new RequirementId(UUID.randomUUID());
+        when(mapper.countByStatusForViewer("dev-zhang", List.of(assignedId.value().toString())))
+                .thenReturn(List.of(new RequirementMapper.StatusCountRow("DRAFT", 2L)));
+        MyBatisRequirementRepository repository = new MyBatisRequirementRepository(mapper);
+
+        assertThat(repository.countByStatus(new RequirementVisibility("dev-zhang", Set.of(assignedId))))
+                .containsEntry(RequirementStatus.DRAFT, 2L);
+
+        when(mapper.countByStatus()).thenReturn(List.of(new RequirementMapper.StatusCountRow("DRAFT", 5L)));
+        assertThat(repository.countByStatus(null)).containsEntry(RequirementStatus.DRAFT, 5L);
+        verify(mapper).countByStatus();
     }
 
     private RequirementMapper.RequirementRow row(RequirementStatus status, String reviewId, long version) {

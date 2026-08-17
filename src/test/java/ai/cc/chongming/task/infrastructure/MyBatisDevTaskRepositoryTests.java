@@ -197,6 +197,28 @@ class MyBatisDevTaskRepositoryTests {
         assertThatIllegalArgumentException().isThrownBy(() -> repository.findPage(null, 1, 101));
     }
 
+    /**
+     * [AIREVIEW-PLAN-027] The visibility feed reads the assignee's requirement identifiers
+     * straight from dev_task; blank or unknown names yield an empty set.
+     */
+    @Test
+    void findRequirementIdsByAssigneeReturnsTheAssigneesRequirements() throws Exception {
+        RequirementId firstRequirement = insertRequirement("可见性需求甲");
+        RequirementId secondRequirement = insertRequirement("可见性需求乙");
+        DevTask first = DevTask.draft(new DevTaskId(UUID.randomUUID()), firstRequirement, null, "可见性任务甲");
+        DevTask second = DevTask.draft(new DevTaskId(UUID.randomUUID()), secondRequirement, null, "可见性任务乙");
+        repository.save(first);
+        repository.save(second);
+        repository.save(restoreAndAssign(first, "visibility-dev"));
+        repository.save(restoreAndAssign(second, "visibility-dev"));
+
+        assertThat(repository.findRequirementIdsByAssignee("visibility-dev"))
+                .containsExactlyInAnyOrder(firstRequirement, secondRequirement);
+        assertThat(repository.findRequirementIdsByAssignee("ghost-dev")).isEmpty();
+        assertThat(repository.findRequirementIdsByAssignee(null)).isEmpty();
+        assertThat(repository.findRequirementIdsByAssignee("  ")).isEmpty();
+    }
+
     private DevTask restoreAndAssign(DevTask task, String assignee) {
         DevTask restored = DevTask.restore(
                 task.taskId(),

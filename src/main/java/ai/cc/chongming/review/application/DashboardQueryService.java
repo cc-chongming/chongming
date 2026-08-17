@@ -39,7 +39,19 @@ public class DashboardQueryService {
 
     @Transactional(readOnly = true)
     public DashboardView getDashboard() {
-        Map<RequirementStatus, Long> persistedCounts = requirementRepository.countByStatus();
+        return getDashboard(null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped dashboard; requirement status counts converge to the
+     * caller's visibility while review projections keep their platform-wide semantics. A
+     * {@code null} visibility keeps the historical platform-wide dashboard.
+     */
+    @Transactional(readOnly = true)
+    public DashboardView getDashboard(RequirementRepository.RequirementVisibility visibility) {
+        Map<RequirementStatus, Long> persistedCounts = visibility == null
+                ? requirementRepository.countByStatus()
+                : requirementRepository.countByStatus(visibility);
         Map<String, Long> statusCounts = new LinkedHashMap<>();
         for (RequirementStatus status : RequirementStatus.values()) {
             statusCounts.put(status.name(), persistedCounts.getOrDefault(status, 0L));

@@ -111,6 +111,13 @@ public interface DevTaskMapper {
     List<StatusCountRow> countByStatus();
 
     /**
+     * [AIREVIEW-PLAN-027] Requirement identifiers bound to one assignee's dev tasks, feeding the
+     * requirement visibility scope for non-administrator viewers.
+     */
+    @Select("SELECT requirement_id FROM dev_task WHERE assignee_username = #{username}")
+    List<String> findRequirementIdsByAssignee(@Param("username") String username);
+
+    /**
      * Flat row shape for the {@code dev_task} table; {@code requirementTitle} and
      * {@code assigneeDisplayName} are only populated by statements that join the
      * requirement/users tables.

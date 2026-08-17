@@ -93,6 +93,98 @@ public interface RequirementMapper {
     List<StatusCountRow> countByStatus();
 
     /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped page read: keeps every historical filter and appends the
+     * ownership predicate {@code creator_id = viewer OR requirement_id IN (assigned)}, collapsing
+     * to the creator condition alone when the assigned set is empty.
+     */
+    @Select("""
+            <script>
+            SELECT requirement_id AS id, title, description_md AS description, requirement_status AS status,
+                   creator_id AS creatorId, assignee_id AS assigneeId, repository_path AS repositoryPath,
+                   priority, review_id AS reviewId, version, created_at AS createdAt, updated_at AS updatedAt
+            FROM requirement
+            <where>
+              <if test="status != null"> requirement_status = #{status} </if>
+              <if test="assigneeId != null"> AND assignee_id = #{assigneeId} </if>
+              <if test="keyword != null"> AND (title LIKE CONCAT('%', #{keyword}, '%') OR description_md LIKE CONCAT('%', #{keyword}, '%')) </if>
+              <choose>
+                <when test="assignedIds != null and !assignedIds.isEmpty()">
+                  AND (creator_id = #{viewer} OR requirement_id IN
+                  <foreach collection="assignedIds" item="assignedId" open="(" separator="," close=")">#{assignedId}</foreach>)
+                </when>
+                <otherwise>
+                  AND creator_id = #{viewer}
+                </otherwise>
+              </choose>
+            </where>
+            ORDER BY updated_at DESC, requirement_id ASC
+            LIMIT #{offset}, #{size}
+            </script>
+            """)
+    List<RequirementRow> findPageForViewer(
+            @Param("status") String status,
+            @Param("assigneeId") String assigneeId,
+            @Param("keyword") String keyword,
+            @Param("viewer") String viewer,
+            @Param("assignedIds") List<String> assignedIds,
+            @Param("offset") long offset,
+            @Param("size") int size);
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped total matching {@link #findPageForViewer}.
+     */
+    @Select("""
+            <script>
+            SELECT COUNT(*) FROM requirement
+            <where>
+              <if test="status != null"> requirement_status = #{status} </if>
+              <if test="assigneeId != null"> AND assignee_id = #{assigneeId} </if>
+              <if test="keyword != null"> AND (title LIKE CONCAT('%', #{keyword}, '%') OR description_md LIKE CONCAT('%', #{keyword}, '%')) </if>
+              <choose>
+                <when test="assignedIds != null and !assignedIds.isEmpty()">
+                  AND (creator_id = #{viewer} OR requirement_id IN
+                  <foreach collection="assignedIds" item="assignedId" open="(" separator="," close=")">#{assignedId}</foreach>)
+                </when>
+                <otherwise>
+                  AND creator_id = #{viewer}
+                </otherwise>
+              </choose>
+            </where>
+            </script>
+            """)
+    long countPageForViewer(
+            @Param("status") String status,
+            @Param("assigneeId") String assigneeId,
+            @Param("keyword") String keyword,
+            @Param("viewer") String viewer,
+            @Param("assignedIds") List<String> assignedIds);
+
+    /**
+     * [AIREVIEW-PLAN-027] Viewer-scoped dashboard counts applying the same ownership predicate
+     * as {@link #findPageForViewer} before grouping by status.
+     */
+    @Select("""
+            <script>
+            SELECT requirement_status AS status, COUNT(*) AS total FROM requirement
+            <where>
+              <choose>
+                <when test="assignedIds != null and !assignedIds.isEmpty()">
+                  creator_id = #{viewer} OR requirement_id IN
+                  <foreach collection="assignedIds" item="assignedId" open="(" separator="," close=")">#{assignedId}</foreach>
+                </when>
+                <otherwise>
+                  creator_id = #{viewer}
+                </otherwise>
+              </choose>
+            </where>
+            GROUP BY requirement_status
+            </script>
+            """)
+    List<StatusCountRow> countByStatusForViewer(
+            @Param("viewer") String viewer,
+            @Param("assignedIds") List<String> assignedIds);
+
+    /**
      * [AIREVIEW-PLAN-023#3] Atomically creates the requirement-scoped launch reservation.
      */
     @Insert("""

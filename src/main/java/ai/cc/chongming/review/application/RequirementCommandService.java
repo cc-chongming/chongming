@@ -50,7 +50,11 @@ public class RequirementCommandService {
     @Transactional
     public Requirement create(CreateRequirementCommand command) {
         CreateRequirementCommand validatedCommand = Objects.requireNonNull(command, "command must not be null");
-        String creatorId = identityProvider.currentReviewer().reviewerId();
+        // [AIREVIEW-PLAN-027] The controller-supplied creator wins so the authenticated principal
+        // becomes the owner; without one the historical identity provider keeps demo behaviour.
+        String creatorId = validatedCommand.creatorUsername() == null || validatedCommand.creatorUsername().isBlank()
+                ? identityProvider.currentReviewer().reviewerId()
+                : validatedCommand.creatorUsername().trim();
         Requirement requirement = Requirement.draft(
                 new RequirementId(UUID.randomUUID()),
                 validatedCommand.title(),
@@ -179,7 +183,21 @@ public class RequirementCommandService {
      * @author zyj
      */
     public record CreateRequirementCommand(
-            String title, String description, String assigneeId, String repositoryPath, String priority) {
+            String title,
+            String description,
+            String assigneeId,
+            String repositoryPath,
+            String priority,
+            String creatorUsername) {
+
+        /**
+         * [AIREVIEW-PLAN-027] Legacy constructor without an authenticated creator; the identity
+         * provider fallback applies.
+         */
+        public CreateRequirementCommand(
+                String title, String description, String assigneeId, String repositoryPath, String priority) {
+            this(title, description, assigneeId, repositoryPath, priority, null);
+        }
     }
 
     /**

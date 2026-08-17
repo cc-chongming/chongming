@@ -1,12 +1,19 @@
 package ai.cc.chongming.review.api;
 
+import ai.cc.chongming.auth.api.PrincipalAccessor;
+import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
+import ai.cc.chongming.auth.domain.UserRole;
 import ai.cc.chongming.review.application.RequirementCommandService;
 import ai.cc.chongming.review.application.RequirementReviewLaunchException;
 import ai.cc.chongming.review.application.RequirementReviewLaunchService;
+import ai.cc.chongming.review.application.RequirementQueryService;
 import ai.cc.chongming.review.application.RequirementQueryService.RequirementView;
+import ai.cc.chongming.review.domain.exception.RequirementDomainException;
+import ai.cc.chongming.review.domain.exception.RequirementErrorCode;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.task.application.TaskFlowGuard;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -17,6 +24,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +45,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * [AIREVIEW-PLAN-021#2][AIREVIEW-PLAN-023#3] Exposes requirement lifecycle commands and draft review launch.
+ * [AIREVIEW-PLAN-021#2][AIREVIEW-PLAN-023#3][AIREVIEW-PLAN-027] Exposes requirement lifecycle
+ * commands and draft review launch. Authenticated callers are gated by role on create and by
+ * ownership (creator or administrator) on revise/delete; requests without a principal keep the
+ * historical open behaviour for demo/test profiles.
  *
  * @author zyj
  */
@@ -50,16 +61,26 @@ public class RequirementCommandController {
     private final RequirementReviewLaunchService launchService;
     private final ObjectMapper objectMapper;
     private final TaskFlowGuard taskFlowGuard;
+    private final RequirementQueryService queryService;
+    private final PrincipalAccessor principalAccessor = new PrincipalAccessor();
 
     public RequirementCommandController(RequirementCommandService commandService) {
-        this(commandService, null, new ObjectMapper(), null);
+        this(commandService, null, new ObjectMapper(), null, null);
     }
 
     public RequirementCommandController(
             RequirementCommandService commandService,
             RequirementReviewLaunchService launchService,
             ObjectMapper objectMapper) {
-        this(commandService, launchService, objectMapper, null);
+        this(commandService, launchService, objectMapper, null, null);
+    }
+
+    public RequirementCommandController(
+            RequirementCommandService commandService,
+            RequirementReviewLaunchService launchService,
+            ObjectMapper objectMapper,
+            TaskFlowGuard taskFlowGuard) {
+        this(commandService, launchService, objectMapper, taskFlowGuard, null);
     }
 
     @Autowired
@@ -67,23 +88,46 @@ public class RequirementCommandController {
             RequirementCommandService commandService,
             RequirementReviewLaunchService launchService,
             ObjectMapper objectMapper,
-            TaskFlowGuard taskFlowGuard) {
+            TaskFlowGuard taskFlowGuard,
+            RequirementQueryService queryService) {
         this.commandService = commandService;
         this.launchService = launchService;
         this.objectMapper = objectMapper;
         this.taskFlowGuard = taskFlowGuard;
+        this.queryService = queryService;
     }
 
     @PostMapping
-    public ResponseEntity<RequirementView> create(@Valid @RequestBody CreateRequirementRequest request) {
+    public ResponseEntity<RequirementView> create(
+            @Valid @RequestBody CreateRequirementRequest request, HttpServletRequest httpRequest) {
+        // [AIREVIEW-PLAN-027] Authenticated callers need a creator-capable role; the principal
+        // username becomes the requirement creator. Demo profiles without a principal keep the
+        // historical identity-provider fallback.
+        Optional<AuthPrincipal> principal = principalAccessor.requirePrincipal(httpRequest);
+        String creatorUsername = null;
+        if (principal.isPresent()) {
+            AuthPrincipal authPrincipal = principal.get();
+            if (!UserRole.parse(authPrincipal.role()).canCreateRequirement()) {
+                throw new RequirementDomainException(RequirementErrorCode.FORBIDDEN, "当前角色无权新建需求");
+            }
+            creatorUsername = authPrincipal.username();
+        }
         return ResponseEntity.status(HttpStatus.CREATED).body(RequirementView.from(commandService.create(
                 new RequirementCommandService.CreateRequirementCommand(
-                        request.title(), request.description(), request.assigneeId(), request.repositoryPath(), request.priority()))));
+                        request.title(),
+                        request.description(),
+                        request.assigneeId(),
+                        request.repositoryPath(),
+                        request.priority(),
+                        creatorUsername))));
     }
 
     @PutMapping("/{requirementId}")
     public RequirementView revise(
-            @PathVariable UUID requirementId, @Valid @RequestBody ReviseRequirementRequest request) {
+            @PathVariable UUID requirementId,
+            @Valid @RequestBody ReviseRequirementRequest request,
+            HttpServletRequest httpRequest) {
+        requireOwnership(new RequirementId(requirementId), httpRequest);
         return RequirementView.from(commandService.revise(
                 new RequirementId(requirementId),
                 new RequirementCommandService.ReviseRequirementCommand(
@@ -163,7 +207,9 @@ public class RequirementCommandController {
     @DeleteMapping("/{requirementId}")
     public ResponseEntity<Void> delete(
             @PathVariable UUID requirementId,
-            @org.springframework.web.bind.annotation.RequestParam @Min(0) long expectedVersion) {
+            @org.springframework.web.bind.annotation.RequestParam @Min(0) long expectedVersion,
+            HttpServletRequest httpRequest) {
+        requireOwnership(new RequirementId(requirementId), httpRequest);
         commandService.delete(new RequirementId(requirementId), expectedVersion);
         return ResponseEntity.noContent().build();
     }
@@ -210,6 +256,31 @@ public class RequirementCommandController {
     private void requireNoActiveTask(UUID requirementId) {
         if (taskFlowGuard != null) {
             taskFlowGuard.requireNoActiveTask(new RequirementId(requirementId));
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-027] Ownership gate for revise/delete: without a principal the historical
+     * open behaviour applies; otherwise only the creator or an administrator may proceed. Hidden
+     * requirements surface 404 through the query lookup so existence is never leaked.
+     */
+    private void requireOwnership(RequirementId requirementId, HttpServletRequest request) {
+        Optional<AuthPrincipal> principal = principalAccessor.requirePrincipal(request);
+        if (principal.isEmpty()) {
+            return;
+        }
+        AuthPrincipal authPrincipal = principal.get();
+        if (UserRole.parse(authPrincipal.role()).viewsAllRequirements()) {
+            return;
+        }
+        if (queryService == null) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.FORBIDDEN, "仅需求创建者或管理员可执行该操作");
+        }
+        RequirementView view = queryService.findById(requirementId);
+        if (!authPrincipal.username().equals(view.creatorId())) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.FORBIDDEN, "仅需求创建者或管理员可执行该操作");
         }
     }
 

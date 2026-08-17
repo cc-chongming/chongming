@@ -1,7 +1,9 @@
 package ai.cc.chongming.task.api;
 
 import ai.cc.chongming.auth.api.AuthJwtFilter;
+import ai.cc.chongming.auth.api.PrincipalAccessor;
 import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
+import ai.cc.chongming.auth.domain.UserRole;
 import ai.cc.chongming.task.application.DevTaskCommandService;
 import ai.cc.chongming.task.application.DevTaskProvisioningListener;
 import ai.cc.chongming.task.application.DevTaskQueryService;
@@ -36,11 +38,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/tasks")
 public class DevTaskController {
 
-    private static final String ADMIN_ROLE = "ADMIN";
-
     private final DevTaskCommandService commandService;
     private final DevTaskQueryService queryService;
     private final DevTaskProvisioningListener provisioningListener;
+    private final PrincipalAccessor principalAccessor = new PrincipalAccessor();
 
     public DevTaskController(
             DevTaskCommandService commandService,
@@ -120,16 +121,17 @@ public class DevTaskController {
     }
 
     private AuthPrincipal requirePrincipal(HttpServletRequest request) {
-        Object principal = request.getAttribute(AuthJwtFilter.PRINCIPAL_ATTRIBUTE);
-        if (!(principal instanceof AuthPrincipal authPrincipal)) {
-            throw new TaskDomainException(TaskErrorCode.FORBIDDEN, "当前请求未携带有效的认证凭据");
-        }
-        return authPrincipal;
+        // [AIREVIEW-PLAN-027] Shared attribute read lives in PrincipalAccessor; task endpoints
+        // keep their historical 403 contract for missing principals.
+        return principalAccessor.requirePrincipal(request)
+                .orElseThrow(() -> new TaskDomainException(TaskErrorCode.FORBIDDEN, "当前请求未携带有效的认证凭据"));
     }
 
     private AuthPrincipal requireAdmin(HttpServletRequest request) {
         AuthPrincipal principal = requirePrincipal(request);
-        if (!ADMIN_ROLE.equals(principal.role())) {
+        // [AIREVIEW-PLAN-027] Legacy USER or unknown roles parse to developer-level semantics and
+        // never pass the administrator gate.
+        if (!UserRole.parse(principal.role()).viewsAllRequirements()) {
             throw new TaskDomainException(TaskErrorCode.FORBIDDEN, "仅管理员可执行该任务操作");
         }
         return principal;

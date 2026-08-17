@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         localStorage.setItem('chongming-auth', JSON.stringify({
             token: `e2e.${payload}.signature`,
-            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT' }
+            user: { username: 'e2e-user', displayName: 'E2E 用户', role: 'PRODUCT_MANAGER' }
         }));
     });
     // 兜底拦截：具体路由未覆盖的 /api 请求不得经 vite 代理泄漏到本地后端（其 401 会清除会话并跳登录页）。
@@ -415,8 +415,9 @@ test('disables requirement creation when the server has no configured repositori
 
 test('deletes a requirement directly from the requirement list regardless of its lifecycle status', async ({ page }) => {
     const requirementId = 'a0000000-0000-0000-0000-000000000001';
+    // [AIREVIEW-PLAN-027] 删除按钮仅对创建者或 ADMIN 可见，fixture 使用会话用户名。
     const item = {
-        id: requirementId, title: '已取消的测试需求', description: '', status: 'CANCELLED', creatorId: 'demo-reviewer',
+        id: requirementId, title: '已取消的测试需求', description: '', status: 'CANCELLED', creatorId: 'e2e-user',
         assigneeId: null, repositoryPath: 'cx-ai', priority: 'P1', reviewId: reviewId, version: 4,
         createdAt: '2026-08-04T00:00:00Z', updatedAt: '2026-08-04T00:00:00Z'
     };

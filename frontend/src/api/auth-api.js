@@ -17,10 +17,16 @@ export const authApi = {
         return request('/api/auth/login', { method: 'POST', ...jsonBody({ username, password }) });
     },
 
-    register(username, password, displayName) {
+    /**
+     * [AIREVIEW-PLAN-027] The optional `role` (PRODUCT_MANAGER/PROJECT_MANAGER/DEVELOPER)
+     * is only sent when provided; the backend defaults to DEVELOPER and rejects ADMIN.
+     */
+    register(username, password, displayName, role) {
+        const body = { username, password, displayName };
+        if (role) body.role = role;
         return request('/api/auth/register', {
             method: 'POST',
-            ...jsonBody({ username, password, displayName })
+            ...jsonBody(body)
         });
     },
 

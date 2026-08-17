@@ -15,7 +15,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
@@ -94,6 +96,19 @@ public class InMemoryDevTaskRepository implements DevTaskRepository {
         Map<DevTaskStatus, Long> counts = new EnumMap<>(DevTaskStatus.class);
         tasks.values().forEach(task -> counts.merge(task.status(), 1L, Long::sum));
         return Map.copyOf(counts);
+    }
+
+    @Override
+    public Set<RequirementId> findRequirementIdsByAssignee(String username) {
+        String normalized = username == null || username.isBlank() ? null : username.trim();
+        if (normalized == null) {
+            return Set.of();
+        }
+        String assignee = normalized;
+        return tasks.values().stream()
+                .filter(task -> assignee.equals(task.assigneeUsername()))
+                .map(DevTask::requirementId)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private void requireVersion(DevTask task, DevTask existing) {

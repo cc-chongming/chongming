@@ -171,6 +171,11 @@ class DevTaskProvisioningListenerTests {
             public Map<DevTaskStatus, Long> countByStatus() {
                 return Map.of();
             }
+
+            @Override
+            public java.util.Set<RequirementId> findRequirementIdsByAssignee(String username) {
+                return java.util.Set.of();
+            }
         };
         DevTaskProvisioningListener failingListener =
                 new DevTaskProvisioningListener(requirementRepository, failingTasks);

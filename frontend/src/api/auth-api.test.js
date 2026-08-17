@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe('auth API', () => {
     it('posts login credentials and parses the signed session', async () => {
-        const session = { token: 'jwt-token', user: { username: 'alice', displayName: 'Alice', role: 'PRODUCT' } };
+        const session = { token: 'jwt-token', user: { username: 'alice', displayName: 'Alice', role: 'PRODUCT_MANAGER' } };
         const fetchMock = vi.fn().mockResolvedValue(response(session));
         globalThis.fetch = fetchMock;
 
@@ -34,7 +34,7 @@ describe('auth API', () => {
     });
 
     it('posts register payloads including the display name', async () => {
-        const session = { token: 'jwt-token', user: { username: 'bob', displayName: 'Bob', role: 'PRODUCT' } };
+        const session = { token: 'jwt-token', user: { username: 'bob', displayName: 'Bob', role: 'DEVELOPER' } };
         const fetchMock = vi.fn().mockResolvedValue(response(session));
         globalThis.fetch = fetchMock;
 
@@ -46,6 +46,18 @@ describe('auth API', () => {
             username: 'bob', password: 'secret', displayName: 'Bob Chen'
         });
         expect(result).toEqual(session);
+    });
+
+    it('includes the selected role in the register payload when provided', async () => {
+        const session = { token: 'jwt-token', user: { username: 'bob', displayName: 'Bob', role: 'PRODUCT_MANAGER' } };
+        const fetchMock = vi.fn().mockResolvedValue(response(session));
+        globalThis.fetch = fetchMock;
+
+        await authApi.register('bob', 'secret', 'Bob Chen', 'PRODUCT_MANAGER');
+
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+            username: 'bob', password: 'secret', displayName: 'Bob Chen', role: 'PRODUCT_MANAGER'
+        });
     });
 
     it('queries the current user profile with a stored Bearer token', async () => {

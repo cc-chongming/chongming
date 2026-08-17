@@ -6,6 +6,7 @@ import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
 import ai.cc.chongming.auth.config.AuthModuleEnabledCondition;
 import ai.cc.chongming.auth.domain.AuthErrorCode;
 import ai.cc.chongming.auth.domain.AuthException;
+import ai.cc.chongming.auth.domain.UserRole;
 import ai.cc.chongming.auth.domain.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -36,10 +37,9 @@ public class AuthController {
     /** Request attribute key where {@link AuthJwtFilter} stores the verified principal. */
     public static final String PRINCIPAL_ATTRIBUTE = AuthJwtFilter.PRINCIPAL_ATTRIBUTE;
 
-    private static final String ADMIN_ROLE = "ADMIN";
-
     private final AuthService authService;
     private final UserRepository userRepository;
+    private final PrincipalAccessor principalAccessor = new PrincipalAccessor();
 
     public AuthController(AuthService authService) {
         this(authService, null);
@@ -59,7 +59,8 @@ public class AuthController {
 
     @PostMapping("/api/auth/register")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
-        AuthResult result = authService.register(request.username(), request.password(), request.displayName());
+        AuthResult result = authService.register(
+                request.username(), request.password(), request.displayName(), request.role());
         return AuthResponse.from(result);
     }
 
@@ -85,7 +86,9 @@ public class AuthController {
     @GetMapping("/api/users")
     public List<UserResponse> users(HttpServletRequest request) {
         AuthPrincipal authPrincipal = requirePrincipal(request);
-        if (!ADMIN_ROLE.equals(authPrincipal.role())) {
+        // [AIREVIEW-PLAN-027] Legacy USER or unknown roles parse to developer-level semantics
+        // and stay outside the administrator-only directory.
+        if (!UserRole.parse(authPrincipal.role()).viewsAllRequirements()) {
             throw new AuthException(AuthErrorCode.FORBIDDEN, "仅管理员可查看用户列表");
         }
         if (userRepository == null) {
@@ -97,11 +100,10 @@ public class AuthController {
     }
 
     private AuthPrincipal requirePrincipal(HttpServletRequest request) {
-        Object principal = request.getAttribute(PRINCIPAL_ATTRIBUTE);
-        if (!(principal instanceof AuthPrincipal authPrincipal)) {
-            throw new AuthException(AuthErrorCode.UNAUTHENTICATED, "当前请求未携带有效的认证凭据");
-        }
-        return authPrincipal;
+        // [AIREVIEW-PLAN-027] Shared attribute read lives in PrincipalAccessor; this endpoint
+        // keeps its historical 401 contract for missing principals.
+        return principalAccessor.requirePrincipal(request)
+                .orElseThrow(() -> new AuthException(AuthErrorCode.UNAUTHENTICATED, "当前请求未携带有效的认证凭据"));
     }
 
     /**
@@ -115,14 +117,16 @@ public class AuthController {
     }
 
     /**
-     * Registration request body.
+     * Registration request body. {@code role} is optional; [AIREVIEW-PLAN-027] restricts it to
+     * the self-registerable role set and defaults to {@code DEVELOPER}.
      *
      * @author wangli
      */
     public record RegisterRequest(
             @NotBlank @Size(min = 1, max = 64) String username,
             @NotBlank @Size(min = 8, max = 128) String password,
-            @Size(max = 64) String displayName) {
+            @Size(max = 64) String displayName,
+            @Size(max = 32) String role) {
     }
 
     /**
