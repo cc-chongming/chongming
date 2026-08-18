@@ -14,12 +14,21 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [requirementFile, repositoryPath, submitter]
+              required: [submitter]
               properties:
                 requirementFile:
                   type: string
                   format: binary
-                  description: UTF-8 Markdown file whose filename ends in .md.
+                  description: >-
+                    UTF-8 Markdown file whose filename ends in .md. Exactly one of
+                    requirementFile or requirementText must be supplied
+                    ([AIREVIEW-PLAN-025] dual transport).
+                requirementText:
+                  type: string
+                  description: >-
+                    Typed UTF-8 Markdown content. Exactly one of requirementFile or
+                    requirementText must be supplied; the server wraps it as
+                    requirement.md before validation.
                 repositoryPath:
                   type: string
                 branch:
@@ -40,7 +49,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/CreateReviewResponse'
         '400':
-          description: A required multipart part or request parameter is missing, or the upload cannot be read.
+          description: >-
+            A required request parameter is missing, neither document transport carries
+            content (MISSING_REQUIREMENT_DOCUMENT), both transports are supplied at once
+            (INVALID_INTAKE_DOCUMENT), or the upload cannot be read.
           content:
             application/problem+json:
               schema:

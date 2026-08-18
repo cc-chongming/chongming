@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.mock.web.MockMultipartFile;
 
 /**
  * Tests immutable workspace snapshots and deterministic duplicate intake handling.
@@ -141,7 +140,7 @@ class ReviewIntakeServiceTests {
     void doesNotPublishAWorkspaceSnapshotWhenCancellationIsRequested() {
         ReviewIntakeService service = newService();
         ReviewIntakeRequest cancelled = new ReviewIntakeRequest(
-                request(false).requirementFile(),
+                request(false).document(),
                 "D:/repositories/chongming",
                 "main",
                 "abc123",
@@ -247,13 +246,11 @@ class ReviewIntakeServiceTests {
     }
 
     private ReviewIntakeRequest request(boolean forceNewAttempt, String idempotencyScope) {
-        MockMultipartFile file = new MockMultipartFile(
-                "requirementFile",
+        IntakeDocument document = new IntakeDocument(
                 "requirements.md",
-                "text/markdown",
                 "# Requirement\r\nImplement the intake endpoint.".getBytes(StandardCharsets.UTF_8));
         return new ReviewIntakeRequest(
-                file,
+                document,
                 "D:/repositories/chongming",
                 "main",
                 "abc123",

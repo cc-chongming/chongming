@@ -6,6 +6,7 @@ import { taskApi } from '../api/task-api';
 import { formatChinaTime } from '../services/china-time';
 import RepositorySelect from '../components/RepositorySelect.vue';
 import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
+import RequirementDocInput from '../components/RequirementDocInput.vue';
 
 // [AIREVIEW-PLAN-023#2] Draft repository edits use the configured repository selector.
 // [AIREVIEW-PLAN-023#3] Draft review launch is one idempotent multipart command.
@@ -21,6 +22,9 @@ const editing = ref(false);
 const launching = ref(false);
 const launchOpen = ref(false);
 const launchFile = ref(null);
+// [AIREVIEW-PLAN-025] Launch Markdown may be uploaded or typed directly.
+const launchDocMode = ref('file');
+const launchManualMarkdown = ref('');
 const launchIdempotencyKey = ref(createLaunchIdempotencyKey());
 const launchRecoveryReviewId = ref(null);
 const repositoryState = ref('loading');
@@ -197,14 +201,19 @@ function openLaunchForm() {
     launchOpen.value = true;
     error.value = '';
 }
-function onLaunchFileChange(event) {
-    launchFile.value = event.target.files?.[0] ?? null;
+function onLaunchFileChange(file) {
+    launchFile.value = file ?? null;
 }
 
 async function launchReview() {
     if (!requirement.value) return;
     error.value = '';
-    if (!launchFile.value?.name.toLowerCase().endsWith('.md')) {
+    if (launchDocMode.value === 'text') {
+        if (!launchManualMarkdown.value.trim()) {
+            error.value = '请输入 Markdown 需求内容，或切换为上传文档。';
+            return;
+        }
+    } else if (!launchFile.value?.name.toLowerCase().endsWith('.md')) {
         error.value = '请重新上传 Markdown 格式的评审需求文档。';
         return;
     }
@@ -218,7 +227,9 @@ async function launchReview() {
         // [AIREVIEW-PLAN-029] Remote-bound requirements reuse the requirement source at launch.
         if (!requirementIsRemote.value && !await ensureConfiguredRepository(launchForm.repositoryPath)) return;
         const result = await reviewApi.launchRequirementReview(props.requirementId, {
-            requirementFile: launchFile.value,
+            ...(launchDocMode.value === 'text'
+                ? { requirementText: launchManualMarkdown.value.trim() }
+                : { requirementFile: launchFile.value }),
             repositoryPath: requirementIsRemote.value ? null : launchForm.repositoryPath,
             branch: requirementIsRemote.value ? '' : launchForm.branch.trim(),
             commit: requirementIsRemote.value ? '' : launchForm.commit.trim(),
@@ -462,9 +473,9 @@ onMounted(refreshRepositoryAvailability);
 
             <section v-if="launchOpen" class="panel requirement-launch-panel" aria-labelledby="requirement-launch-title" style="margin-bottom:16px">
                 <h2 id="requirement-launch-title">发起评审</h2>
-                <p class="muted">草稿不保存 Markdown 原文，请重新上传需求文档。提交后将创建、绑定并启动一次评审。</p>
+                <p class="muted">草稿不保存 Markdown 原文，请重新提供需求文档（上传或手动输入）。提交后将创建、绑定并启动一次评审。</p>
                 <form class="review-form compact" @submit.prevent="launchReview">
-                    <label class="full">评审需求文档（.md）<input type="file" accept=".md,text/markdown" @change="onLaunchFileChange" /></label>
+                    <div class="full"><RequirementDocInput v-model:mode="launchDocMode" v-model:text="launchManualMarkdown" :file="launchFile" @update:file="onLaunchFileChange" /></div>
                     <p v-if="requirementIsRemote" class="muted full">🌐 该需求已绑定线上仓库 {{ requirement.remote.url }}，发起评审时将自动克隆该仓库。</p>
                     <template v-else>
                         <RepositorySelect v-model="launchForm.repositoryPath" class="full" required />

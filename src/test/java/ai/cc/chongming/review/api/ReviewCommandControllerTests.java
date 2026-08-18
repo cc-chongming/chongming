@@ -104,11 +104,64 @@ class ReviewCommandControllerTests {
 
     @Test
     void returnsStableProblemWhenRequiredFilePartIsMissing() throws Exception {
+        // [AIREVIEW-PLAN-025] Neither an uploaded file nor typed text now yields a stable 400.
         mockMvc.perform(multipart("/api/reviews")
                         .param("repositoryPath", "D:/repository")
                         .param("submitter", "user-001"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MISSING_MULTIPART_PART"));
+                .andExpect(jsonPath("$.code").value("MISSING_REQUIREMENT_DOCUMENT"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-025] Typed Markdown is accepted in place of an uploaded file and reaches the
+     * intake service as a uniform document.
+     */
+    @Test
+    void acceptsTypedMarkdownInsteadOfAnUploadedFile() throws Exception {
+        UUID reviewUuid = UUID.randomUUID();
+        when(intakeService.intake(any())).thenReturn(new ReviewIntakeResult(
+                new RequirementSnapshot(
+                        UUID.randomUUID(),
+                        new ReviewId(reviewUuid),
+                        1,
+                        "user-001",
+                        "D:/repository",
+                        "main",
+                        "abc123",
+                        "requirement.md",
+                        "a".repeat(64),
+                        "b".repeat(64),
+                        "markdown-line-parser-v1",
+                        new RequirementDocument(List.of(), List.of(), 0, 0, false),
+                        Instant.now()),
+                new StoredRequirementSnapshot(
+                        Path.of("raw.md"), Path.of("normalized.md"), Path.of("snapshot-manifest.json")),
+                false));
+
+        mockMvc.perform(multipart("/api/reviews")
+                        .param("requirementText", "# Requirement\nTyped intake body.")
+                        .param("repositoryPath", "D:/repository")
+                        .param("submitter", "user-001"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.reviewId").value(reviewUuid.toString()));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-025] Supplying both transports at once is rejected with a stable 400.
+     */
+    @Test
+    void rejectsProvidingBothFileAndTypedMarkdown() throws Exception {
+        mockMvc.perform(multipart("/api/reviews")
+                        .file(new MockMultipartFile(
+                                "requirementFile",
+                                "requirements.md",
+                                "text/markdown",
+                                "# Requirement".getBytes(StandardCharsets.UTF_8)))
+                        .param("requirementText", "# Requirement")
+                        .param("repositoryPath", "D:/repository")
+                        .param("submitter", "user-001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INTAKE_DOCUMENT"));
     }
 
     @Test

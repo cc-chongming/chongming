@@ -4,6 +4,7 @@ import ai.cc.chongming.auth.api.PrincipalAccessor;
 import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
 import ai.cc.chongming.auth.domain.UserRole;
 import ai.cc.chongming.review.application.RequirementCommandService;
+import ai.cc.chongming.review.application.IntakeDocument;
 import ai.cc.chongming.review.application.RequirementReviewLaunchException;
 import ai.cc.chongming.review.application.RequirementReviewLaunchService;
 import ai.cc.chongming.review.application.RequirementQueryService;
@@ -154,13 +155,16 @@ public class RequirementCommandController {
 
     /**
      * [AIREVIEW-PLAN-023#3] Accepts one idempotent multipart command for intake, binding and start.
+     * [AIREVIEW-PLAN-025] The Markdown may arrive either as an uploaded {@code .md} part or as the
+     * typed {@code requirementText} parameter; exactly one of the two must be present.
      */
     @PostMapping(value = "/{requirementId}/reviews", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<RequirementReviewLaunchService.LaunchResult> launchReview(
             @PathVariable UUID requirementId,
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
             @RequestHeader(value = "X-Trace-Id", required = false) String traceId,
-            @RequestPart("requirementFile") MultipartFile requirementFile,
+            @RequestPart(value = "requirementFile", required = false) MultipartFile requirementFile,
+            @RequestParam(value = "requirementText", required = false) String requirementText,
             @RequestParam(value = "repositoryPath", required = false) String repositoryPath,
             @RequestParam(value = "branch", required = false) String branch,
             @RequestParam(value = "commit", required = false) String commit,
@@ -177,7 +181,7 @@ public class RequirementCommandController {
         RequirementReviewLaunchService.LaunchResult result = launchService.launch(
                 new RequirementId(requirementId),
                 new RequirementReviewLaunchService.LaunchCommand(
-                        requirementFile,
+                        IntakeDocument.from(requirementFile, requirementText),
                         repositoryPath,
                         branch,
                         commit,

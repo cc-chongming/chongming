@@ -165,6 +165,7 @@ export const reviewApi = {
 
     launchRequirementReview(requirementId, {
         requirementFile,
+        requirementText,
         repositoryPath,
         branch,
         commit,
@@ -177,7 +178,9 @@ export const reviewApi = {
         traceId
     }) {
         const form = new FormData();
-        form.append('requirementFile', requirementFile);
+        // [AIREVIEW-PLAN-025] The Markdown travels either as an uploaded .md part or typed text.
+        if (requirementFile) form.append('requirementFile', requirementFile);
+        if (requirementText) form.append('requirementText', requirementText);
         // [AIREVIEW-PLAN-029] Remote-bound requirements launch without a configured repository id.
         if (repositoryPath) form.append('repositoryPath', repositoryPath);
         if (branch) form.append('branch', branch);
@@ -225,6 +228,7 @@ export const reviewApi = {
 
     createReview({
         requirementFile,
+        requirementText,
         repositoryPath,
         branch,
         commit,
@@ -235,7 +239,9 @@ export const reviewApi = {
         remoteToken
     }) {
         const form = new FormData();
-        form.append('requirementFile', requirementFile);
+        // [AIREVIEW-PLAN-025] The Markdown travels either as an uploaded .md part or typed text.
+        if (requirementFile) form.append('requirementFile', requirementFile);
+        if (requirementText) form.append('requirementText', requirementText);
         // [AIREVIEW-PLAN-029] Configured repositories and online sources are mutually exclusive.
         if (repositoryPath) form.append('repositoryPath', repositoryPath);
         form.append('submitter', submitter);

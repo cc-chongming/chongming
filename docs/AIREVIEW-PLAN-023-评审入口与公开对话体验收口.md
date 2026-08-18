@@ -499,3 +499,4 @@ OpenAiCompatibleModelClient 当前固定 stream=false，需要：
 | 2026-08-10 | 创建 PLAN-023，统一规划仓库下拉、草稿发起、浅色 /live、Scout 持久化结论、Claim 与结论链可读化、全 Agent AI 对话、右侧全局对话抽屉、工具默认折叠与真实流式。 |
 | 2026-08-10 | 开始实施；通过 IDEA MCP 确认现有迁移最高为 V16，将 Scout 结论迁移由计划中的 V15 调整为 V17，并并行推进入口、Scout、流式与 /live 实现。 |
 | 2026-08-12 | 修复草稿提交同一 Markdown 时误复用其他需求 Review 的 409：受理幂等键增加 Requirement 归属范围；同需求重放仍复用、跨需求创建独立 Review root，且未带范围的旧 `/api/reviews` 去重键保持兼容。对旧逻辑已写入且指向缺失、非 `PENDING` 或已归属其他需求 Review 的错误完成态启动预约增加精确条件失效与自动重建，同一 `Idempotency-Key` 重试可恢复，无需人工清库；补充内存、MyBatis、持久化键与启动编排回归。 |
+| 2026-08-18 | 需求文档双通道受理：`/api/reviews` 与 `/{requirementId}/reviews` 的 `requirementFile` 改为可选，新增 `requirementText` 参数，二者严格二选一（同传 `INVALID_INTAKE_DOCUMENT`、均缺 `MISSING_REQUIREMENT_DOCUMENT`、空文件保持 `EMPTY_DOCUMENT` 422）；应用层引入 `IntakeDocument` 统一承载文件名与字节，校验器只见单一来源。新建需求、独立创建评审与草稿发起三处页面共用 `RequirementDocInput` 双模式组件（上传 .md / 手动输入）；OpenAPI 受理契约与前端单测、e2e 同步更新。 |

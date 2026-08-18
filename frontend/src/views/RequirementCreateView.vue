@@ -3,13 +3,16 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
 import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
+import RequirementDocInput from '../components/RequirementDocInput.vue';
 
 // [AIREVIEW-PLAN-023#2] Configured repositories stay constrained to the backend whitelist.
 // [AIREVIEW-PLAN-029] Online repositories are supplied directly at creation (url + token).
 
 const router = useRouter();
 const file = ref(null);
-const fileInput = ref(null);
+// [AIREVIEW-PLAN-025] Requirement Markdown may be uploaded or typed directly.
+const docMode = ref('file');
+const manualMarkdown = ref('');
 const submitting = ref(false);
 const error = ref('');
 const savedDraftId = ref(null);
@@ -25,10 +28,12 @@ const repoSource = ref({ mode: 'configured', repositoryPath: '', remoteUrl: '', 
 const isRemoteSource = computed(() => repoSource.value.mode === 'remote');
 
 function tasks() { return form.publicTasks.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
-function onFileChange(event) { file.value = event.target.files?.[0] ?? null; }
-function openFilePicker() { fileInput.value?.click(); }
-function fileSize() { return file.value ? `${(file.value.size / 1024).toFixed(1)} KB` : ''; }
 function idempotencyKey() { return globalThis.crypto?.randomUUID?.() ?? `requirement-start-${Date.now()}`; }
+function requirementDocumentPayload() {
+    return docMode.value === 'text'
+        ? { requirementText: manualMarkdown.value.trim() }
+        : { requirementFile: file.value };
+}
 const repositorySubmissionBlocked = computed(() => !isRemoteSource.value
     && ['loading', 'empty'].includes(repositoryState.value));
 
@@ -102,7 +107,9 @@ async function submit() {
     error.value = '';
     savedDraftId.value = null;
     reusedReviewId.value = null;
-    if (!file.value?.name.toLowerCase().endsWith('.md')) { error.value = '请上传 Markdown 格式的评审需求文档。'; return; }
+    if (docMode.value === 'text') {
+        if (!manualMarkdown.value.trim()) { error.value = '请输入 Markdown 需求内容，或切换为上传文档。'; return; }
+    } else if (!file.value?.name.toLowerCase().endsWith('.md')) { error.value = '请上传 Markdown 格式的评审需求文档。'; return; }
     if (!form.title.trim() || !form.submitter.trim() || !tasks().length) { error.value = '请填写需求标题、提交人和至少一项公开计划。'; return; }
     if (!isRemoteSource.value && !repoSource.value.repositoryPath.trim()) { error.value = '请选择评审仓库或切换到线上仓库填写地址。'; return; }
     if (isRemoteSource.value && !repoSource.value.remoteUrl.trim()) { error.value = '请填写线上仓库地址。'; return; }
@@ -115,7 +122,7 @@ async function submit() {
         });
         savedDraftId.value = requirement.id;
         const review = await reviewApi.createReview({
-            requirementFile: file.value, submitter: form.submitter.trim(), ...reviewRepositoryPayload()
+            ...requirementDocumentPayload(), submitter: form.submitter.trim(), ...reviewRepositoryPayload()
         });
         if (review.reused) {
             try {
@@ -170,12 +177,7 @@ onMounted(refreshRepositoryAvailability);
                 <div class="form-field"><label>需求名称</label><input v-model="form.title" required maxlength="256" placeholder="简短描述需求内容" /></div>
                 <div class="form-field">
                     <label>需求文档</label>
-                    <div class="upload-zone" :class="{ 'has-file': file }" role="button" tabindex="0" aria-label="上传 Markdown 需求文档" @click="openFilePicker" @keyup.enter="openFilePicker">
-                        <div class="uz-icon">{{ file ? '✓' : '📄' }}</div>
-                        <div class="uz-txt">{{ file ? file.name : '点击或拖拽上传 Markdown 需求文档' }}</div>
-                        <div class="uz-hint">{{ file ? fileSize() : '支持 .md 格式，最大 2MB' }}</div>
-                    </div>
-                    <input ref="fileInput" type="file" accept=".md,text/markdown" class="uz-input" @change="onFileChange" />
+                    <RequirementDocInput v-model:mode="docMode" v-model:text="manualMarkdown" v-model:file="file" />
                 </div>
                 <div class="form-row">
                     <div class="form-field">

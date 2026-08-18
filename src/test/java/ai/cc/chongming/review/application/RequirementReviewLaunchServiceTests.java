@@ -604,8 +604,7 @@ class RequirementReviewLaunchServiceTests {
     private RequirementReviewLaunchService.LaunchCommand commandWithFile(
             String filename, String content, long expectedVersion) {
         return new RequirementReviewLaunchService.LaunchCommand(
-                new MockMultipartFile(
-                        "requirementFile", filename, "text/markdown", content.getBytes(StandardCharsets.UTF_8)),
+                new IntakeDocument(filename, content.getBytes(StandardCharsets.UTF_8)),
                 "cx-ai",
                 "main",
                 null,

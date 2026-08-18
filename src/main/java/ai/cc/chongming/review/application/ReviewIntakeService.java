@@ -80,21 +80,16 @@ public class ReviewIntakeService {
     /**
      * Validates, normalizes and stores a Markdown requirement before later review orchestration.
      *
-     * @param request multipart intake command
+     * @param request intake command carrying the uniform requirement document
      * @return immutable snapshot result, or the existing result for an idempotent replay
      */
     public ReviewIntakeResult intake(ReviewIntakeRequest request) {
         request.cancellation().checkCancelled();
         validateMetadata(request);
-        ValidatedMarkdown markdown;
-        try {
-            markdown = validator.validate(
-                    request.requirementFile().getOriginalFilename(),
-                    request.requirementFile().getInputStream(),
-                    request.cancellation());
-        } catch (IOException exception) {
-            throw ReviewIntakeException.badRequest("UNREADABLE_UPLOAD", "Unable to read uploaded Markdown file");
-        }
+        ValidatedMarkdown markdown = validator.validate(
+                request.document().originalFilename(),
+                request.document().openStream(),
+                request.cancellation());
 
         try {
             RequirementDocument document = parser.parse(markdown.normalizedFile(), request.cancellation());

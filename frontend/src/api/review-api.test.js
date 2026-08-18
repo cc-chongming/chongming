@@ -188,4 +188,25 @@ describe('requirement platform API', () => {
         expect(options.body.get('initialMessage')).toBe('开始评审');
         expect(options.body.get('expectedVersion')).toBe('2');
     });
+
+    // [AIREVIEW-PLAN-025] Typed Markdown travels as requirementText without a file part.
+    it('sends typed Markdown as requirementText when no file is provided', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(response({
+            reviewId, attempt: 1, snapshotHash: 'a'.repeat(64), statusUrl: `/api/reviews/${reviewId}`, reused: false
+        }));
+        globalThis.fetch = fetchMock;
+
+        await reviewApi.createReview({
+            requirementText: '# 需求\n手动输入的需求内容。',
+            repositoryPath: 'cx-ai',
+            submitter: 'reviewer-001'
+        });
+
+        const [path, options] = fetchMock.mock.calls[0];
+        expect(path).toBe('/api/reviews');
+        expect(options.body).toBeInstanceOf(FormData);
+        expect(options.body.get('requirementText')).toBe('# 需求\n手动输入的需求内容。');
+        expect(options.body.get('requirementFile')).toBeNull();
+        expect(options.body.get('repositoryPath')).toBe('cx-ai');
+    });
 });

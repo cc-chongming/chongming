@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.api;
 
 import ai.cc.chongming.review.api.dto.CreateReviewResponse;
+import ai.cc.chongming.review.application.IntakeDocument;
 import ai.cc.chongming.review.application.RemoteTokenCipher;
 import ai.cc.chongming.review.application.ReviewIntakeException;
 import ai.cc.chongming.review.application.ReviewIntakeRequest;
@@ -50,10 +51,13 @@ public class ReviewCommandController {
 
     /**
      * Creates a review request from one Markdown document and one repository identity.
+     * [AIREVIEW-PLAN-025] The Markdown may arrive either as an uploaded {@code .md} part or as the
+     * typed {@code requirementText} parameter; exactly one of the two must be present.
      * [AIREVIEW-PLAN-029] Alternatively accepts an online repository source; the token is
      * encrypted before the intake snapshot is written and never echoed afterwards.
      *
-     * @param requirementFile submitted UTF-8 Markdown file
+     * @param requirementFile submitted UTF-8 Markdown file (optional when requirementText is set)
+     * @param requirementText typed UTF-8 Markdown (optional when requirementFile is set)
      * @param repositoryPath repository path supplied by the caller (optional when remoteUrl is set)
      * @param branch optional repository branch
      * @param commit optional repository commit
@@ -66,7 +70,8 @@ public class ReviewCommandController {
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<CreateReviewResponse> createReview(
-            @RequestPart("requirementFile") MultipartFile requirementFile,
+            @RequestPart(value = "requirementFile", required = false) MultipartFile requirementFile,
+            @RequestParam(value = "requirementText", required = false) String requirementText,
             @RequestParam(value = "repositoryPath", required = false) String repositoryPath,
             @RequestParam(value = "branch", required = false) String branch,
             @RequestParam(value = "commit", required = false) String commit,
@@ -83,7 +88,8 @@ public class ReviewCommandController {
             throw ReviewIntakeException.badRequest("REMOTE_SOURCE_INVALID", "配置仓库与线上仓库只能二选一");
         }
         ReviewIntakeResult result = reviewIntakeService.intake(new ReviewIntakeRequest(
-                requirementFile, repositoryPath, branch, commit, submitter, forceNewAttempt, null,
+                IntakeDocument.from(requirementFile, requirementText),
+                repositoryPath, branch, commit, submitter, forceNewAttempt, null,
                 null, remoteSource));
         CreateReviewResponse response = new CreateReviewResponse(
                 result.snapshot().reviewId().value(),

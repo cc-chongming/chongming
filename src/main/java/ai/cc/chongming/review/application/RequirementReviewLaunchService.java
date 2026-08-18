@@ -33,7 +33,6 @@ import java.util.stream.IntStream;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * [AIREVIEW-PLAN-023#3] Idempotently intakes, binds and starts a review from one draft command.
@@ -175,7 +174,7 @@ public class RequirementReviewLaunchService {
         ReservationHeartbeat heartbeat = startHeartbeat(requirement.id(), command.idempotencyKey(), ownerToken);
         try (heartbeat) {
             intake = intakeService.intake(new ReviewIntakeRequest(
-                    command.requirementFile(),
+                    command.document(),
                     command.repositoryPath(),
                     command.branch(),
                     command.commit(),
@@ -294,7 +293,7 @@ public class RequirementReviewLaunchService {
     private String fingerprint(LaunchCommand command) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            update(digest, command.requirementFile().getBytes());
+            update(digest, command.document().content());
             update(digest, command.repositoryPath());
             update(digest, command.branch());
             update(digest, command.commit());
@@ -304,8 +303,6 @@ public class RequirementReviewLaunchService {
             update(digest, command.changeReason());
             update(digest, command.initialMessage());
             return HexFormat.of().formatHex(digest.digest());
-        } catch (IOException exception) {
-            throw RequirementReviewLaunchException.unreadableUpload();
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 must be available", exception);
         }
@@ -378,11 +375,12 @@ public class RequirementReviewLaunchService {
 
     /**
      * [AIREVIEW-PLAN-023#3] Validated launch input shared by the multipart adapter and application service.
+     * [AIREVIEW-PLAN-025] The requirement Markdown travels as a uniform {@link IntakeDocument}.
      *
      * @author zyj
      */
     public record LaunchCommand(
-            MultipartFile requirementFile,
+            IntakeDocument document,
             String repositoryPath,
             String branch,
             String commit,
@@ -395,7 +393,7 @@ public class RequirementReviewLaunchService {
             String initialMessage) {
 
         public LaunchCommand {
-            Objects.requireNonNull(requirementFile, "requirementFile must not be null");
+            Objects.requireNonNull(document, "document must not be null");
             // [AIREVIEW-PLAN-029] repositoryPath is optional when the bound requirement carries
             // an online repository source; the launch service enforces the either/or rule.
             repositoryPath = normalizeOptional(repositoryPath);

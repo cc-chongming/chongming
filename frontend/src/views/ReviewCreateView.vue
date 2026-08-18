@@ -3,11 +3,15 @@ import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
 import RepositorySelect from '../components/RepositorySelect.vue';
+import RequirementDocInput from '../components/RequirementDocInput.vue';
 
 // [AIREVIEW-PLAN-023#2] Repository input is constrained to the active backend configuration.
+// [AIREVIEW-PLAN-025] The Markdown may be uploaded or typed directly.
 
 const router = useRouter();
 const requirementFile = ref(null);
+const docMode = ref('file');
+const manualMarkdown = ref('');
 const submitting = ref(false);
 const error = ref('');
 const acceptedReview = ref(null);
@@ -31,17 +35,21 @@ function publicTasks() {
     return form.publicTasks.split(/\r?\n/).map((task) => task.trim()).filter(Boolean);
 }
 
-function onFileChange(event) {
-    requirementFile.value = event.target.files?.[0] ?? null;
+function onFileChange(file) {
+    requirementFile.value = file ?? null;
 }
 
 async function submit() {
     error.value = '';
-    if (!requirementFile.value) {
+    if (docMode.value === 'text') {
+        if (!manualMarkdown.value.trim()) {
+            error.value = '请输入 Markdown 需求内容，或切换为上传文档。';
+            return;
+        }
+    } else if (!requirementFile.value) {
         error.value = '请选择一个 .md 需求文件。';
         return;
-    }
-    if (!requirementFile.value.name.toLowerCase().endsWith('.md')) {
+    } else if (!requirementFile.value.name.toLowerCase().endsWith('.md')) {
         error.value = '需求文件必须使用 .md 扩展名。';
         return;
     }
@@ -57,7 +65,9 @@ async function submit() {
     try {
         if (!acceptedReview.value) {
             acceptedReview.value = await reviewApi.createReview({
-                requirementFile: requirementFile.value,
+                ...(docMode.value === 'text'
+                    ? { requirementText: manualMarkdown.value.trim() }
+                    : { requirementFile: requirementFile.value }),
                 repositoryPath: form.repositoryPath.trim(),
                 branch: form.branch.trim(),
                 commit: form.commit.trim(),
@@ -87,11 +97,11 @@ async function submit() {
         <div class="hero">
             <p class="eyebrow">可回放 · 可追溯 · 人工 Gate</p>
             <h1>创建一场需求评审</h1>
-            <p>上传 Markdown 需求、选择已受服务端白名单保护的仓库标识，然后进入实时辩论工作台。</p>
+            <p>提供 Markdown 需求（上传或手动输入）、选择已受服务端白名单保护的仓库标识，然后进入实时辩论工作台。</p>
         </div>
         <form class="review-form create-form" @submit.prevent="submit">
             <p v-if="error" class="error-banner" role="alert">{{ error }}</p>
-            <label class="full">需求文档（.md）<input type="file" accept=".md,text/markdown" required @change="onFileChange" /></label>
+            <div class="full"><RequirementDocInput v-model:mode="docMode" v-model:text="manualMarkdown" :file="requirementFile" @update:file="onFileChange" /></div>
             <RepositorySelect v-model="form.repositoryPath" class="full" required />
             <label>分支（可选）<input v-model="form.branch" placeholder="main" /></label>
             <label>Commit（可选）<input v-model="form.commit" placeholder="40 位 SHA" /></label>

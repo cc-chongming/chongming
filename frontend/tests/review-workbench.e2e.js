@@ -224,6 +224,51 @@ test('removes the temporary draft when the uploaded Markdown already has a revie
     expect(deletedDrafts).toEqual(['0']);
 });
 
+// [AIREVIEW-PLAN-025] Typed Markdown is submitted as requirementText without a file part.
+test('submits typed Markdown through the manual input mode', async ({ page }) => {
+    const requirementId = '70000000-0000-0000-0000-000000000002';
+    const reviewId = '80000000-0000-0000-0000-000000000002';
+    let intakeBody = '';
+    await page.route(/\/api\/(?:repositories|requirements|reviews)(?:\/|\?|$)/, async (route) => {
+        const requestUrl = new URL(route.request().url());
+        const path = requestUrl.pathname;
+        const method = route.request().method();
+        const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+        if (path === '/api/repositories' && method === 'GET') {
+            return json([{ id: 'cx-ai', displayName: 'CX AI' }]);
+        }
+        if (path === '/api/requirements' && method === 'POST') {
+            return json({ id: requirementId, version: 0, status: 'DRAFT' }, 201);
+        }
+        if (path === '/api/reviews' && method === 'POST') {
+            intakeBody = route.request().postData() ?? '';
+            return json({ reviewId, attempt: 1, reused: false }, 202);
+        }
+        if (path === `/api/requirements/${requirementId}/submit` && method === 'POST') {
+            return json({ id: requirementId, version: 1, status: 'PENDING_REVIEW', reviewId });
+        }
+        if (path === `/api/reviews/${reviewId}/start` && method === 'POST') {
+            return json({ reviewId, stage: 'PLANNING', version: 1 });
+        }
+        if (path === `/api/requirements/${requirementId}` && method === 'GET') {
+            return json({ id: requirementId, title: '手动输入需求', description: '', status: 'PENDING_REVIEW', version: 1, reviewId });
+        }
+        return json({ detail: 'Unexpected request' }, 404);
+    });
+
+    await page.goto('/index.html#/requirements/create');
+    await page.getByPlaceholder('简短描述需求内容').fill('手动输入需求');
+    await page.getByRole('tab', { name: '手动输入内容' }).click();
+    await page.getByLabel('手动输入 Markdown 需求内容').fill('# 需求\n手动输入的需求内容。');
+
+    await page.getByRole('button', { name: /提交并启动评审/ }).click();
+
+    await page.waitForURL(new RegExp(`#/requirements/${requirementId}$`));
+    expect(intakeBody).toContain('name="requirementText"');
+    expect(intakeBody).toContain('手动输入的需求内容');
+    expect(intakeBody).not.toContain('name="requirementFile"');
+});
+
 test('edits and deletes an unbound requirement draft from its detail page', async ({ page }) => {
     const requirementId = '90000000-0000-0000-0000-000000000001';
     const draft = {
@@ -324,7 +369,7 @@ test('launches an unbound draft from its detail page with a configured repositor
 
     await expect(page.getByText('历史仓库“legacy-repository”已不可用，请重新选择。')).toBeVisible();
     await page.getByLabel('目标仓库').selectOption('cx-ai');
-    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+    await page.locator('.requirement-launch-panel input[type="file"][accept*=".md"]').setInputFiles({
         name: 'draft.md', mimeType: 'text/markdown', buffer: Buffer.from('# 草稿评审')
     });
     await page.getByRole('button', { name: '确认发起评审' }).click();
@@ -370,7 +415,7 @@ test('refreshes a draft and rotates the command key after a version conflict', a
 
     await page.goto(`/index.html#/requirements/${requirementId}`);
     await page.getByRole('button', { name: '发起评审' }).click();
-    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+    await page.locator('.requirement-launch-panel input[type="file"][accept*=".md"]').setInputFiles({
         name: 'version.md', mimeType: 'text/markdown', buffer: Buffer.from('# 版本冲突')
     });
     await page.getByRole('button', { name: '确认发起评审' }).click();
@@ -378,7 +423,7 @@ test('refreshes a draft and rotates the command key after a version conflict', a
     await expect(page.getByText('需求版本已刷新，请检查最新草稿并确认后重试。')).toBeVisible();
     expect(reads).toBeGreaterThanOrEqual(2);
     // 版本冲突后页面会重新加载详情，发起面板重建后需重新选择文档再重试。
-    await page.getByLabel('评审需求文档（.md）').setInputFiles({
+    await page.locator('.requirement-launch-panel input[type="file"][accept*=".md"]').setInputFiles({
         name: 'version-retry.md', mimeType: 'text/markdown', buffer: Buffer.from('# 版本冲突重试')
     });
     await page.getByRole('button', { name: '确认发起评审' }).click();
