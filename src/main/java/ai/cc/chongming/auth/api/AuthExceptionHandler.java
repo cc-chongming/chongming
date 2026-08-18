@@ -33,7 +33,7 @@ public class AuthExceptionHandler {
         HttpStatus status = switch (exception.errorCode()) {
             case INVALID_CREDENTIAL, UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
-            case USERNAME_TAKEN -> HttpStatus.CONFLICT;
+            case USERNAME_TAKEN, UID_TAKEN -> HttpStatus.CONFLICT;
         };
         return toResponse(status, exception.errorCode().name(), exception.getMessage(), response);
     }

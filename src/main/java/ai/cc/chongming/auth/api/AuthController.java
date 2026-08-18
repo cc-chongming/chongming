@@ -60,7 +60,7 @@ public class AuthController {
     @PostMapping("/api/auth/register")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
         AuthResult result = authService.register(
-                request.username(), request.password(), request.displayName(), request.role());
+                request.username(), request.password(), request.displayName(), request.role(), request.uid());
         return AuthResponse.from(result);
     }
 
@@ -73,7 +73,9 @@ public class AuthController {
     @GetMapping("/api/auth/me")
     public UserResponse me(HttpServletRequest request) {
         AuthPrincipal authPrincipal = requirePrincipal(request);
-        return new UserResponse(authPrincipal.username(), authPrincipal.displayName(), authPrincipal.role());
+        // [AIREVIEW-PLAN-025] The JWT claim set intentionally stays unchanged; the company uid is
+        // not part of the token and is reported as absent on this endpoint.
+        return new UserResponse(authPrincipal.username(), authPrincipal.displayName(), authPrincipal.role(), null);
     }
 
     /**
@@ -95,7 +97,7 @@ public class AuthController {
             throw new AuthException(AuthErrorCode.FORBIDDEN, "用户目录当前不可用");
         }
         return userRepository.findAll().stream()
-                .map(user -> new UserResponse(user.username(), user.displayName(), user.role()))
+                .map(user -> new UserResponse(user.username(), user.displayName(), user.role(), user.companyUid()))
                 .toList();
     }
 
@@ -119,6 +121,8 @@ public class AuthController {
     /**
      * Registration request body. {@code role} is optional; [AIREVIEW-PLAN-027] restricts it to
      * the self-registerable role set and defaults to {@code DEVELOPER}.
+     * [AIREVIEW-PLAN-025] {@code uid} is the optional company-internal identifier used later as
+     * the message-binding identity; it must be unique across accounts when present.
      *
      * @author wangli
      */
@@ -126,7 +130,8 @@ public class AuthController {
             @NotBlank @Size(min = 1, max = 64) String username,
             @NotBlank @Size(min = 8, max = 128) String password,
             @Size(max = 64) String displayName,
-            @Size(max = 32) String role) {
+            @Size(max = 32) String role,
+            @Size(max = 64) String uid) {
     }
 
     /**
@@ -140,15 +145,24 @@ public class AuthController {
             return new AuthResponse(
                     result.token(),
                     result.expiresAt(),
-                    new UserResponse(result.user().username(), result.user().displayName(), result.user().role()));
+                    new UserResponse(
+                            result.user().username(),
+                            result.user().displayName(),
+                            result.user().role(),
+                            result.user().companyUid()));
         }
     }
 
     /**
-     * Public user projection.
+     * Public user projection. [AIREVIEW-PLAN-025] Carries the optional company uid.
      *
      * @author wangli
      */
-    public record UserResponse(String username, String displayName, String role) {
+    public record UserResponse(String username, String displayName, String role, String uid) {
+
+        /** Legacy projection without the company uid. */
+        public UserResponse(String username, String displayName, String role) {
+            this(username, displayName, role, null);
+        }
     }
 }

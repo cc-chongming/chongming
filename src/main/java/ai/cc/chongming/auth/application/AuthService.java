@@ -82,6 +82,17 @@ public class AuthService {
      * @return token plus the registered user view
      */
     public AuthResult register(String username, String password, String displayName, String role) {
+        return register(username, password, displayName, role, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-025] Registration carrying the optional company-internal uid used later as
+     * the message-binding identity. A non-blank uid must not be bound to another account.
+     *
+     * @param companyUid optional company-internal user identifier, unique when present
+     * @return token plus the registered user view
+     */
+    public AuthResult register(String username, String password, String displayName, String role, String companyUid) {
         String trimmedUsername = username == null ? "" : username.trim();
         if (trimmedUsername.isEmpty() || trimmedUsername.length() > MAX_USERNAME_LENGTH) {
             throw new IllegalArgumentException("username must be 1-" + MAX_USERNAME_LENGTH + " characters");
@@ -95,10 +106,17 @@ public class AuthService {
             throw new IllegalArgumentException("displayName must be at most " + MAX_DISPLAY_NAME_LENGTH + " characters");
         }
         String effectiveRole = resolveRegisterableRole(role);
+        String trimmedCompanyUid = companyUid == null || companyUid.isBlank() ? null : companyUid.trim();
         if (userRepository.findByUsername(trimmedUsername).isPresent()) {
             throw new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用");
         }
-        User user = User.newUser(trimmedUsername, passwordHasher.hash(password), trimmedDisplayName, effectiveRole);
+        // [AIREVIEW-PLAN-025] Company uids are unique across accounts when present; the database
+        // unique index is the second line of defence for concurrent registrations.
+        if (trimmedCompanyUid != null && userRepository.findByCompanyUid(trimmedCompanyUid).isPresent()) {
+            throw new AuthException(AuthErrorCode.UID_TAKEN, "公司 UID 已被其他账号绑定");
+        }
+        User user = User.newUser(
+                trimmedUsername, passwordHasher.hash(password), trimmedDisplayName, effectiveRole, trimmedCompanyUid);
         return issue(userRepository.save(user));
     }
 
@@ -124,7 +142,7 @@ public class AuthService {
         return new AuthResult(
                 issuedToken.token(),
                 issuedToken.expiresAt(),
-                new UserView(user.username(), user.displayName(), user.role()));
+                new UserView(user.username(), user.displayName(), user.role(), user.companyUid()));
     }
 
     /**
@@ -137,9 +155,15 @@ public class AuthService {
 
     /**
      * Safe user projection for API responses (never exposes the password hash).
+     * [AIREVIEW-PLAN-025] Carries the optional company uid for message binding.
      *
      * @author wangli
      */
-    public record UserView(String username, String displayName, String role) {
+    public record UserView(String username, String displayName, String role, String companyUid) {
+
+        /** Legacy projection without the company uid. */
+        public UserView(String username, String displayName, String role) {
+            this(username, displayName, role, null);
+        }
     }
 }

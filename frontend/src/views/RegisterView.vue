@@ -11,6 +11,8 @@ const displayName = ref('');
 const password = ref('');
 // [AIREVIEW-PLAN-027] Self-service registration picks DEVELOPER unless changed.
 const role = ref(DEFAULT_REGISTRATION_ROLE);
+// [AIREVIEW-PLAN-025] Optional company-internal uid used later for message binding.
+const companyUid = ref('');
 const errorMessage = ref(null);
 const submitting = ref(false);
 
@@ -20,7 +22,9 @@ async function handleSubmit() {
     submitting.value = true;
     try {
         // Registration signs the user in automatically per the backend contract.
-        await authStore.register(username.value.trim(), password.value, displayName.value.trim(), role.value);
+        await authStore.register(
+            username.value.trim(), password.value, displayName.value.trim(), role.value,
+            companyUid.value.trim() || null);
         router.push('/dashboard');
     } catch (error) {
         errorMessage.value = error instanceof ReviewApiError ? error.message : formatApiError(error);
@@ -56,6 +60,11 @@ async function handleSubmit() {
                     <select v-model="role" name="role" required>
                         <option v-for="option in REGISTRABLE_ROLES" :key="option.value" :value="option.value">{{ option.label }}</option>
                     </select>
+                </label>
+                <label>
+                    公司 UID（可选）
+                    <input v-model.trim="companyUid" type="text" name="companyUid" maxlength="64"
+                        placeholder="用于公司内部消息绑定">
                 </label>
                 <label>
                     密码

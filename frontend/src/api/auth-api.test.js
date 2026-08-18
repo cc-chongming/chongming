@@ -60,6 +60,34 @@ describe('auth API', () => {
         });
     });
 
+    it('includes the company uid in the register payload when provided [AIREVIEW-PLAN-025]', async () => {
+        const session = {
+            token: 'jwt-token',
+            user: { username: 'bob', displayName: 'Bob', role: 'DEVELOPER', uid: 'corp-10086' }
+        };
+        const fetchMock = vi.fn().mockResolvedValue(response(session));
+        globalThis.fetch = fetchMock;
+
+        const result = await authApi.register('bob', 'secret', 'Bob Chen', 'DEVELOPER', 'corp-10086');
+
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+            username: 'bob', password: 'secret', displayName: 'Bob Chen', role: 'DEVELOPER', uid: 'corp-10086'
+        });
+        expect(result.user.uid).toBe('corp-10086');
+    });
+
+    it('omits the company uid from the register payload when absent [AIREVIEW-PLAN-025]', async () => {
+        const session = { token: 'jwt-token', user: { username: 'bob', displayName: 'Bob', role: 'DEVELOPER' } };
+        const fetchMock = vi.fn().mockResolvedValue(response(session));
+        globalThis.fetch = fetchMock;
+
+        await authApi.register('bob', 'secret', 'Bob Chen', 'DEVELOPER');
+
+        expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+            username: 'bob', password: 'secret', displayName: 'Bob Chen', role: 'DEVELOPER'
+        });
+    });
+
     it('queries the current user profile with a stored Bearer token', async () => {
         const backing = new Map([[
             'chongming-auth',

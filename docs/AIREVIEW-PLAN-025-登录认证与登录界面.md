@@ -288,3 +288,4 @@ MyBatis 映射器 `UserMapper` 位于既有持久化层 `review/infrastructure/p
 |---|---|
 | 2026-08-12 | 创建 PLAN-025：登录/注册界面、JWT（HS256）认证、AuthJwtFilter 双通道守卫、PBKDF2 密码哈希、V20 users 表与 admin 种子、前端认证三件套与路由守卫、SSE access_token 通道、用户区与 `.auth-page` 样式；记录共享库 V20 冲突风险与未来扩展预留；验证记录：clean verify 512 用例、npm test 68、playwright 20 与真实浏览器 E2E 全部通过。 |
 | 2026-08-13 | 合并他人提交（de4acce，携带 V20 `review_conflict_audit` 迁移）后为避免 Flyway 版本号撞车，将本计划 users 迁移由 V20 重编号为 `V21__create_users_table_and_admin.sql`（内容不变），并同步更新本文档与持久化集成测试中的版本号引用。 |
+| 2026-08-18 | 注册新增可选「公司 UID」字段（为后续公司内部消息发送提供绑定标识）：users 表 V25 迁移新增 `company_uid VARCHAR(64)` 唯一索引列；注册契约新增可选 `uid`（≤64，非空时全账号唯一，冲突返回 409 `UID_TAKEN`）；`User` 领域对象与双仓储、`/api/users` 目录投影同步携带；注册页新增可选输入框；JWT claim 集保持不变，`/me` 不回传 uid。验证：后端 auth 套件 38 项、前端单测 112、auth E2E 9 全部通过。 |

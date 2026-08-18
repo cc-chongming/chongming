@@ -29,6 +29,14 @@ public interface UserRepository {
     Optional<User> findById(Long id);
 
     /**
+     * [AIREVIEW-PLAN-025] Looks up a user by its optional company-internal uid.
+     *
+     * @param companyUid company-internal user identifier
+     * @return matching user when present
+     */
+    Optional<User> findByCompanyUid(String companyUid);
+
+    /**
      * Persists a fresh user and returns it bound to the generated identifier.
      *
      * @param user unpersisted user
@@ -46,9 +54,15 @@ public interface UserRepository {
 
     /**
      * Credential-free user projection exposed to directory reads.
+     * [AIREVIEW-PLAN-025] Carries the optional company uid for message binding.
      *
      * @author wangli
      */
-    record UserView(String username, String displayName, String role) {
+    record UserView(String username, String displayName, String role, String companyUid) {
+
+        /** Legacy projection without the company uid. */
+        public UserView(String username, String displayName, String role) {
+            this(username, displayName, role, null);
+        }
     }
 }

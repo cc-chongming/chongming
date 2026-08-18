@@ -150,4 +150,32 @@ class AuthServiceTests {
         assertThat(verifiedHashes.get(0)).isEqualTo(knownUser.passwordHash());
         assertThat(verifiedHashes.get(1)).startsWith("PBKDF2$");
     }
+
+    /**
+     * [AIREVIEW-PLAN-025] Registration persists the optional company uid and echoes it on the
+     * issued profile; a second registration binding the same uid is rejected with UID_TAKEN.
+     */
+    @Test
+    void registersCompanyUidAndRejectsDuplicateBindings() {
+        AuthResult registration = authService.register("bob", "password123", "Bob", null, "corp-10086");
+
+        assertThat(registration.user().companyUid()).isEqualTo("corp-10086");
+        assertThat(userRepository.findByCompanyUid("corp-10086")).isPresent();
+
+        assertThatThrownBy(() -> authService.register("alice", "password123", "Alice", null, "corp-10086"))
+                .isInstanceOf(AuthException.class)
+                .extracting(exception -> ((AuthException) exception).errorCode())
+                .isEqualTo(AuthErrorCode.UID_TAKEN);
+    }
+
+    /** [AIREVIEW-PLAN-025] Blank uids stay optional and never collide with each other. */
+    @Test
+    void registersMultipleAccountsWithoutCompanyUid() {
+        AuthResult first = authService.register("bob", "password123", "Bob", null, "  ");
+        AuthResult second = authService.register("alice", "password123", "Alice", null, null);
+
+        assertThat(first.user().companyUid()).isNull();
+        assertThat(second.user().companyUid()).isNull();
+        assertThat(userRepository.findByCompanyUid("")).isEmpty();
+    }
 }

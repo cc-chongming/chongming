@@ -9,5 +9,7 @@ public enum AuthErrorCode {
     INVALID_CREDENTIAL,
     USERNAME_TAKEN,
     UNAUTHENTICATED,
-    FORBIDDEN
+    FORBIDDEN,
+    /** [AIREVIEW-PLAN-025] The company-internal uid is already bound to another account. */
+    UID_TAKEN
 }

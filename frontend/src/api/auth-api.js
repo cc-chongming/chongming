@@ -20,10 +20,13 @@ export const authApi = {
     /**
      * [AIREVIEW-PLAN-027] The optional `role` (PRODUCT_MANAGER/PROJECT_MANAGER/DEVELOPER)
      * is only sent when provided; the backend defaults to DEVELOPER and rejects ADMIN.
+     * [AIREVIEW-PLAN-025] The optional `uid` binds the company-internal identifier used later
+     * for message delivery.
      */
-    register(username, password, displayName, role) {
+    register(username, password, displayName, role, uid) {
         const body = { username, password, displayName };
         if (role) body.role = role;
+        if (uid) body.uid = uid;
         return request('/api/auth/register', {
             method: 'POST',
             ...jsonBody(body)

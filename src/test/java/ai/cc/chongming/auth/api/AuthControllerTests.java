@@ -80,7 +80,7 @@ class AuthControllerTests {
     @Test
     void registerWithTakenUsernameReturnsConflict() throws Exception {
         // [AIREVIEW-PLAN-027] Bodies without a role field pass null through to the service.
-        when(authService.register("bob", "password123", "Bobby", null))
+        when(authService.register("bob", "password123", "Bobby", null, null))
                 .thenThrow(new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用"));
 
         mockMvc.perform(post("/api/auth/register")
@@ -110,7 +110,7 @@ class AuthControllerTests {
      */
     @Test
     void registerWithAdminRoleReturnsBadRequest() throws Exception {
-        when(authService.register("bob", "password123", "Bobby", "ADMIN"))
+        when(authService.register("bob", "password123", "Bobby", "ADMIN", null))
                 .thenThrow(new IllegalArgumentException("role must be one of PRODUCT_MANAGER, PROJECT_MANAGER, DEVELOPER"));
 
         mockMvc.perform(post("/api/auth/register")
@@ -128,7 +128,7 @@ class AuthControllerTests {
      */
     @Test
     void registerWithWhitelistedRoleIssuesTokenWithThatRole() throws Exception {
-        when(authService.register("bob", "password123", "Bobby", "PRODUCT_MANAGER")).thenReturn(new AuthResult(
+        when(authService.register("bob", "password123", "Bobby", "PRODUCT_MANAGER", null)).thenReturn(new AuthResult(
                 "signed-token",
                 Instant.parse("2026-08-12T12:00:00Z"),
                 new UserView("bob", "Bobby", "PRODUCT_MANAGER")));
@@ -141,6 +141,45 @@ class AuthControllerTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").value("signed-token"))
                 .andExpect(jsonPath("$.user.role").value("PRODUCT_MANAGER"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-025] The register body carries an optional company uid; it is forwarded to
+     * the service and echoed on the issued user profile.
+     */
+    @Test
+    void registerWithCompanyUidIssuesTokenCarryingTheUid() throws Exception {
+        when(authService.register("bob", "password123", "Bobby", null, "corp-10086")).thenReturn(new AuthResult(
+                "signed-token",
+                Instant.parse("2026-08-12T12:00:00Z"),
+                new UserView("bob", "Bobby", "DEVELOPER", "corp-10086")));
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"bob","password":"password123","displayName":"Bobby","uid":"corp-10086"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").value("signed-token"))
+                .andExpect(jsonPath("$.user.uid").value("corp-10086"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-025] A company uid already bound to another account surfaces a stable 409.
+     */
+    @Test
+    void registerWithTakenCompanyUidReturnsConflict() throws Exception {
+        when(authService.register("bob", "password123", "Bobby", null, "corp-10086"))
+                .thenThrow(new AuthException(AuthErrorCode.UID_TAKEN, "公司 UID 已被其他账号绑定"));
+
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"bob","password":"password123","displayName":"Bobby","uid":"corp-10086"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("UID_TAKEN"))
+                .andExpect(header().exists("x-trace-id"));
     }
 
     @Test

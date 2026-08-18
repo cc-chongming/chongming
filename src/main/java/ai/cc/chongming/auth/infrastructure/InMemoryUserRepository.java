@@ -42,10 +42,28 @@ public class InMemoryUserRepository implements UserRepository {
                 .findFirst();
     }
 
+    /** [AIREVIEW-PLAN-025] Company-internal uid lookup backing registration uniqueness checks. */
+    @Override
+    public Optional<User> findByCompanyUid(String companyUid) {
+        if (companyUid == null || companyUid.isBlank()) {
+            return Optional.empty();
+        }
+        String trimmed = companyUid.trim();
+        return usersByUsername.values().stream()
+                .filter(user -> trimmed.equals(user.companyUid()))
+                .findFirst();
+    }
+
     @Override
     public User save(User user) {
         User nonNullUser = Objects.requireNonNull(user, "user must not be null");
         User persisted = nonNullUser.id() == null ? nonNullUser.withId(idSequence.incrementAndGet()) : nonNullUser;
+        if (persisted.companyUid() != null) {
+            Optional<User> uidOwner = findByCompanyUid(persisted.companyUid());
+            if (uidOwner.isPresent() && !uidOwner.orElseThrow().id().equals(persisted.id())) {
+                throw new AuthException(AuthErrorCode.UID_TAKEN, "公司 UID 已被其他账号绑定");
+            }
+        }
         User existing = usersByUsername.putIfAbsent(persisted.username(), persisted);
         if (existing != null && !existing.id().equals(persisted.id())) {
             throw new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用");
@@ -57,7 +75,7 @@ public class InMemoryUserRepository implements UserRepository {
     public List<UserView> findAll() {
         return usersByUsername.values().stream()
                 .sorted(Comparator.comparing(User::username))
-                .map(user -> new UserView(user.username(), user.displayName(), user.role()))
+                .map(user -> new UserView(user.username(), user.displayName(), user.role(), user.companyUid()))
                 .toList();
     }
 }
