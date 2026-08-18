@@ -278,6 +278,43 @@ class ReviewRepositoryToolFactoryTests {
                 new RequirementSnapshot.RequirementDocument(List.of(), List.of(), 0, 0, false), Instant.now());
     }
 
+    /**
+     * [AIREVIEW-PLAN-025] Remote-bound requirements carry a null repositoryPath; the shared
+     * overview must take its identity from the snapshot instead of NPE-ing the Context Scout.
+     */
+    @Test
+    void buildsTheSharedOverviewForRemoteBoundRequirementsWithoutARepositoryPath() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewRuntimeContext runtimeContext = new ReviewRuntimeContext(
+                reviewId, 1, "reviewer", "trace", IntakeCancellation.neverCancelled());
+        RequirementSnapshot remoteRequirement = new RequirementSnapshot(
+                UUID.randomUUID(), reviewId, 1, "reviewer", null, null, null,
+                "requirement.md", "a".repeat(64), "b".repeat(64), "test",
+                new RequirementSnapshot.RequirementDocument(
+                        List.of(new RequirementSnapshot.RequirementSection("Requirement", 1, 1, "# Requirement")),
+                        List.of(), 1, 0, false),
+                Instant.now(),
+                new ai.cc.chongming.review.domain.model.RemoteRepositorySource(
+                        "https://gitee.com/dromara/easy-query", "main", null));
+        RepositorySnapshot remoteSnapshot = repositorySnapshot(reviewId);
+        ReviewIntakeService intakeService = mock(ReviewIntakeService.class);
+        RepositorySnapshotService snapshotService = mock(RepositorySnapshotService.class);
+        ReadOnlyRepositoryTools repositoryTools = mock(ReadOnlyRepositoryTools.class);
+        when(intakeService.requireSnapshot(reviewId, 1)).thenReturn(remoteRequirement);
+        when(snapshotService.findExistingSnapshot(
+                reviewId, 1, ai.cc.chongming.review.application.RepositorySource.from(remoteRequirement)))
+                .thenReturn(Optional.of(remoteSnapshot));
+        when(repositoryTools.listFiles(any(), anyInt(), any()))
+                .thenReturn(List.<ai.cc.chongming.review.infrastructure.repository.RepositorySearchIndex.FileMetadata>of());
+        ReviewRepositoryToolFactory factory = new ReviewRepositoryToolFactory(
+                intakeService, snapshotService, repositoryTools, new ReviewContextAssembler());
+
+        ReviewRepositoryToolFactory.SharedProjectContext overview = factory.sharedProjectContext(runtimeContext);
+
+        assertThat(overview.repositoryId()).isEqualTo(remoteSnapshot.repositoryId());
+        assertThat(overview.publicText(RoleType.PROJECT)).contains(remoteSnapshot.repositoryId());
+    }
+
     private RepositorySnapshot repositorySnapshot(ReviewId reviewId) {
         Path root = Path.of("build/test-snapshot").toAbsolutePath();
         return new RepositorySnapshot(

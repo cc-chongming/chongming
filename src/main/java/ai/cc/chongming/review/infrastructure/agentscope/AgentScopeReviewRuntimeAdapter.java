@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -47,6 +49,8 @@ import reactor.core.publisher.Sinks;
  */
 @Component
 public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentScopeReviewRuntimeAdapter.class);
 
     private static final Map<String, Integer> SCOUT_INIT_TOOL_LIMITS = Map.of(
             "glob_files", 2,
@@ -242,6 +246,14 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         if (isScoutCancellation(state, failure)) {
             return Mono.error(failure);
         }
+        // [AIREVIEW-PLAN-025] Scout degradation used to be silent; log the root cause so the
+        // advisory fallback stays diagnosable in server logs.
+        log.warn(
+                "context_scout_degraded reviewId={} attemptNo={} failureType={} message={}",
+                state.context().reviewId(),
+                state.context().attemptNo(),
+                failure.getClass().getName(),
+                failure.getMessage());
         degraded.set(true);
         recordScoutDegradation(state, failure);
         return Mono.empty();

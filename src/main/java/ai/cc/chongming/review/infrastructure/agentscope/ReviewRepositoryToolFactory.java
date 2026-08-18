@@ -325,7 +325,7 @@ public class ReviewRepositoryToolFactory {
                 .map(section -> "- " + section.heading() + ": " + abbreviate(section.content(), 600))
                 .toList();
         return new SharedProjectContext(
-                requirement.repositoryPath(),
+                snapshot.repositoryId(),
                 snapshot.headCommit(),
                 snapshot.branch(),
                 snapshot.includedFileCount(),
