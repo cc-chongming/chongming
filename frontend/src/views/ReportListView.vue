@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { formatChinaTime } from '../services/china-time';
 
 const reports = ref({ items: [], total: 0, page: 1, size: 20 });
 const error = ref('');
@@ -21,7 +22,7 @@ onMounted(load);
                     <div class="rv-body">{{ shortId(report.reviewId) }} · {{ report.reviewId }}</div>
                     <div class="rv-footer">
                         <span class="rv-fi">⚖ Gate v{{ report.gateVersion }}</span>
-                        <span class="rv-fi" style="margin-left:auto">{{ report.createdAt }}</span>
+                        <span class="rv-fi" style="margin-left:auto">{{ formatChinaTime(report.createdAt) }}</span>
                     </div>
                 </RouterLink>
             </div>

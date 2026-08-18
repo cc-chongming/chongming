@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { formatApiError, ReviewApiError } from '../api/review-api';
 import { taskApi } from '../api/task-api';
 import { authStore } from '../stores/auth-store';
+import { formatChinaTime } from '../services/china-time';
 
 /**
  * Task-center detail page: info panel + role/status-driven actions.
@@ -99,7 +100,7 @@ onMounted(load);
                         <span class="rd-meta-item"><span class="rd-mono">{{ shortId(task.taskId) }}</span></span>
                         <span class="rd-meta-item"><span class="tag" :class="currentStatus.tag">{{ currentStatus.label }}</span></span>
                         <span class="rd-meta-item">👤 负责人：{{ task.assigneeDisplayName || task.assigneeUsername || '未指派' }}</span>
-                        <span class="rd-meta-item">🕐 {{ task.updatedAt }}</span>
+                        <span class="rd-meta-item">🕐 {{ formatChinaTime(task.updatedAt) }}</span>
                     </div>
                 </div>
                 <div class="rd-actions">
@@ -119,8 +120,8 @@ onMounted(load);
                                 <div class="sb-row"><span class="role-name">关联评审</span>
                                     <span class="role-count"><RouterLink v-if="task.reviewId" :to="`/reviews/${task.reviewId}/live`">{{ shortId(task.reviewId) }}</RouterLink><template v-else>—</template></span></div>
                                 <div class="sb-row"><span class="role-name">指派人</span><span class="role-count">{{ task.dispatcherUsername || '—' }}</span></div>
-                                <div class="sb-row"><span class="role-name">创建时间</span><span class="role-count">{{ task.createdAt || '—' }}</span></div>
-                                <div class="sb-row"><span class="role-name">更新时间</span><span class="role-count">{{ task.updatedAt || '—' }}</span></div>
+                                <div class="sb-row"><span class="role-name">创建时间</span><span class="role-count">{{ task.createdAt ? formatChinaTime(task.createdAt) : '—' }}</span></div>
+                                <div class="sb-row"><span class="role-name">更新时间</span><span class="role-count">{{ task.updatedAt ? formatChinaTime(task.updatedAt) : '—' }}</span></div>
                             </div>
                         </div>
                     </div>

@@ -5,6 +5,7 @@ import { formatApiError, ReviewApiError } from '../api/review-api';
 import { taskApi } from '../api/task-api';
 import { authApi } from '../api/auth-api';
 import { authStore } from '../stores/auth-store';
+import { formatChinaTime } from '../services/china-time';
 
 /**
  * Task-center list shared by the `/tasks` (all) and `/tasks/mine` (mine) routes.
@@ -168,7 +169,7 @@ onMounted(() => load());
                         <td><span class="tag" :class="metaOf(item.status).tag">{{ metaOf(item.status).label }}</span></td>
                         <td class="req-assignee">{{ item.assigneeDisplayName || item.assigneeUsername || '—' }}</td>
                         <td class="req-assignee">{{ item.dispatcherUsername || '—' }}</td>
-                        <td class="req-date">{{ item.updatedAt }}</td>
+                        <td class="req-date">{{ formatChinaTime(item.updatedAt) }}</td>
                         <td v-if="isAdmin">
                             <button v-if="item.status === 'PENDING_ASSIGN'" class="button secondary sm" type="button" :disabled="loading" @click="openAssign(item)">指派</button>
                             <span v-else>—</span>

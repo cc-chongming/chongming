@@ -62,7 +62,8 @@ public class ReviewQueryService {
     private static final int EVENT_STORE_BATCH_SIZE = 10_000;
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss")
-            .withZone(ZoneId.systemDefault());
+            // [AIREVIEW-PLAN-025] Display times are always China time, independent of server TZ.
+            .withZone(ZoneId.of("Asia/Shanghai"));
 
     private final ReviewEventStore eventStore;
     private final ReviewDebateStore debateStore;

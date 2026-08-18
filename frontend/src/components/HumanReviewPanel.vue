@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
 import { gateLabel } from '../services/review-live-presenter';
+import { formatChinaTime } from '../services/china-time';
 import {
     compareGateDecision,
     latestGateDecision,
@@ -217,7 +218,7 @@ async function finalizeDecision() {
                 <label v-if="decision.result === 'OVERRIDE'" class="full">Override 理由<textarea v-model="decision.overrideReason" required></textarea></label>
                 <div class="form-actions full"><button class="button" type="submit" :disabled="busy || reviewVersion === null || !decision.result">提交最终 Gate</button></div>
             </form>
-            <ol v-if="gateVersions.length" class="plan-history"><li v-for="gate in gateVersions" :key="gate.gateVersion"><strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ gate.decidedAt }}</span><p>{{ gate.reason }}</p></li></ol>
+            <ol v-if="gateVersions.length" class="plan-history"><li v-for="gate in gateVersions" :key="gate.gateVersion"><strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ formatChinaTime(gate.decidedAt) }}</span><p>{{ gate.reason }}</p></li></ol>
         </div>
     </section>
 </template>

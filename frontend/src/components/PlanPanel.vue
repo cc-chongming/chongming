@@ -1,4 +1,6 @@
 <script setup>
+import { formatChinaTime } from '../services/china-time';
+
 defineProps({
     summary: { type: Object, default: null },
     plans: { type: Array, default: () => [] },
@@ -36,7 +38,7 @@ function payloadValue(event, name) {
         <aside v-if="summary?.contextScout?.status === 'DEGRADED'" class="context-scout-warning" aria-label="Context Scout 降级信息">
             <strong>Context Scout 已降级</strong>
             <p>{{ summary.contextScout.publicSummary }}</p>
-            <small>原因代码：{{ summary.contextScout.reasonCode }}<template v-if="summary.contextScout.occurredAt"> · {{ summary.contextScout.occurredAt }}</template></small>
+            <small>原因代码：{{ summary.contextScout.reasonCode }}<template v-if="summary.contextScout.occurredAt"> · {{ formatChinaTime(summary.contextScout.occurredAt) }}</template></small>
         </aside>
 
         <h3>活跃角色</h3>
@@ -52,7 +54,7 @@ function payloadValue(event, name) {
         <ol v-if="plans.length" class="plan-history">
             <li v-for="plan in plans" :key="plan.sequence">
                 <strong>{{ plan.type }}</strong>
-                <span>v{{ plan.payload?.planVersion ?? '—' }} · {{ plan.occurredAt }}</span>
+                <span>v{{ plan.payload?.planVersion ?? '—' }} · {{ formatChinaTime(plan.occurredAt) }}</span>
                 <p>{{ payloadValue(plan, 'changeReason') }}</p>
             </li>
         </ol>

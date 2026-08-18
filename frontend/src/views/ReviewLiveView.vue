@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
+import { formatChinaTime } from '../services/china-time';
 import LiveAgentConversation from '../components/LiveAgentConversation.vue';
 import ReviewClaimList from '../components/ReviewClaimList.vue';
 import ReviewConversationDrawer from '../components/ReviewConversationDrawer.vue';
@@ -426,7 +427,7 @@ onUnmounted(() => loadQueue.dispose());
 
                     <section v-if="activePhase === 'director' && planCards.length" class="flow-plan-section" aria-label="评审计划">
                         <article v-for="plan in planCards" :key="plan.sequence" class="flow-plan-card">
-                            <header><strong>{{ plan.type === 'PLAN_REVISED' ? '计划修订' : '评审计划' }} v{{ planVersion(plan) }}</strong><span>{{ plan.occurredAt }}</span></header>
+                            <header><strong>{{ plan.type === 'PLAN_REVISED' ? '计划修订' : '评审计划' }} v{{ planVersion(plan) }}</strong><span>{{ formatChinaTime(plan.occurredAt) }}</span></header>
                             <ol v-if="planTasks(plan).length" class="flow-plan-tasks"><li v-for="(task, taskIndex) in planTasks(plan)" :key="taskIndex">{{ task }}</li></ol>
                             <p v-if="plan.payload?.changeReason">修订原因：{{ plan.payload.changeReason }}</p>
                         </article>
@@ -578,7 +579,7 @@ onUnmounted(() => loadQueue.dispose());
 
                     <section v-if="store.state.humanGateVersions.length" class="flow-gate-history" aria-label="Gate 版本历史">
                         <article v-for="gate in store.state.humanGateVersions" :key="gate.gateVersion">
-                            <strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ gate.decidedAt }}</span>
+                            <strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ formatChinaTime(gate.decidedAt) }}</span>
                             <p>{{ gate.reason }}</p>
                         </article>
                     </section>

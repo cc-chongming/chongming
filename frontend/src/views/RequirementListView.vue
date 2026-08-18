@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
 import { authStore } from '../stores/auth-store';
+import { formatChinaTime } from '../services/china-time';
 
 const result = ref({ items: [], page: 1, size: 20, total: 0 });
 const loading = ref(false);
@@ -115,7 +116,7 @@ onMounted(async () => {
                         <td><span class="tag" :class="statusTag[item.status] ?? 'tag-draft'">{{ statusLabel[item.status] ?? item.status }}</span></td>
                         <td><span v-if="item.priority" class="badge" :class="priorityBadge[item.priority] ?? 'b-p2'">{{ item.priority }}</span><span v-else>—</span></td>
                         <td class="req-assignee">{{ item.assigneeId || '—' }}</td>
-                        <td class="req-date">{{ item.updatedAt }}</td>
+                        <td class="req-date">{{ formatChinaTime(item.updatedAt) }}</td>
                         <td><button v-if="canDelete(item)" class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td>
                     </tr>
                 </tbody>

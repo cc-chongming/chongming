@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { formatApiError, reviewApi } from '../api/review-api';
 import { authStore } from '../stores/auth-store';
+import { formatChinaTime } from '../services/china-time';
 
 const result = ref({ items: [], total: 0, page: 1, size: 20 });
 const error = ref('');
@@ -67,7 +68,7 @@ onMounted(load);
                     <div class="rv-footer">
                         <span class="rv-fi">📋 {{ item.reviewId }}</span>
                         <span class="rv-fi">📄 {{ item.hasReport ? `报告 v${item.reportVersion}` : '暂无报告' }}</span>
-                        <span class="rv-fi" style="margin-left:auto">{{ item.occurredAt ?? '—' }}</span>
+                        <span class="rv-fi" style="margin-left:auto">{{ formatChinaTime(item.occurredAt) || '—' }}</span>
                     </div>
                     <div class="rv-progress"><div class="bar" :style="{ width: `${item.progress ?? 0}%`, background: progressColor(item.stage) }"></div></div>
                 </RouterLink>

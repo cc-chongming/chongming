@@ -1,6 +1,7 @@
 <script setup>
 // [AIREVIEW-PLAN-023#7.3] Global conversation, review facts and runtime diagnostics share one drawer.
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { formatChinaTime } from '../services/china-time';
 import LiveAgentConversation from './LiveAgentConversation.vue';
 
 const props = defineProps({
@@ -77,7 +78,7 @@ onUnmounted(() => {
             <LiveAgentConversation compact :items="filteredItems" />
         </div>
         <ol v-else-if="activeTab === 'facts'" id="drawer-panel-facts" class="flow-fact-timeline" role="tabpanel" aria-labelledby="drawer-tab-facts">
-            <li v-for="event in facts" :key="event.sequence" :data-type="event.type"><span></span><div><strong>{{ event.title }}</strong><p>{{ event.detail }}</p><small>#{{ event.sequence }} · {{ event.occurredAt }}</small></div></li>
+            <li v-for="event in facts" :key="event.sequence" :data-type="event.type"><span></span><div><strong>{{ event.title }}</strong><p>{{ event.detail }}</p><small>#{{ event.sequence }} · {{ formatChinaTime(event.occurredAt) }}</small></div></li>
             <li v-if="!facts.length" class="flow-sidebar-empty">尚未收到持久化评审事实。</li>
         </ol>
         <ol v-else id="drawer-panel-debug" class="flow-debug-list" role="tabpanel" aria-labelledby="drawer-tab-debug">

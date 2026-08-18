@@ -2,6 +2,7 @@
 // [AIREVIEW-PLAN-023#7.1] Unified public AI conversation for every review Agent.
 import { computed, nextTick, ref, watch } from 'vue';
 import { buildRuntimeConversation } from '../services/runtime-conversation-adapter';
+import { formatChinaClock } from '../services/china-time';
 import AgUiToolCallMessage from './AgUiToolCallMessage.vue';
 import SafeMarkdown from './SafeMarkdown.vue';
 
@@ -30,11 +31,9 @@ function roleInitial(role) {
 }
 
 function displayTime(value) {
-    if (!value) return '';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // [AIREVIEW-PLAN-025] Conversation bubbles always show China time regardless of viewer TZ.
+    return formatChinaClock(value);
 }
-
 function updateFollowState() {
     const element = scrollPanel.value;
     if (!element) return;

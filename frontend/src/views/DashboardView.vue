@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { formatChinaTime } from '../services/china-time';
 
 const dashboard = ref(null);
 const error = ref('');
@@ -80,7 +81,7 @@ onMounted(load);
                         <div v-for="activity in dashboard.recentActivities" :key="`${activity.reviewId}-${activity.sequence}`" class="feed-item">
                             <span class="feed-dot" style="background:#059669"></span>
                             <span class="feed-body"><span class="feed-t">{{ activity.type }}</span><span class="feed-s">{{ activity.summary }}</span></span>
-                            <span class="feed-time">{{ activity.occurredAt }}</span>
+                            <span class="feed-time">{{ formatChinaTime(activity.occurredAt) }}</span>
                         </div>
                         <p v-if="!dashboard.recentActivities.length" class="dash-empty">暂无评审活动。</p>
                     </div>

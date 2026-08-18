@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
 import { latestGateDecision, presentDebateJudgement } from '../services/review-conclusion-presenter';
+import { formatChinaTime } from '../services/china-time';
 
 const props = defineProps({ reviewId: { type: String, required: true } });
 const loading = ref(false);
@@ -169,8 +170,8 @@ onMounted(() => load(selectedVersion.value));
                         <div class="rpt-meta">
                             <span class="rpt-mono">#{{ shortId }}</span>
                             <span>· 报告 v{{ currentVersion?.reportVersion ?? '—' }}</span>
-                            <span v-if="currentVersion?.createdAt">· {{ currentVersion.createdAt }}</span>
-                            <span v-if="summary?.occurredAt">· 评审至 {{ summary.occurredAt }}</span>
+                            <span v-if="currentVersion?.createdAt">· {{ formatChinaTime(currentVersion.createdAt) }}</span>
+                            <span v-if="summary?.occurredAt">· 评审至 {{ formatChinaTime(summary.occurredAt) }}</span>
                         </div>
                     </div>
                     <RouterLink class="button secondary" :to="{ name: 'review-workbench', params: { reviewId } }">返回工作台</RouterLink>
@@ -251,7 +252,7 @@ onMounted(() => load(selectedVersion.value));
                             <section v-if="entry.judgement" class="report-judge-result" :aria-label="`${entry.debate.subjectKey} 的 Judge 裁决`">
                                 <header>
                                     <div><span class="judge-label">Judge 结论</span><strong>{{ entry.judgement.resultLabel }}</strong></div>
-                                    <time v-if="entry.judgement.createdAt">{{ entry.judgement.createdAt }}</time>
+                                    <time v-if="entry.judgement.createdAt">{{ formatChinaTime(entry.judgement.createdAt) }}</time>
                                 </header>
                                 <p class="judge-reason"><strong>裁决理由：</strong>{{ entry.judgement.reason }}</p>
                                 <div class="judge-claim-columns">
@@ -295,7 +296,7 @@ onMounted(() => load(selectedVersion.value));
                     <div v-if="finalGate" class="gate-box" :class="`t-${gateFor(finalGate.result).tone}`">
                         <div class="gate-tag" :class="`t-${gateFor(finalGate.result).tone}`">{{ gateFor(finalGate.result).icon }} {{ gateFor(finalGate.result).label }}</div>
                         <div class="gate-meta">
-                            <div><strong>决策者:</strong> {{ finalGate.reviewerId ?? summary?.gate?.actor ?? '—' }} · {{ finalGate.decidedAt }}</div>
+                            <div><strong>决策者:</strong> {{ finalGate.reviewerId ?? summary?.gate?.actor ?? '—' }} · {{ formatChinaTime(finalGate.decidedAt) }}</div>
                             <div v-if="finalGate.reason"><strong>理由:</strong> {{ finalGate.reason }}</div>
                             <template v-if="finalGate.conditions?.length">
                                 <div><strong>条件:</strong></div>
@@ -315,7 +316,7 @@ onMounted(() => load(selectedVersion.value));
                         <div class="rpt-raw-bar">
                             <label>版本<select v-model="selectedVersion" @change="onVersionChange">
                                 <option :value="null">最新 (v{{ latestVersion ?? '—' }})</option>
-                                <option v-for="v in versions" :key="v.reportVersion" :value="Number(v.reportVersion)">v{{ v.reportVersion }} · {{ v.createdAt }}</option>
+                                <option v-for="v in versions" :key="v.reportVersion" :value="Number(v.reportVersion)">v{{ v.reportVersion }} · {{ formatChinaTime(v.createdAt) }}</option>
                             </select></label>
                             <label>格式<select v-model="format"><option value="json">结构化 JSON</option><option value="markdown">Markdown 原文</option></select></label>
                             <button class="button secondary" type="button" :disabled="generating" @click="generate">{{ generating ? '正在生成…' : '生成新版本' }}</button>

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { formatApiError, ReviewApiError, reviewApi } from '../api/review-api';
 import { taskApi } from '../api/task-api';
+import { formatChinaTime } from '../services/china-time';
 import RepositorySelect from '../components/RepositorySelect.vue';
 import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
 
@@ -417,7 +418,7 @@ onMounted(refreshRepositoryAvailability);
                         <span class="rd-meta-item">👤 {{ requirement.assigneeId || '未指派' }}</span>
                         <span v-if="requirement.repositoryPath" class="rd-meta-item">📁 {{ requirement.repositoryPath }}</span>
                         <span v-else-if="requirement.remote" class="rd-meta-item">🌐 线上仓库 · {{ requirement.remote.url }}{{ requirement.remote.ref ? `（${requirement.remote.ref}）` : '' }}</span>
-                        <span class="rd-meta-item">🕐 {{ requirement.updatedAt }}</span>
+                        <span class="rd-meta-item">🕐 {{ formatChinaTime(requirement.updatedAt) }}</span>
                     </div>
                 </div>
                 <div class="rd-actions">
@@ -497,7 +498,7 @@ onMounted(refreshRepositoryAvailability);
                                             {{ ({ PENDING_ASSIGN: '待指派', DEVELOPING: '开发中', PENDING_ACCEPTANCE: '待验收', DONE: '已完成' })[item.status] ?? item.status }}
                                         </span>
                                     </div>
-                                    <div class="re-summary">负责人：{{ item.assigneeUsername || '未指派' }} · 更新于 {{ item.updatedAt }}</div>
+                                    <div class="re-summary">负责人：{{ item.assigneeUsername || '未指派' }} · 更新于 {{ formatChinaTime(item.updatedAt) }}</div>
                                 </RouterLink>
                             </template>
                             <p v-else-if="tasksLoadFailed" class="dash-empty">关联任务读取失败，请稍后重试。</p>
@@ -578,7 +579,7 @@ onMounted(refreshRepositoryAvailability);
                             <div v-if="gate" class="gate-box" :class="`t-${gateInfo(gate.result).tone}`" style="margin:14px">
                                 <div class="gate-tag" :class="`t-${gateInfo(gate.result).tone}`">{{ gateInfo(gate.result).icon }} {{ gateInfo(gate.result).label }}</div>
                                 <div class="gate-meta">
-                                    <div v-if="gate.actor"><strong>决策者:</strong> {{ gate.actor }}<span v-if="gate.decidedAt"> · {{ gate.decidedAt }}</span></div>
+                                    <div v-if="gate.actor"><strong>决策者:</strong> {{ gate.actor }}<span v-if="gate.decidedAt"> · {{ formatChinaTime(gate.decidedAt) }}</span></div>
                                     <div v-if="gate.reasonSummary"><strong>理由:</strong> {{ gate.reasonSummary }}</div>
                                 </div>
                             </div>
