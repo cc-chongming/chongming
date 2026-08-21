@@ -53,7 +53,7 @@ RoleContext（按 contextSelectors 与角色范围筛选）
 - Scout 不再使用项目自定义的 `listFiles`、`searchText`、`readLines` 等工具；改用 AS2 原生 `glob_files`、`grep_files`、`read_file`。根目录和受控文件清单改由服务端初始化步骤提供，不再暴露会导致重复全仓枚举的 `list_files`。
 - AS2 文件系统使用私有 Scout 上层工作区与冻结共享快照下层工作区的 copy-on-write 叠加；Shell 仍禁用，宿主仓库从不进入工作区。通过 AS2 `ToolsConfig` 仅保留 `glob_files`、`grep_files`、`read_file` 三个原生定向读工具，`list_files`、`write_file`、`edit_file` 不会被暴露或调用。
 - Director 与 Scout 的 AS2 原生文件系统均显式根植于 `<review>/attempts/<attemptNo>`；需求快照位于 `input/requirement.md`，不再回退到 Spring 进程当前目录或宿主重明工程。
-- Scout 工作流参考 ECC 的 `codebase-onboarding`、`project-init` 与 `iterative-retrieval`：服务端先完成根目录、构建指纹、文件清单和模块根的确定性 `context-scout-init` 清单；模型随后只做需求定向 `glob`、关键词 `grep` 和高相关 `read`，并立即生成结构性结论。`glob_files`、`grep_files`、`read_file` 的上限分别为 2、3、4 次，违反工具契约、超过总预算或超时都会持久化为 `CONTEXT_SCOUT_DEGRADED` 后继续 Director。该约束由运行时代码强制执行，不只依赖提示词。
+- Scout 工作流参考 ECC 的 `codebase-onboarding`、`project-init` 与 `iterative-retrieval`：服务端先完成根目录、构建指纹、文件清单和模块根的确定性 `context-scout-init` 清单；模型随后只做需求定向 `glob`、关键词 `grep` 和高相关 `read`，并立即生成结构性结论。`glob_files`、`grep_files`、`read_file` 的上限分别为 3、6、8 次，总预算默认 16 次（`scout-max-tool-calls`，低于单工具上限之和 17，使总预算成为真实安全阀），超时默认 `PT150S`；违反工具契约、超过总预算或超时都会持久化为 `CONTEXT_SCOUT_DEGRADED` 后继续 Director。该约束由运行时代码强制执行，不只依赖提示词。（2026-08-19 修订：原上限 2/3/4 与总预算 9 在多模块真实仓库上过紧——实测 Scout 三轮用尽 glob=2/grep=3 后第四次检索即触发 `CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED`，且单工具上限之和恰等于总预算使总预算旋钮失效、违约时全流中断丢弃已有勘察；故放宽单工具上限、总预算与超时，保持“建议性预处理 + 优雅降级”语义不变。）
 - Scout 的最终可见 JSON 结论会写入 `context-scout-result.json`，同步成为 `scout-overview` ContextFact；隐藏推理不会被读取、存储或传播。除取消外，Scout 运行失败会作为非终态 `CONTEXT_SCOUT_DEGRADED` 事实持久化，包含安全原因码与公开摘要；Director 继续启动，但页面会明确展示该次降级，不把失败伪装成已完成上下文准备。
 
 ### 3.4 RoleContext 注入与路径范围 ✅

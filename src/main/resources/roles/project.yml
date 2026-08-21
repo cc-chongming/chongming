@@ -2,7 +2,7 @@ roleType: PROJECT
 description: Validate delivery scope, dependencies, milestones and implementation risk.
 activationRules:
   - Always activate for a review.
-promptVersion: project-v1
+promptVersion: project-v2
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -27,6 +27,9 @@ checklist:
   - checkpointKey: project.schedule_risk
     instruction: Identify schedule or coordination risks that could block delivery of this requirement.
     required: false
+  - checkpointKey: project.adversarial_scrutiny
+    instruction: Act as the adversary of this requirement - find the most vulnerable delivery, dependency or milestone assumption and state whether it deserves an OPPOSE claim.
+    required: true
 allowedTools:
   - submit_assessment
   - submit_claim

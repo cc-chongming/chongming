@@ -14,6 +14,7 @@ public enum ReviewEventCategory {
     JUDGEMENT,
     HUMAN,
     GATE,
+    TASK,
     NOTIFICATION,
     ERROR
 }

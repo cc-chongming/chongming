@@ -298,6 +298,8 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
         private ModelGateway.FinishReason finishReason = ModelGateway.FinishReason.UNKNOWN;
         private boolean done;
         private boolean hasPublicText;
+        private boolean hasReasoningOnly;
+        private final List<String> rawSample = new java.util.ArrayList<>();
 
         private SseAccumulator(String traceId) {
             fallbackResponseId = traceId + ":provider-response";
@@ -312,6 +314,9 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
                 return List.of();
             }
             String data = line.substring("data:".length()).stripLeading();
+            if (rawSample.size() < 6) {
+                rawSample.add(data.length() > 160 ? data.substring(0, 160) + "..." : data);
+            }
             if ("[DONE]".equals(data)) {
                 if (done) {
                     return List.of();
@@ -319,6 +324,16 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
                 done = true;
                 List<ModelGateway.ToolCall> completedTools = completedToolCalls();
                 if (!hasPublicText && completedTools.isEmpty()) {
+                    // Keep a bounded sample of the raw SSE lines so the next empty stream can be
+                    // diagnosed from the log alone (proxy error JSON vs literally empty body).
+                    LOGGER.warn("MODEL_STREAM_EMPTY_SAMPLE traceId={} sample={}", fallbackResponseId, rawSample);
+                    // Distinguish a reasoning-only stream (provider thinking mode consumed the
+                    // whole output) from a truly empty one so operators can diagnose provider
+                    // side changes from the log alone.
+                    if (hasReasoningOnly) {
+                        throw new ModelGatewayException(Code.MODEL_RESPONSE_INVALID,
+                                "Model stream contained only hidden reasoning content and no public text");
+                    }
                     throw new ModelGatewayException(
                             Code.MODEL_RESPONSE_INVALID, "Model stream has no public text or tool call");
                 }
@@ -346,6 +361,9 @@ public class OpenAiCompatibleModelClient implements ModelProviderClient {
                     }
                     JsonNode delta = choice.path("delta");
                     accumulateToolDeltas(delta.path("tool_calls"));
+                    if (!delta.path("reasoning_content").asText("").isEmpty()) {
+                        hasReasoningOnly = true;
+                    }
                     String publicDelta = delta.path("content").asText("");
                     if (!publicDelta.isEmpty()) {
                         hasPublicText = true;

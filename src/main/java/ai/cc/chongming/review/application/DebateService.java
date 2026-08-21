@@ -399,6 +399,17 @@ public class DebateService {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "debate can be skipped only when no deterministic conflict candidate remains");
         }
+        // [AIREVIEW-PLAN-024#方案4 收口 / 2026-08-19 修订] The Director prompt already promises to skip
+        // only when no persisted Claim has an OPPOSE position, but the server did not enforce it:
+        // a prompt-violating Director could silently discard lone opposition. Align the guard with
+        // the prompt so any unwithdrawn OPPOSE Claim keeps the review in debate.
+        boolean unwithdrawnOppose = debateStore.findClaims(review.id()).stream()
+                .anyMatch(claim -> claim.position() == ClaimPosition.OPPOSE
+                        && claim.status() != ClaimStatus.WITHDRAWN);
+        if (unwithdrawnOppose) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "debate can be skipped only when no unwithdrawn OPPOSE claim remains");
+        }
         conflictDetectionService.recordTopicRegistration(review, List.of());
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);

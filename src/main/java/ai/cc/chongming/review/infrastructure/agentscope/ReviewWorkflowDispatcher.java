@@ -1,5 +1,6 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
+import ai.cc.chongming.review.application.DebateConvergenceGuard;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewEventListener;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
@@ -47,10 +48,19 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     private final ReviewRegistry reviewRegistry;
     private final ReviewDispatchService dispatchService;
     private final ReviewDebateStore debateStore;
+    private final ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
 
     public ReviewWorkflowDispatcher(ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider) {
-        this(runtimeAdapterProvider, null, null, null);
+        this(runtimeAdapterProvider, null, null, null, null);
+    }
+
+    public ReviewWorkflowDispatcher(
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ReviewRegistry reviewRegistry,
+            ReviewDispatchService dispatchService,
+            ReviewDebateStore debateStore) {
+        this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -58,16 +68,19 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
             ReviewRegistry reviewRegistry,
             ReviewDispatchService dispatchService,
-            ReviewDebateStore debateStore) {
+            ReviewDebateStore debateStore,
+            ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider) {
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
         this.reviewRegistry = reviewRegistry;
         this.dispatchService = dispatchService;
         this.debateStore = debateStore;
+        this.convergenceGuardProvider = convergenceGuardProvider;
     }
 
     @Override
     public void onCommitted(ReviewEvent event) {
         if (event.type() == ReviewEventType.REVIEW_CANCELLED || event.type() == ReviewEventType.REVIEW_FAILED) {
+            clearGuard(event);
             reactor.core.publisher.Sinks.Many<Dispatch> queue = queues.remove(runtimeId(event));
             if (queue != null) {
                 queue.tryEmitComplete();
@@ -78,18 +91,18 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             // batch-register every chosen subject in one command, or skip when none remains.
             send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims, then list_conflict_candidates. If at least one conflict candidate remains, register ALL chosen candidates in one register_topics batch command; only when no conflict candidate remains call skip_debate_when_no_conflicts. A single GAP or UNKNOWN assessment alone is never a debate topic. Do not search the workspace for Claim files or create facts in text.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_OPENED) {
-            send(runtimeId(event), directorLabel(event), "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command.");
+            wakeDirector(event, "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command.");
         } else if (event.type() == ReviewEventType.DEBATE_ROUND_2_STARTED) {
-            send(runtimeId(event), directorLabel(event), "Debate round two is active. Issue dispatch_debate_action commands for every still-required round-two action with the matching targets, or converge with close_debate_topic/begin_judging when no further action is necessary. Do not run an empty round.");
+            wakeDirector(event, "Debate round two is active. Issue dispatch_debate_action commands for every still-required round-two action with the matching targets, or converge with close_debate_topic/begin_judging when no further action is necessary. Do not run an empty round.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {
-            send(runtimeId(event), directorLabel(event), "A debate topic was closed. If more topics need round one or two, use the stage tools; when every topic is terminal, use begin_judging.");
+            wakeDirector(event, "A debate topic was closed. If more topics need round one or two, use the stage tools; when every topic is terminal, use begin_judging.");
         } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
             issueRebuttalDispatch(event);
-            send(runtimeId(event), directorLabel(event), "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
         } else if (event.type() == ReviewEventType.REBUTTAL_SUBMITTED
                 || event.type() == ReviewEventType.POSITION_CHANGED
                 || event.type() == ReviewEventType.EVIDENCE_REQUESTED) {
-            send(runtimeId(event), directorLabel(event), "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
         } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_ISSUED) {
             deliverDispatchEnvelope(event);
         } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_EXPIRED
@@ -98,13 +111,14 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                     event.reviewId().value(), event.type(),
                     event.payload().getOrDefault("commandId", "-"),
                     event.payload().getOrDefault("reason", "-"));
-            send(runtimeId(event), directorLabel(event), "Dispatch command "
+            wakeDirector(event, "Dispatch command "
                     + event.payload().getOrDefault("commandId", "-") + " ("
                     + event.payload().getOrDefault("allowedAction", "-") + " for "
                     + event.payload().getOrDefault("recipientRole", "-") + ") was dropped: "
                     + event.payload().getOrDefault("reason", event.type().name())
                     + ". Reissue a valid dispatch_debate_action command or converge with the stage tools.");
         } else if (event.type() == ReviewEventType.JUDGING_STARTED) {
+            clearGuard(event);
             // The debate is over; stop any role subagent still grinding through its dispatched run
             // so it stops producing output (and rejected turns) during judging / human decision.
             AgentRuntimeAdapter adapter = runtimeAdapterProvider.getIfAvailable();
@@ -112,6 +126,10 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 adapter.stopRoleRuns(runtimeId(event)).subscribe();
             }
             rejectPendingCommands(event, "JUDGING_STARTED");
+            dispatchJudgeForEvent(event);
+        } else if (event.type() == ReviewEventType.DEBATE_SKIPPED) {
+            clearGuard(event);
+            dispatchJudgeForEvent(event);
         }
     }
 
@@ -119,6 +137,20 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
         send(runtimeId, roleLabel(runtimeId, RoleType.JUDGE),
                 "All debate topics are terminal. Use submit_judgement for each topic; if the topic list is empty, skip it. Then always call draft_gate exactly once so the judging stage can finish. Do not add facts.");
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4 收口] Single Judge wake point for every path into judging: the
+     * Director's begin_judging/skip tools and the server-side forced convergence all publish
+     * JUDGING_STARTED or DEBATE_SKIPPED, so the Judge can never be left idle in JUDGING.
+     */
+    private void dispatchJudgeForEvent(ReviewEvent event) {
+        if (reviewRegistry == null) {
+            return;
+        }
+        reviewRegistry.find(event.reviewId())
+                .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                .ifPresent(this::dispatchJudge);
     }
 
     /**
@@ -229,6 +261,27 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             // A dropped dispatch would silently miss a Director wake and stall the review.
             LOGGER.warn("REVIEW_WORKFLOW_DISPATCH_DROPPED runtimeId={} recipient={} result={}",
                     runtimeId, recipient, result);
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案4 收口] Every Director wake during the debate rounds is counted by the
+     * convergence guard so a looping Director is deterministically force-converged server-side.
+     */
+    private void wakeDirector(ReviewEvent event, String message) {
+        DebateConvergenceGuard guard = convergenceGuardProvider == null
+                ? null : convergenceGuardProvider.getIfAvailable();
+        if (guard != null) {
+            guard.noteDirectorWake(event.reviewId(), event.attemptNo());
+        }
+        send(runtimeId(event), directorLabel(event), message);
+    }
+
+    private void clearGuard(ReviewEvent event) {
+        DebateConvergenceGuard guard = convergenceGuardProvider == null
+                ? null : convergenceGuardProvider.getIfAvailable();
+        if (guard != null) {
+            guard.clear(event.reviewId(), event.attemptNo());
         }
     }
 

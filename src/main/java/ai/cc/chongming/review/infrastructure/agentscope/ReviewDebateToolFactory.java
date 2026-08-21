@@ -53,7 +53,6 @@ public class ReviewDebateToolFactory {
     private final ReviewRegistry reviewRegistry;
     private final DebateTools debateTools;
     private final DebateService debateService;
-    private final ReviewWorkflowDispatcher workflowDispatcher;
     private final ReviewDebateStore debateStore;
     private final ReviewDispatchService dispatchService;
     private final ConflictDetectionService conflictDetectionService;
@@ -62,19 +61,17 @@ public class ReviewDebateToolFactory {
             ReviewRegistry reviewRegistry,
             DebateTools debateTools,
             DebateService debateService,
-            ReviewWorkflowDispatcher workflowDispatcher,
             ReviewDebateStore debateStore) {
-        this(reviewRegistry, debateTools, debateService, workflowDispatcher, debateStore, null, null);
+        this(reviewRegistry, debateTools, debateService, debateStore, null, null);
     }
 
     public ReviewDebateToolFactory(
             ReviewRegistry reviewRegistry,
             DebateTools debateTools,
             DebateService debateService,
-            ReviewWorkflowDispatcher workflowDispatcher,
             ReviewDebateStore debateStore,
             ReviewDispatchService dispatchService) {
-        this(reviewRegistry, debateTools, debateService, workflowDispatcher, debateStore, dispatchService, null);
+        this(reviewRegistry, debateTools, debateService, debateStore, dispatchService, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -82,14 +79,12 @@ public class ReviewDebateToolFactory {
             ReviewRegistry reviewRegistry,
             DebateTools debateTools,
             DebateService debateService,
-            ReviewWorkflowDispatcher workflowDispatcher,
             ReviewDebateStore debateStore,
             ReviewDispatchService dispatchService,
             ConflictDetectionService conflictDetectionService) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.debateTools = Objects.requireNonNull(debateTools, "debateTools must not be null");
         this.debateService = Objects.requireNonNull(debateService, "debateService must not be null");
-        this.workflowDispatcher = Objects.requireNonNull(workflowDispatcher, "workflowDispatcher must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.dispatchService = dispatchService;
         this.conflictDetectionService = conflictDetectionService;
@@ -508,7 +503,8 @@ public class ReviewDebateToolFactory {
             }
             boolean replayed = advanceStage(review, metadata, List.of(ReviewStage.DEBATE_ROUND_2, ReviewStage.DEBATE_ROUND_1),
                     "begin-judging", () -> debateService.beginJudging(review));
-            if (!replayed) workflowDispatcher.dispatchJudge(review);
+            // The Judge wake is owned by ReviewWorkflowDispatcher's JUDGING_STARTED handler so every
+            // path into judging (Director tool, forced convergence) dispatches exactly once.
             return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
         }
     }
@@ -522,9 +518,7 @@ public class ReviewDebateToolFactory {
             requireNoInput(input);
             boolean replayed = advanceStage(review, metadata, ReviewStage.CONFLICT_DETECTION,
                     "skip-debate-no-conflicts", () -> debateService.skipDebateWhenNoConflicts(review));
-            if (!replayed) {
-                workflowDispatcher.dispatchJudge(review);
-            }
+            // The Judge wake is owned by ReviewWorkflowDispatcher's DEBATE_SKIPPED handler.
             return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
         }
     }

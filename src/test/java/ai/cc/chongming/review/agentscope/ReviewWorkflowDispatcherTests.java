@@ -177,6 +177,20 @@ class ReviewWorkflowDispatcherTests {
         verify(adapter, timeout(3000)).stopRoleRuns(runtimeId);
     }
 
+    /**
+     * [AIREVIEW-PLAN-024#方案4 收口] Every path into judging must wake the Judge exactly once:
+     * the forced-convergence guard only transitions the stage, so the dispatcher owns the wake.
+     */
+    @Test
+    void judgingStartedAndDebateSkippedEachWakeTheJudgeExactlyOnce() {
+        dispatcher.onCommitted(event(ReviewEventType.JUDGING_STARTED, null, Map.of()));
+        verify(adapter, timeout(3000)).send(eq(runtimeId), eq(runtimeId + "-judge"),
+                contains("draft_gate exactly once"));
+
+        dispatcher.onCommitted(event(ReviewEventType.DEBATE_SKIPPED, null, Map.of()));
+        verify(adapter, timeout(3000).times(2)).send(eq(runtimeId), eq(runtimeId + "-judge"), anyString());
+    }
+
     @Test
     void cancellationRejectsPendingCommands() {
         ReviewDispatchCommand command = dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(

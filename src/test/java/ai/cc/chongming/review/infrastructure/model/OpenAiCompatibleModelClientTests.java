@@ -235,6 +235,20 @@ class OpenAiCompatibleModelClientTests {
     }
 
     @Test
+    void reportsReasoningOnlyStreamsDistinctlyFromEmptyStreams() {
+        responseBody.set("""
+                data: {"id":"chat-stream-r1","choices":[{"delta":{"reasoning_content":"内部推理"},"finish_reason":null}]}
+                data: [DONE]
+                """);
+        OpenAiCompatibleModelClient client = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new ObjectMapper());
+
+        assertThatThrownBy(() -> client.stream(request()).collectList().block())
+                .isInstanceOf(ModelGatewayException.class)
+                .satisfies(exception -> assertThat(exception.getMessage())
+                        .contains("only hidden reasoning content"));
+    }
+
+    @Test
     void classifiesRequestTimeoutAsModelCallTimeoutSoBreakerAndMetricsCanCountIt() {
         OpenAiCompatibleModelClient client = new OpenAiCompatibleModelClient(HttpClient.newHttpClient(), new ObjectMapper());
         ModelProviderClient.ProviderRequest slowRequest = new ModelProviderClient.ProviderRequest(

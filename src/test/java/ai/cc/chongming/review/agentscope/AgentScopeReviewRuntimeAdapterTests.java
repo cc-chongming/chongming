@@ -389,7 +389,7 @@ class AgentScopeReviewRuntimeAdapterTests {
                 .thenReturn(new ContextScoutHarnessFactory.ScoutRuntime(
                         scout, new ScoutToolTraceCollector()));
         Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
-                .thenReturn(Flux.range(1, 3)
+                .thenReturn(Flux.range(1, 10)
                         .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "glob_files")));
         AtomicInteger directorModelCalls = new AtomicInteger();
         AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
@@ -568,7 +568,8 @@ class AgentScopeReviewRuntimeAdapterTests {
                 reviewProperties, new com.fasterxml.jackson.databind.ObjectMapper());
         AgentScopeProperties properties = new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString());
         List<String> requiredKeys = List.of("product.requirement_completeness", "product.acceptance_criteria",
-                "product.user_value", "product.scope_boundary", "product.testability");
+                "product.user_value", "product.scope_boundary", "product.testability",
+                "product.adversarial_scrutiny", "product.core_value_stance");
         List<ModelGateway.ModelResponse> script = new ArrayList<>();
         // The role first tries to complete without any assessment: the coverage guard must reject it.
         script.add(toolCallResponse("call-complete-early", "complete_initial_review",
@@ -615,12 +616,12 @@ class AgentScopeReviewRuntimeAdapterTests {
                 .singleElement()
                 .satisfies(activation -> assertThat(activation.initialReviewCompleted()).isTrue());
         assertThat(assessmentStore.findByReview(review.id(), context.attemptNo(), RoleType.PRODUCT))
-                .hasSize(5)
+                .hasSize(requiredKeys.size())
                 .allSatisfy(assessment -> assertThat(assessment.status()).isEqualTo(AssessmentStatus.CONFIRMED));
         assertThat(events).extracting(ReviewEventDraft::type)
                 .containsExactly(ReviewEventType.ROLE_COMPLETED, ReviewEventType.INITIAL_REVIEW_COMPLETED);
         assertThat(events.getFirst().payload().get("summary").toString())
-                .contains("CONFIRMED=5")
+                .contains("CONFIRMED=" + requiredKeys.size())
                 .contains("product.user_value：CONFIRMED");
     }
 

@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
@@ -49,6 +50,10 @@ public class CommercialModelGateway implements ModelGateway {
     private final ModelProfileRegistry profileRegistry;
     private final ModelProviderClient providerClient;
     private final ModelCallAuditService auditService;
+    // [AIREVIEW-PLAN-030] Some provider tokens reject simultaneous requests (new-api returned
+    // "Invalid token" for any concurrency above one). The permit bound keeps parallel role
+    // rounds from tripping that limit; configure 1 for such providers.
+    private final Semaphore concurrency;
     private final Map<String, BreakerState> circuitBreakers =
             Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
                 @Override
@@ -67,6 +72,7 @@ public class CommercialModelGateway implements ModelGateway {
         this.profileRegistry = Objects.requireNonNull(profileRegistry, "profileRegistry must not be null");
         this.providerClient = Objects.requireNonNull(providerClient, "providerClient must not be null");
         this.auditService = Objects.requireNonNull(auditService, "auditService must not be null");
+        this.concurrency = new Semaphore(properties.maxConcurrentCalls(), true);
     }
 
     @Override
@@ -265,10 +271,13 @@ public class CommercialModelGateway implements ModelGateway {
             AtomicBoolean emitted = new AtomicBoolean();
             ModelProviderClient.ProviderRequest providerRequest = new ModelProviderClient.ProviderRequest(
                     properties.baseUrl(), apiKey, profile, request, properties.logConversation());
-            Flux<ModelProviderClient.ProviderStreamChunk> invocation = profile.streamEnabled()
-                    ? providerClient.stream(providerRequest)
-                    : Flux.defer(() -> Flux.just(ModelProviderClient.ProviderStreamChunk.from(
-                            providerClient.invoke(providerRequest))));
+            Flux<ModelProviderClient.ProviderStreamChunk> invocation = Flux.using(
+                    this::acquireConcurrencyPermit,
+                    permit -> profile.streamEnabled()
+                            ? providerClient.stream(providerRequest)
+                            : Flux.defer(() -> Flux.just(ModelProviderClient.ProviderStreamChunk.from(
+                                    providerClient.invoke(providerRequest)))),
+                    Semaphore::release);
             return invocation
                     .doOnNext(ignored -> emitted.set(true))
                     .onErrorResume(ModelGatewayException.class, failure -> {
@@ -299,9 +308,15 @@ public class CommercialModelGateway implements ModelGateway {
             attempts.increment();
             checkCancelled(cancellation);
             try {
-                ModelProviderClient.ProviderResponse response = providerClient.invoke(
-                        new ModelProviderClient.ProviderRequest(
-                                properties.baseUrl(), apiKey, profile, request, properties.logConversation()));
+                acquireConcurrency();
+                ModelProviderClient.ProviderResponse response;
+                try {
+                    response = providerClient.invoke(
+                            new ModelProviderClient.ProviderRequest(
+                                    properties.baseUrl(), apiKey, profile, request, properties.logConversation()));
+                } finally {
+                    concurrency.release();
+                }
                 checkCancelled(cancellation);
                 return response;
             } catch (ModelGatewayException exception) {
@@ -312,6 +327,26 @@ public class CommercialModelGateway implements ModelGateway {
             }
         }
         throw new ModelGatewayException(Code.MODEL_PROVIDER_ERROR, "Model provider did not produce a response");
+    }
+
+    private void acquireConcurrency() {
+        try {
+            concurrency.acquire();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ModelGatewayException(
+                    Code.MODEL_NETWORK_ERROR, "Interrupted while waiting for a model concurrency permit", exception);
+        }
+    }
+
+    /**
+     * Flux.using ties the permit to the stream resource so complete, error and cancel all
+     * release it; a doOnSubscribe/doFinally pair leaked permits when the orchestration
+     * subscribed the next role synchronously on the completing thread.
+     */
+    private Semaphore acquireConcurrencyPermit() {
+        acquireConcurrency();
+        return concurrency;
     }
 
     private boolean shouldFallback(ModelProfile primaryProfile, ModelGatewayException failure) {
@@ -380,7 +415,12 @@ public class CommercialModelGateway implements ModelGateway {
         return exception.code() == Code.MODEL_CALL_TIMEOUT
                 || exception.code() == Code.MODEL_RATE_LIMITED
                 || exception.code() == Code.MODEL_NETWORK_ERROR
-                || exception.code() == Code.MODEL_PROVIDER_ERROR;
+                || exception.code() == Code.MODEL_PROVIDER_ERROR
+                // [AIREVIEW-PLAN-030] Empty or malformed provider streams (e.g. reasoning-only
+                // responses with no public text) are transient provider glitches; bounded
+                // retries plus fallback-profile escalation keep one bad stream from failing
+                // the whole review at INITIAL_REVIEW.
+                || exception.code() == Code.MODEL_RESPONSE_INVALID;
     }
 
     private void waitForRetry(Duration initialBackoff, int completedAttempts, IntakeCancellation cancellation) {

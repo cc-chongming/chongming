@@ -2,7 +2,7 @@ roleType: PRODUCT
 description: Validate product value, scope, user journeys, acceptance criteria and business risk.
 activationRules:
   - Always activate for a review.
-promptVersion: product-v1
+promptVersion: product-v3
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -27,6 +27,12 @@ checklist:
   - checkpointKey: product.business_risk
     instruction: Identify business, compliance or experience risks introduced by the requirement.
     required: false
+  - checkpointKey: product.adversarial_scrutiny
+    instruction: Act as the adversary of this requirement - find the most vulnerable value, scope or acceptance assumption and state whether it deserves an OPPOSE claim.
+    required: true
+  - checkpointKey: product.core_value_stance
+    instruction: Take an explicit stance on the requirement's core value proposition - defend it with a SUPPORT claim when it holds, or oppose it when the value proposition itself is broken; never stay silent.
+    required: true
 allowedTools:
   - submit_assessment
   - submit_claim

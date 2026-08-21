@@ -245,8 +245,9 @@ public class RoleSubagentFactory {
                 ? "For every checkpoint of your checklist submit exactly one assessment with submit_assessment: "
                         + "when the authorized evidence is sufficient, proactively submit CONFIRMED; when the evidence you need is outside "
                         + "this role's authorized scope, submit UNKNOWN and state the missing authorized evidence; never write "
-                        + "'file not read' as 'feature does not exist'. Submit a submit_claim only when you confirm a risk gap or form a "
-                        + "debatable proposition. After every checkpoint assessment is submitted, always call complete_initial_review, "
+                        + "'file not read' as 'feature does not exist'. "
+                        + claimGuidance(rolePack)
+                        + "After every checkpoint assessment is submitted, always call complete_initial_review, "
                         + "including when there are no findings. "
                 : "Submit only the evidence and formal actions authorized for this role; do not claim that an unavailable completion tool was called. ";
         String checklistGuidance = rolePack.checklist().isEmpty()
@@ -280,6 +281,41 @@ public class RoleSubagentFactory {
                 + rolePack.outputKind().name() + " JSON compatible output using prompt version " + rolePack.promptVersion() + ". "
                 + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
                 + publicContext;
+    }
+
+    /**
+     * Claim stance guidance. Real disagreement must surface as an OPPOSE Claim so deterministic
+     * conflict detection can match it against SUPPORT Claims on the same topic; claims stay
+     * scoped to risk propositions and never degenerate into one Claim per minor finding.
+     */
+    private static String claimGuidance(RolePack rolePack) {
+        if (!rolePack.allowedTools().contains("submit_claim")) {
+            return "";
+        }
+        return "Use submit_claim for risk gaps and debatable propositions, never for every minor finding. "
+                + "When you identify a risk that contradicts the requirement or that another role is likely to defend differently, "
+                + "you must submit it as an OPPOSE claim instead of suppressing or softening it to keep your conclusions harmonious; "
+                + "submit a SUPPORT claim for a positive proposition worth defending in debate. "
+                + valueStanceGuidance(rolePack)
+                + "The subjectKey of every claim must name the requirement topic under debate with a stable lower-case dot-separated "
+                + "key derived from the requirement itself, such as 'sync.conflict_resolution', never your own checkpointKey, so claims "
+                + "about the same topic submitted by different roles are matched by deterministic conflict detection. ";
+    }
+
+    /**
+     * PRODUCT is the platform's closest proxy to the requirement owner, so it must defend or
+     * reject the core value proposition explicitly; a review where every role only opposes leaves
+     * deterministic conflict detection without a support side to form an opposing pair.
+     */
+    private static String valueStanceGuidance(RolePack rolePack) {
+        if (rolePack.roleType() != RoleType.PRODUCT) {
+            return "";
+        }
+        return "You are the closest proxy to the requirement owner. You must take an explicit stance on the requirement's core "
+                + "value proposition: submit exactly one claim about it - a SUPPORT claim with your reasoning when the value "
+                + "proposition holds, or an OPPOSE claim when the value proposition itself is broken; never stay silent on it. "
+                + "Also defend what you verified as sound: when another role is likely to challenge a behavior you confirmed as "
+                + "correct or valuable, submit a SUPPORT claim on that same topic so the debate has two sides. ";
     }
 
     /**

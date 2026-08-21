@@ -20,18 +20,38 @@ public record ModelGatewayProperties(
         String modelName,
         String apiKey,
         boolean logConversation,
-        CircuitBreaker circuitBreaker) {
+        CircuitBreaker circuitBreaker,
+        Integer maxConcurrentCalls) {
+
+    public static final int DEFAULT_MAX_CONCURRENT_CALLS = 4;
 
     @ConstructorBinding
     public ModelGatewayProperties {
         circuitBreaker = circuitBreaker == null ? new CircuitBreaker(null, null) : circuitBreaker;
+        maxConcurrentCalls = maxConcurrentCalls == null ? DEFAULT_MAX_CONCURRENT_CALLS : maxConcurrentCalls;
+        if (maxConcurrentCalls < 1) {
+            throw new IllegalArgumentException("maxConcurrentCalls must be positive");
+        }
     }
 
     /**
      * Backward-compatible constructor for call sites that predate the circuit breaker settings.
      */
     public ModelGatewayProperties(boolean enabled, URI baseUrl, String modelName, String apiKey, boolean logConversation) {
-        this(enabled, baseUrl, modelName, apiKey, logConversation, new CircuitBreaker(null, null));
+        this(enabled, baseUrl, modelName, apiKey, logConversation, new CircuitBreaker(null, null), null);
+    }
+
+    /**
+     * Backward-compatible constructor for call sites that predate the concurrency bound.
+     */
+    public ModelGatewayProperties(
+            boolean enabled,
+            URI baseUrl,
+            String modelName,
+            String apiKey,
+            boolean logConversation,
+            CircuitBreaker circuitBreaker) {
+        this(enabled, baseUrl, modelName, apiKey, logConversation, circuitBreaker, null);
     }
 
     /**

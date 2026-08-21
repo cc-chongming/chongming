@@ -53,9 +53,9 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     private static final Logger log = LoggerFactory.getLogger(AgentScopeReviewRuntimeAdapter.class);
 
     private static final Map<String, Integer> SCOUT_INIT_TOOL_LIMITS = Map.of(
-            "glob_files", 2,
-            "grep_files", 3,
-            "read_file", 4);
+            "glob_files", 3,
+            "grep_files", 6,
+            "read_file", 8);
 
     private final ReviewDirectorHarnessFactory directorFactory;
     private final RoleSubagentFactory roleSubagentFactory;

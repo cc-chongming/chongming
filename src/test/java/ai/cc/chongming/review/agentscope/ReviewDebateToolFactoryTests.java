@@ -29,7 +29,7 @@ class ReviewDebateToolFactoryTests {
     void exposesPersistedInventoriesAndNoConflictRouteToAuthorizedRoles() {
         ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
                 mock(ReviewRegistry.class), mock(DebateTools.class), mock(DebateService.class),
-                mock(ReviewWorkflowDispatcher.class), mock(ReviewDebateStore.class));
+                mock(ReviewDebateStore.class));
         ReviewRuntimeContext context = new ReviewRuntimeContext(
                 new ReviewId(UUID.randomUUID()), 1, "test-user", "test-trace", IntakeCancellation.neverCancelled());
 
@@ -52,7 +52,7 @@ class ReviewDebateToolFactoryTests {
     void roleWriteToolsRequireAnAuthorizingDispatchCommandIdWhenDispatchServiceIsWired() {
         ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
                 mock(ReviewRegistry.class), mock(DebateTools.class), mock(DebateService.class),
-                mock(ReviewWorkflowDispatcher.class), mock(ReviewDebateStore.class),
+                mock(ReviewDebateStore.class),
                 mock(ai.cc.chongming.review.application.ReviewDispatchService.class));
         ReviewRuntimeContext context = new ReviewRuntimeContext(
                 new ReviewId(UUID.randomUUID()), 1, "test-user", "test-trace", IntakeCancellation.neverCancelled());

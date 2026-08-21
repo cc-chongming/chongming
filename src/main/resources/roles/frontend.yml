@@ -2,7 +2,7 @@ roleType: FRONTEND
 description: Validate interaction flows, interface contracts, accessibility and client-side risk.
 activationRules:
   - Always activate for a review.
-promptVersion: frontend-v1
+promptVersion: frontend-v2
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -27,6 +27,9 @@ checklist:
   - checkpointKey: frontend.client_risk
     instruction: Identify browser compatibility, performance or state management risks introduced on the client side.
     required: false
+  - checkpointKey: frontend.adversarial_scrutiny
+    instruction: Act as the adversary of this requirement - find the most vulnerable interaction, contract or client-state assumption and state whether it deserves an OPPOSE claim.
+    required: true
 allowedTools:
   - submit_assessment
   - submit_claim

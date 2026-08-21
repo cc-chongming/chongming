@@ -14,6 +14,7 @@ import ai.cc.chongming.review.infrastructure.persistence.mapper.ReviewPlatformPr
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,11 @@ public class MyBatisReviewPlatformProjectionStore implements ReviewPlatformProje
 
     private static final TypeReference<Map<String, String>> STRING_PAYLOAD = new TypeReference<>() {
     };
+
+    // review_request.updated_at is DB-generated (CURRENT_TIMESTAMP ... ON UPDATE CURRENT_TIMESTAMP)
+    // in the MySQL server's China timezone, unlike Java-written columns that follow the UTC
+    // wall-clock convention; reading it back as UTC shifted list/dashboard times by +8h.
+    private static final ZoneId DB_SERVER_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final ReviewPlatformProjectionMapper mapper;
     private final ObjectMapper objectMapper;
@@ -63,7 +69,7 @@ public class MyBatisReviewPlatformProjectionStore implements ReviewPlatformProje
                 ReviewStage.valueOf(row.stage()),
                 row.attemptNo(),
                 row.reviewVersion(),
-                row.updatedAt().toInstant(ZoneOffset.UTC),
+                row.updatedAt().atZone(DB_SERVER_ZONE).toInstant(),
                 row.eventId() == null ? null : toEvent(row),
                 row.reportId() == null ? null : toReportMetadata(row));
     }

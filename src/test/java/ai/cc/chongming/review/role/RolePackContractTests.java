@@ -61,6 +61,49 @@ class RolePackContractTests {
         }
     }
 
+    /**
+     * Adversarial checkpoints keep deterministic conflict detection demonstrable: every core role
+     * must be instructed to surface a required opposing-position scrutiny of the requirement.
+     */
+    @Test
+    void givesEveryCoreRoleARequiredAdversarialScrutinyCheckpointWithClaimAuthority() {
+        RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+
+        for (RoleType coreRole : List.of(RoleType.PRODUCT, RoleType.PROJECT, RoleType.FRONTEND, RoleType.BACKEND)) {
+            RolePack rolePack = registry.require(coreRole);
+            String expectedKey = coreRole.name().toLowerCase() + ".adversarial_scrutiny";
+            assertThat(rolePack.checklist())
+                    .as("core role %s must declare a required adversarial scrutiny checkpoint", coreRole)
+                    .filteredOn(checkpoint -> expectedKey.equals(checkpoint.checkpointKey()))
+                    .hasSize(1)
+                    .allSatisfy(checkpoint -> {
+                        assertThat(checkpoint.required()).isTrue();
+                        assertThat(checkpoint.instruction()).contains("OPPOSE");
+                    });
+            assertThat(rolePack.allowedTools())
+                    .as("core role %s must keep submit_claim authority for adversarial claims", coreRole)
+                    .contains("submit_claim");
+        }
+    }
+
+    /**
+     * PRODUCT is the platform's closest proxy to the requirement owner; it must declare an
+     * explicit stance on the core value proposition so deterministic conflict detection always
+     * has a potential support side to pair against opposing claims.
+     */
+    @Test
+    void requiresProductToDeclareAnExplicitStanceOnTheCoreValueProposition() {
+        RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+
+        assertThat(registry.require(RoleType.PRODUCT).checklist())
+                .filteredOn(checkpoint -> "product.core_value_stance".equals(checkpoint.checkpointKey()))
+                .hasSize(1)
+                .allSatisfy(checkpoint -> {
+                    assertThat(checkpoint.required()).isTrue();
+                    assertThat(checkpoint.instruction()).contains("SUPPORT").contains("oppose");
+                });
+    }
+
     @Test
     void exposesStableGloballyUniqueCheckpointKeysForCoreRoles() {
         RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());

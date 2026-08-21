@@ -2,7 +2,7 @@ roleType: BACKEND
 description: Validate service boundaries, data consistency, API behavior and operational risk.
 activationRules:
   - Always activate for a review.
-promptVersion: backend-v1
+promptVersion: backend-v2
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -27,6 +27,9 @@ checklist:
   - checkpointKey: backend.performance_risk
     instruction: Identify throughput, latency or resource usage risks introduced by the change.
     required: false
+  - checkpointKey: backend.adversarial_scrutiny
+    instruction: Act as the adversary of this requirement - find the most vulnerable contract, consistency or failure-handling assumption and state whether it deserves an OPPOSE claim.
+    required: true
 allowedTools:
   - submit_assessment
   - submit_claim

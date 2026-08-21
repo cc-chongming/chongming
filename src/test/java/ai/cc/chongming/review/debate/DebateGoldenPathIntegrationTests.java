@@ -291,6 +291,23 @@ class DebateGoldenPathIntegrationTests {
                 .hasMessageContaining("no deterministic conflict candidate remains");
     }
 
+    /**
+     * [AIREVIEW-PLAN-024#方案4 收口 / 2026-08-19 修订] Even without a SUPPORT pair forming a
+     * deterministic candidate, a lone unwithdrawn OPPOSE Claim must keep the review in debate:
+     * the server enforces the Director prompt's "skip only when no OPPOSE remains" promise.
+     */
+    @Test
+    void rejectsSkippingDebateWhenOnlyUnwithdrawnOpposeClaimsRemain() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        Review review = conflictDetectionReview();
+        store.saveClaim(claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE));
+
+        assertThatThrownBy(() -> debateService.skipDebateWhenNoConflicts(review))
+                .isInstanceOf(ReviewDomainException.class)
+                .hasMessageContaining("no unwithdrawn OPPOSE claim remains");
+    }
+
     private Review conflictDetectionReview() {
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         Review review = Review.pending(new ReviewId(UUID.randomUUID()));
