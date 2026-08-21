@@ -35,7 +35,7 @@ class NotificationDeliveryRouterTests {
         SmtpMailNotificationAdapter mailAdapter = mock(SmtpMailNotificationAdapter.class);
         when(mailAdapter.deliver(any())).thenReturn(new NotificationDeliveryReceipt("SMTP_ACCEPTED", "hash"));
         ObjectProvider<SmtpMailNotificationAdapter> mailProvider = provider(mailAdapter);
-        NotificationDeliveryRouter router = new NotificationDeliveryRouter(mailProvider, provider(null));
+        NotificationDeliveryRouter router = new NotificationDeliveryRouter(mailProvider, provider(null), provider(null));
 
         NotificationDeliveryReceipt receipt = router.deliver(command("smtp-mail", "reviewer@qq.com"));
 
@@ -45,7 +45,7 @@ class NotificationDeliveryRouterTests {
 
     @Test
     void rejectsMailChannelWhenSmtpIsDisabled() {
-        NotificationDeliveryRouter router = new NotificationDeliveryRouter(provider(null), provider(null));
+        NotificationDeliveryRouter router = new NotificationDeliveryRouter(provider(null), provider(null), provider(null));
 
         NotificationDeliveryException exception = assertThrows(NotificationDeliveryException.class,
                 () -> router.deliver(command("smtp-mail", "reviewer@qq.com")));
@@ -58,12 +58,23 @@ class NotificationDeliveryRouterTests {
     void routesOtherChannelsToLearningPlatformAdapter() {
         LearningPlatformMcpAdapter mcpAdapter = mock(LearningPlatformMcpAdapter.class);
         when(mcpAdapter.deliver(any())).thenReturn(new NotificationDeliveryReceipt("MCP_ACCEPTED", "hash"));
-        NotificationDeliveryRouter router = new NotificationDeliveryRouter(provider(null), provider(mcpAdapter));
+        NotificationDeliveryRouter router = new NotificationDeliveryRouter(provider(null), provider(mcpAdapter), provider(null));
 
         NotificationDeliveryReceipt receipt = router.deliver(command("learning-platform", "recipient"));
 
         assertEquals("MCP_ACCEPTED", receipt.responseCode());
         verify(mcpAdapter).deliver(any());
+    }
+
+    @Test
+    void rejectsChaoxingChannelWhenDisabled() {
+        NotificationDeliveryRouter router = new NotificationDeliveryRouter(provider(null), provider(null), provider(null));
+
+        NotificationDeliveryException exception = assertThrows(NotificationDeliveryException.class,
+                () -> router.deliver(command("chaoxing", "12345")));
+
+        assertEquals("CHAOXING_DISABLED", exception.code());
+        assertEquals(false, exception.retryable());
     }
 
     @SuppressWarnings("unchecked")

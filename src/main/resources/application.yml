@@ -5,6 +5,12 @@ spring:
     name: chongming
   flyway:
     enabled: false
+  servlet:
+    multipart:
+      # [AIREVIEW-PLAN-031] Task delivery attachments advertise a 20MB ceiling; raise Spring's
+      # 1MB/10MB defaults so the business rule in DevTaskAttachmentService is the real gate.
+      max-file-size: ${REVIEW_ATTACHMENT_MAX_FILE_SIZE:20MB}
+      max-request-size: ${REVIEW_ATTACHMENT_MAX_REQUEST_SIZE:25MB}
   mail:
     # QQ 邮箱 SMTP（SSL 465）；password 必须使用 QQ 邮箱授权码，通过环境变量注入，不入库不入仓。
     host: ${REVIEW_QQ_MAIL_HOST:smtp.qq.com}
@@ -71,12 +77,18 @@ review:
     director-max-iterations: ${REVIEW_AGENTSCOPE_DIRECTOR_MAX_ITERATIONS:48}
     # Context Scout is advisory. Exhausting either limit records a degradation and immediately starts Director.
     scout-max-iterations: ${REVIEW_AGENTSCOPE_SCOUT_MAX_ITERATIONS:12}
-    scout-max-tool-calls: ${REVIEW_AGENTSCOPE_SCOUT_MAX_TOOL_CALLS:9}
-    scout-timeout: ${REVIEW_AGENTSCOPE_SCOUT_TIMEOUT:PT90S}
+    scout-max-tool-calls: ${REVIEW_AGENTSCOPE_SCOUT_MAX_TOOL_CALLS:16}
+    scout-timeout: ${REVIEW_AGENTSCOPE_SCOUT_TIMEOUT:PT150S}
+    # Debate convergence fallback: force-escalate open topics and begin judging when the Director
+    # wakes too often or the debate exceeds the wall-clock budget.
+    debate-max-director-wakes: ${REVIEW_AGENTSCOPE_DEBATE_MAX_DIRECTOR_WAKES:24}
+    debate-convergence-timeout: ${REVIEW_AGENTSCOPE_DEBATE_CONVERGENCE_TIMEOUT:PT20M}
   model-gateway:
     enabled: ${REVIEW_MODEL_GATEWAY_ENABLED:false}
     base-url: ${REVIEW_MODEL_GATEWAY_BASE_URL:}
     model-name: ${REVIEW_MODEL_GATEWAY_MODEL_NAME:}
+    # Provider tokens that reject simultaneous requests need this set to 1 (see local profile).
+    max-concurrent-calls: ${REVIEW_MODEL_GATEWAY_MAX_CONCURRENT_CALLS:4}
     # Supply the key only through an ignored profile-specific configuration file.
     api-key:
     # Print request/response bodies only for a controlled local debugging session; never enable in shared environments.
@@ -192,6 +204,16 @@ review:
       credential-environment-variable: ${REVIEW_QQ_MAIL_AUTH_CODE_ENV:REVIEW_QQ_MAIL_AUTH_CODE}
       subject-prefix: ${REVIEW_QQ_MAIL_SUBJECT_PREFIX:【重明需求评审】}
       auth-code: ${REVIEW_QQ_MAIL_AUTH_CODE:}
+    chaoxing:
+      # 学习通 uid 通知通道：默认关闭、继续以 QQ 邮箱为主；启用需配置 api/puid/pcode 与签名 token/key（fillParams_encnew），
+      # 且收件人 users.company_uid 为数字 uid 时才会与邮件并行扇出（多端通知）。
+      enabled: ${REVIEW_CHAOXING_ENABLED:false}
+      api: ${REVIEW_CHAOXING_API:}
+      detail-url: ${REVIEW_CHAOXING_DETAIL_URL:}
+      puid: ${REVIEW_CHAOXING_PUID:}
+      pcode: ${REVIEW_CHAOXING_PCODE:}
+      token: ${REVIEW_CHAOXING_TOKEN:}
+      key: ${REVIEW_CHAOXING_KEY:}
   auth:
     # 认证开关与 JWT 配置。签名密钥只允许通过环境变量 REVIEW_AUTH_JWT_SECRET 注入（HS256 至少 32 字节）；
     # 密钥缺失/过短且开关未显式置 true 时打 WARN 并自动禁用认证模块（正常启动），显式开启则拒绝启动；密钥不入库不入仓。

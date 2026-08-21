@@ -6,6 +6,8 @@ import ai.cc.chongming.review.config.NotificationMailProperties;
 import ai.cc.chongming.review.domain.model.NotificationCommand;
 import ai.cc.chongming.review.domain.model.NotificationDeliveryReceipt;
 import jakarta.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.MailAuthenticationException;
 import org.springframework.mail.MailException;
@@ -31,6 +33,8 @@ import java.util.function.Function;
 @Component
 @ConditionalOnProperty(prefix = "review.notification", name = "mail-enabled", havingValue = "true")
 public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SmtpMailNotificationAdapter.class);
 
     private final NotificationMailProperties properties;
     private final JavaMailSender mailSender;
@@ -69,16 +73,26 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             MimeMessageHelper helper = new MimeMessageHelper(message, false, StandardCharsets.UTF_8.name());
             helper.setFrom(properties.sender());
             helper.setTo(command.destination());
-            helper.setSubject(properties.subjectPrefix() + "Gate v" + command.gateVersion() + " · " + command.result());
+            helper.setSubject(command.templateKey() != null
+                    ? properties.subjectPrefix() + command.reason()
+                    : properties.subjectPrefix() + "Gate v" + command.gateVersion() + " · " + command.result());
             helper.setText(mailBody(command), false);
             mailSender.send(message);
         } catch (jakarta.mail.MessagingException exception) {
             throw new NotificationDeliveryException("MAIL_MESSAGE_BUILD_ERROR", false,
                     "Unable to build the notification mail message", exception);
         } catch (MailAuthenticationException exception) {
+            // Surface the SMTP reply (e.g. QQ 535) without ever logging credentials.
+            Throwable root = exception;
+            while (root.getCause() != null && root.getCause() != root) {
+                root = root.getCause();
+            }
+            LOGGER.warn("SMTP authentication failed for sender {}: {} / {}",
+                    properties.sender(), exception.getMessage(), root.getMessage());
             throw new NotificationDeliveryException("MAIL_AUTH_FAILED", false,
                     "SMTP authentication failed; verify the QQ mailbox and its authorization code", exception);
         } catch (MailException exception) {
+            LOGGER.warn("SMTP transport error for sender {}: {}", properties.sender(), exception.getMessage());
             throw new NotificationDeliveryException("MAIL_TRANSPORT_ERROR", true,
                     "SMTP delivery failed", exception);
         }
@@ -87,6 +101,17 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
 
     private String mailBody(NotificationCommand command) {
         StringBuilder body = new StringBuilder();
+        if (command.templateKey() != null) {
+            // [AIREVIEW-PLAN-030] Matrix transition notification.
+            body.append("重明任务流转通知\n\n");
+            body.append("- 事件: ").append(command.eventType()).append('\n');
+            body.append("- 内容: ").append(command.reason()).append('\n');
+            body.append("- 收件人: ").append(command.recipientUsername() == null ? "-" : command.recipientUsername()).append('\n');
+            body.append("- 评审: ").append(command.reviewId().value()).append('\n');
+            body.append("- 报告接口: ").append(command.reportUrl()).append('\n');
+            body.append("- 幂等键: ").append(command.idempotencyKey()).append('\n');
+            return body.toString();
+        }
         body.append("重明需求评审最终 Gate 通知\n\n");
         body.append("- 评审: ").append(command.reviewId().value()).append('\n');
         body.append("- Gate 版本: v").append(command.gateVersion()).append('\n');

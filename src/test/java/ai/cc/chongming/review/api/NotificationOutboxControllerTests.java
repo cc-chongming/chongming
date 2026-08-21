@@ -7,12 +7,14 @@ import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.GateResult;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
+import ai.cc.chongming.review.domain.repository.ReviewRepositories;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.domain.security.ReviewerIdentityProvider;
 import ai.cc.chongming.review.domain.security.ReviewerIdentityProvider.Permission;
 import ai.cc.chongming.review.domain.security.ReviewerIdentityProvider.ReviewerIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -43,6 +45,7 @@ class NotificationOutboxControllerTests {
     private NotificationOutboxService service;
     private ReviewRegistry registry;
     private ReviewerIdentityProvider identityProvider;
+    private ObjectProvider<ReviewRepositories> repositories;
     private MockMvc mockMvc;
     private UUID reviewId;
 
@@ -51,7 +54,10 @@ class NotificationOutboxControllerTests {
         service = mock(NotificationOutboxService.class);
         registry = mock(ReviewRegistry.class);
         identityProvider = mock(ReviewerIdentityProvider.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new NotificationOutboxController(service, registry, identityProvider))
+        repositories = mock(ObjectProvider.class);
+        when(repositories.getIfAvailable()).thenReturn(null);
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                        new NotificationOutboxController(service, registry, identityProvider, repositories))
                 .setControllerAdvice(new NotificationOutboxExceptionHandler())
                 .build();
         reviewId = UUID.randomUUID();
@@ -88,10 +94,41 @@ class NotificationOutboxControllerTests {
                 .andExpect(jsonPath("$.code").value("NOTIFICATION_FORBIDDEN"));
     }
 
+    @Test
+    void restoresPersistedReviewAfterRestartBeforeRetry() throws Exception {
+        UUID restoredId = UUID.randomUUID();
+        when(registry.find(new ReviewId(restoredId))).thenReturn(Optional.empty());
+        ReviewRepositories reviewRepositories = mock(ReviewRepositories.class);
+        when(repositories.getIfAvailable()).thenReturn(reviewRepositories);
+        Review restored = Review.restore(new ReviewId(restoredId), ReviewStage.NOTIFYING, 1, 0L, List.of(), Map.of());
+        when(reviewRepositories.findReview(new ReviewId(restoredId))).thenReturn(Optional.of(restored));
+        when(identityProvider.currentReviewer()).thenReturn(new ReviewerIdentity("reviewer-1", Set.of(Permission.REVIEW)));
+        when(service.retryNow(any(), any(), eq(0L), eq("reviewer-1"))).thenReturn(entry(new ReviewId(restoredId)));
+
+        mockMvc.perform(post("/api/reviews/{reviewId}/notifications/{notificationId}/retry", restoredId, UUID.randomUUID())
+                        .param("expectedVersion", "0"))
+                .andExpect(status().isOk());
+        verify(registry).register(restored);
+    }
+
+    @Test
+    void missingReviewStillReturnsNotFoundWhenPersistenceUnavailable() throws Exception {
+        UUID unknownId = UUID.randomUUID();
+        when(registry.find(new ReviewId(unknownId))).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/reviews/{reviewId}/notifications", unknownId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOTIFICATION_NOT_FOUND"));
+    }
+
     private NotificationOutboxEntry entry() {
+        return entry(new ReviewId(reviewId));
+    }
+
+    private NotificationOutboxEntry entry(ReviewId entryReviewId) {
         NotificationCommand command = new NotificationCommand(
-                new ReviewId(reviewId), 1L, "learning-platform", "recipient-placeholder", GateResult.PASS,
-                "approved", List.of(), "/api/reviews/" + reviewId + "/report");
+                entryReviewId, 1L, "learning-platform", "recipient-placeholder", GateResult.PASS,
+                "approved", List.of(), "/api/reviews/" + entryReviewId.value() + "/report");
         Instant createdAt = Instant.parse("2026-07-16T08:00:00Z");
         NotificationOutboxEntry sending = NotificationOutboxEntry.pending(command, "a".repeat(64), createdAt)
                 .claim(0L, createdAt);

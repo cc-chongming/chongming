@@ -22,16 +22,21 @@ import java.util.Objects;
 public class NotificationDeliveryRouter implements NotificationDeliveryPort {
 
     public static final String MAIL_CHANNEL = "smtp-mail";
+    public static final String CHAOXING_CHANNEL = "chaoxing";
 
     private final ObjectProvider<SmtpMailNotificationAdapter> mailAdapterProvider;
     private final ObjectProvider<LearningPlatformMcpAdapter> learningPlatformAdapterProvider;
+    private final ObjectProvider<ChaoxingNotificationAdapter> chaoxingAdapterProvider;
 
     public NotificationDeliveryRouter(
             ObjectProvider<SmtpMailNotificationAdapter> mailAdapterProvider,
-            ObjectProvider<LearningPlatformMcpAdapter> learningPlatformAdapterProvider) {
+            ObjectProvider<LearningPlatformMcpAdapter> learningPlatformAdapterProvider,
+            ObjectProvider<ChaoxingNotificationAdapter> chaoxingAdapterProvider) {
         this.mailAdapterProvider = Objects.requireNonNull(mailAdapterProvider, "mailAdapterProvider must not be null");
         this.learningPlatformAdapterProvider = Objects.requireNonNull(
                 learningPlatformAdapterProvider, "learningPlatformAdapterProvider must not be null");
+        this.chaoxingAdapterProvider = Objects.requireNonNull(
+                chaoxingAdapterProvider, "chaoxingAdapterProvider must not be null");
     }
 
     @Override
@@ -44,6 +49,14 @@ public class NotificationDeliveryRouter implements NotificationDeliveryPort {
                         "SMTP mail channel is disabled by configuration (review.notification.mail-enabled)");
             }
             return mailAdapter.deliver(command);
+        }
+        if (CHAOXING_CHANNEL.equalsIgnoreCase(command.channel())) {
+            ChaoxingNotificationAdapter chaoxingAdapter = chaoxingAdapterProvider.getIfAvailable();
+            if (chaoxingAdapter == null) {
+                throw new NotificationDeliveryException("CHAOXING_DISABLED", false,
+                        "Chaoxing channel is disabled by configuration (review.notification.chaoxing.enabled)");
+            }
+            return chaoxingAdapter.deliver(command);
         }
         LearningPlatformMcpAdapter learningPlatformAdapter = learningPlatformAdapterProvider.getIfAvailable();
         if (learningPlatformAdapter == null) {
