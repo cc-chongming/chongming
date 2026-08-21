@@ -103,6 +103,31 @@ export async function request(path, { method = 'GET', body, headers = {}, fetchI
     return parsed;
 }
 
+/**
+ * [AIREVIEW-PLAN-031#2] Binary download companion of {@link request}: returns the raw blob plus
+ * the RFC 5987 file name from Content-Disposition instead of parsing a JSON/text body.
+ */
+export async function requestBlob(path, { fetchImpl = fetch } = {}) {
+    const token = getAuthToken();
+    const response = await fetchImpl(apiPath(path), {
+        method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) {
+        if (response.status === 401 && !apiPath(path).startsWith('/api/auth/')) {
+            clearAuthSession();
+            redirectToLogin();
+        }
+        throw new ReviewApiError(`下载失败（HTTP ${response.status}）`, { status: response.status });
+    }
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    return {
+        blob: await response.blob(),
+        fileName: match ? decodeURIComponent(match[1]) : null
+    };
+}
+
 function jsonBody(value) {
     return {
         body: JSON.stringify(value),

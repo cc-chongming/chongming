@@ -9,6 +9,9 @@ import { isStoredTokenUsable, redirectToLogin, withAuthToken } from './auth-toke
 export const REVIEW_EVENT_TYPES = [
     'REVIEW_ACCEPTED', 'PLAN_CREATED', 'PLAN_REVISED',
     'ROLE_ACTIVATED', 'ROLE_STARTED', 'ROLE_COMPLETED', 'ROLE_FAILED', 'CONTEXT_SCOUT_DEGRADED',
+    // The structured conclusion lands with this event; without a live listener the scout
+    // conclusion panel stays empty until a manual page reload.
+    'CONTEXT_SCOUT_COMPLETED',
     'EVIDENCE_CAPTURED', 'CLAIM_SUBMITTED', 'DEBATE_TOPIC_OPENED', 'DEBATE_ROUND_2_STARTED',
     'CHALLENGE_SUBMITTED',
     'REBUTTAL_SUBMITTED', 'POSITION_CHANGED', 'EVIDENCE_REQUESTED', 'DEBATE_TOPIC_CLOSED',

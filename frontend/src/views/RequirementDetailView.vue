@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { formatApiError, ReviewApiError, reviewApi } from '../api/review-api';
+import { authStore } from '../stores/auth-store';
 import { taskApi } from '../api/task-api';
 import { formatChinaTime } from '../services/china-time';
 import RepositorySelect from '../components/RepositorySelect.vue';
@@ -35,7 +36,7 @@ const claims = ref([]);
 // Related development tasks drive the task-flow card and suppress manual lifecycle shortcuts.
 const relatedTasks = ref([]);
 const tasksLoadFailed = ref(false);
-const editForm = reactive({ title: '', description: '', assigneeId: '', priority: 'P1' });
+const editForm = reactive({ title: '', description: '', priority: 'P1' });
 // [AIREVIEW-PLAN-029] Repository binding edited alongside the draft; token is write-only.
 const editRepoSource = ref({ mode: 'configured', repositoryPath: '', remoteUrl: '', remoteRef: '', remoteToken: '' });
 const requirementIsRemote = computed(() => !!requirement.value?.remote);
@@ -44,11 +45,12 @@ const launchForm = reactive({
     repositoryPath: '',
     branch: 'main',
     commit: '',
-    submitter: 'demo-reviewer',
     publicTasks: '核对需求范围、验收标准与实现风险',
     changeReason: '草稿已补齐，发起首次评审',
     initialMessage: '请根据公开计划开始需求评审。'
 });
+// The submitter is always the logged-in account; no manual entry needed.
+const launchSubmitter = computed(() => authStore.currentUser.value?.username ?? '');
 
 const lifecycleSteps = [
     { key: 'DRAFT', label: '草稿' },
@@ -217,9 +219,9 @@ async function launchReview() {
         error.value = '请重新上传 Markdown 格式的评审需求文档。';
         return;
     }
-    if (!launchBindingReady.value || !launchForm.submitter.trim() || !launchTasks().length
+    if (!launchBindingReady.value || !launchTasks().length
         || !launchForm.changeReason.trim() || !launchForm.initialMessage.trim()) {
-        error.value = '请填写仓库、提交人、公开计划、计划原因和启动说明。';
+        error.value = '请填写仓库、公开计划、计划原因和启动说明。';
         return;
     }
     launching.value = true;
@@ -233,7 +235,7 @@ async function launchReview() {
             repositoryPath: requirementIsRemote.value ? null : launchForm.repositoryPath,
             branch: requirementIsRemote.value ? '' : launchForm.branch.trim(),
             commit: requirementIsRemote.value ? '' : launchForm.commit.trim(),
-            submitter: launchForm.submitter.trim(),
+            submitter: launchSubmitter.value,
             publicTasks: launchTasks(),
             changeReason: launchForm.changeReason.trim(),
             initialMessage: launchForm.initialMessage.trim(),
@@ -308,7 +310,6 @@ function beginEdit() {
     Object.assign(editForm, {
         title: requirement.value.title,
         description: requirement.value.description,
-        assigneeId: requirement.value.assigneeId ?? '',
         priority: requirement.value.priority ?? 'P1'
     });
     // [AIREVIEW-PLAN-029] Initialize the binding picker from the current requirement source.
@@ -365,7 +366,6 @@ async function saveEdit() {
         requirement.value = await reviewApi.reviseRequirement(props.requirementId, {
             title: editForm.title.trim(),
             description: editForm.description,
-            assigneeId: editForm.assigneeId,
             priority: editForm.priority,
             expectedVersion: requirement.value.version,
             ...repositoryPayload
@@ -426,7 +426,6 @@ onMounted(refreshRepositoryAvailability);
                         <span class="rd-meta-item"><span class="rd-mono">{{ shortId(requirement.id) }}</span></span>
                         <span class="rd-meta-item"><span class="tag" :class="currentStatus.tag">{{ currentStatus.label }}</span></span>
                         <span class="rd-meta-item"><span class="badge" :class="severityClass(requirement.priority)">{{ requirement.priority || '—' }}</span></span>
-                        <span class="rd-meta-item">👤 {{ requirement.assigneeId || '未指派' }}</span>
                         <span v-if="requirement.repositoryPath" class="rd-meta-item">📁 {{ requirement.repositoryPath }}</span>
                         <span v-else-if="requirement.remote" class="rd-meta-item">🌐 线上仓库 · {{ requirement.remote.url }}{{ requirement.remote.ref ? `（${requirement.remote.ref}）` : '' }}</span>
                         <span class="rd-meta-item">🕐 {{ formatChinaTime(requirement.updatedAt) }}</span>
@@ -456,7 +455,6 @@ onMounted(refreshRepositoryAvailability);
                     <label class="full">需求标题<input v-model="editForm.title" maxlength="256" required /></label>
                     <label class="full">需求描述<textarea v-model="editForm.description" /></label>
                     <label>优先级<select v-model="editForm.priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></label>
-                    <label>负责人（可选）<input v-model="editForm.assigneeId" /></label>
                     <div class="form-field full">
                         <label>仓库绑定</label>
                         <RepositorySourcePicker
@@ -482,7 +480,7 @@ onMounted(refreshRepositoryAvailability);
                         <label>分支<input v-model="launchForm.branch" placeholder="main" /></label>
                         <label>Commit（可选）<input v-model="launchForm.commit" placeholder="40 位 SHA" /></label>
                     </template>
-                    <label class="full">提交人<input v-model="launchForm.submitter" maxlength="128" required /></label>
+                    <label class="full">提交人<input :value="launchSubmitter" disabled /></label>
                     <label class="full">公开评审计划（每行一项）<textarea v-model="launchForm.publicTasks" required /></label>
                     <label class="full">计划原因<input v-model="launchForm.changeReason" maxlength="512" required /></label>
                     <label class="full">启动说明<textarea v-model="launchForm.initialMessage" required /></label>

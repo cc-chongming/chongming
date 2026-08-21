@@ -86,6 +86,58 @@ describe('review store', () => {
         });
     });
 
+    it('refreshes the summary live when the scout conclusion completes', async () => {
+        let summaryReads = 0;
+        const api = {
+            ...createApi(),
+            getSummary: async () => {
+                summaryReads += 1;
+                if (summaryReads === 1) {
+                    return { reviewId: fixture.reviewId, attempt: 1, reviewVersion: 4, lastSequence: 3, stage: 'PLANNING', progress: 10 };
+                }
+                return {
+                    reviewId: fixture.reviewId, attempt: 1, reviewVersion: 4, lastSequence: 4, stage: 'PLANNING', progress: 10,
+                    contextScout: { status: 'COMPLETED', conclusion: { summary: '结构化结论已生成。' } }
+                };
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+        expect(store.state.summary.contextScout).toBeUndefined();
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'CONTEXT_SCOUT_COMPLETED',
+            category: 'INFO', occurredAt: '2026-08-19 15:31:00', payload: { status: 'COMPLETED' }
+        });
+
+        await vi.waitFor(() => expect(store.state.summary.contextScout?.status).toBe('COMPLETED'));
+        expect(store.state.summary.contextScout?.conclusion?.summary).toBe('结构化结论已生成。');
+    });
+
+    it('refreshes the notification panel live when delivery events arrive', async () => {
+        let notificationReads = 0;
+        const api = {
+            ...createApi(),
+            getNotifications: async () => {
+                notificationReads += 1;
+                if (notificationReads === 1) return [];
+                return [{ notificationId: 'n-1', deliveryStatus: 'SENT', command: { channel: 'smtp-mail', gateVersion: 1 } }];
+            }
+        };
+        const store = createReviewStore({ api, EventSourceImpl: FakeEventSource });
+        await store.load(fixture.reviewId);
+        expect(store.state.notifications).toEqual([]);
+
+        store.mergeEvent({
+            reviewId: fixture.reviewId, sequence: 4, attemptNo: 1, type: 'NOTIFICATION_SENT',
+            category: 'NOTIFICATION', stage: 'COMPLETED', progress: 100,
+            occurredAt: '2026-08-21 18:00:00', payload: {}
+        });
+
+        await vi.waitFor(() => expect(store.state.notifications).toHaveLength(1));
+        expect(store.state.notifications[0].deliveryStatus).toBe('SENT');
+    });
+
     it('ignores a replayed Scout degradation from an earlier attempt', async () => {
         const api = {
             ...createApi(),

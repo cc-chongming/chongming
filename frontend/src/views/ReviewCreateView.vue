@@ -83,7 +83,7 @@ async function submit() {
             changeReason: form.changeReason.trim(),
             initialMessage: form.initialMessage.trim()
         });
-        await router.push({ name: 'review-workbench', params: { reviewId: acceptedReview.value.reviewId } });
+        await router.push({ name: 'review-live', params: { reviewId: acceptedReview.value.reviewId } });
     } catch (requestError) {
         error.value = formatApiError(requestError);
     } finally {

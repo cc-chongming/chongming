@@ -78,7 +78,7 @@ onUnmounted(() => { subscription?.close(); store.dispose(); });
                 <h1>项目上下文侦察</h1>
                 <p class="connection" :data-status="connection"><span aria-hidden="true">●</span>{{ statusText }}</p>
             </div>
-            <RouterLink class="button secondary" :to="{ name: 'review-workbench', params: { reviewId } }">返回评审工作台</RouterLink>
+            <RouterLink class="button secondary" :to="{ name: 'review-live', params: { reviewId } }">返回实时观察台</RouterLink>
         </header>
 
         <p class="live-observatory-note">此入口只读取当前评审尝试绑定的冻结快照；不会启动 Director、角色、辩论或 Gate，也不会把预览结果写入正式角色上下文。</p>

@@ -43,12 +43,12 @@ test.beforeEach(async ({ page }) => {
     }));
 });
 
-test('renders a replayable debate workbench without executing report content', async ({ page }) => {
+test('renders a replayable debate on the live page without executing report content', async ({ page }) => {
     await page.route('**/api/reviews/**', async (route) => {
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-        if (path.endsWith('/events')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+        if (path.endsWith('/events') || path.endsWith('/runtime/ag-ui')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
         if (path === `/api/reviews/${reviewId}`) return json({ reviewId, attempt: 1, stage: 'DEBATE_ROUND_1', progress: 52, lastSequence: 3, reviewVersion: 4, occurredAt: '2026-07-16 15:00:10', gate: null });
         if (path.endsWith('/plans')) return json({ items: [], nextAfterSequence: null });
         if (path.endsWith('/debates')) return json([{ topicId, subjectKey: '登录幂等边界', claimIds: [claimId], status: 'CHALLENGED', currentRound: 1, resolution: null, closedAt: null, claims: [{ claimId, role: 'PRODUCT', subjectKey: '登录幂等边界', severity: 'P1', position: 'SUPPORT', statement: '需要一次性登录令牌。', reasonSummary: '防止重复提交。', status: 'SUBMITTED', evidenceIds: [evidenceId] }], turns: [], judgement: null }]);
@@ -59,11 +59,12 @@ test('renders a replayable debate workbench without executing report content', a
         return json({});
     });
 
+    // The legacy workbench URL now redirects to the live observation console.
     await page.goto(`/index.html#/reviews/${reviewId}`);
+    await expect(page).toHaveURL(new RegExp(`#/reviews/${reviewId}/live$`));
     await expect(page.getByRole('heading', { name: '辩论时间线' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '公开对话流' })).toBeVisible();
-    await expect(page.getByText('需要一次性登录令牌。')).toBeVisible();
-    await page.getByRole('button', { name: '查看证据' }).click();
+    await expect(page.getByText('需要一次性登录令牌。').first()).toBeVisible();
+    await page.getByRole('button', { name: '查看证据' }).first().click();
     await expect(page.getByText('<script>window.__xss = true</script>')).toBeVisible();
     await expect(page.locator('pre script')).toHaveCount(0);
 });
@@ -74,7 +75,7 @@ test('starts a pending review with its server command contract', async ({ page }
         const requestUrl = new URL(route.request().url());
         const path = requestUrl.pathname;
         const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-        if (path.endsWith('/events')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+        if (path.endsWith('/events') || path.endsWith('/runtime/ag-ui')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
         if (path === `/api/reviews/${reviewId}/start`) {
             calls.push({ headers: route.request().headers(), body: route.request().postDataJSON() });
             return json({ reviewId, attemptNo: 1, version: 3, stage: 'PLANNING', replayed: false }, 202);
@@ -158,12 +159,12 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await expect(page.getByRole('button', { name: /项目经理/ })).toHaveCount(0);
     // 展开角色卡后可看到论点与可折叠的运行详情
     await page.getByRole('button', { name: /后端工程师/ }).click();
-    await expect(page.getByText('并发写入一致性无法保证。')).toBeVisible();
+    await expect(page.getByText('并发写入一致性无法保证。').first()).toBeVisible();
 
     // 切换到冲突检测：展示 SUPPORT vs OPPOSE 推导出的冲突卡
     await page.getByRole('button', { name: /冲突检测/ }).click();
     await expect(page.getByText('冲突 #1 [P0] · 数据冲突解决策略')).toBeVisible();
-    await expect(page.getByText('增量同步必须上线。')).toBeVisible();
+    await expect(page.getByText('增量同步必须上线。').first()).toBeVisible();
 
     // 切换到多轮辩论：展示回合 Tabs、支持/质疑对局与对话流
     await page.getByRole('button', { name: /多轮辩论/ }).click();
@@ -171,18 +172,19 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     await expect(page.getByText('🟢 支持方')).toBeVisible();
     await expect(page.getByText('🔴 质疑方')).toBeVisible();
     await expect(page.getByText('⚪ 中立方')).toBeVisible();
-    await expect(page.getByText('认证改动范围尚待确认。')).toBeVisible();
-    await expect(page.getByText('业务上能接受数据丢失吗？')).toBeVisible();
+    await expect(page.getByText('认证改动范围尚待确认。').first()).toBeVisible();
+    await expect(page.getByText('业务上能接受数据丢失吗？').first()).toBeVisible();
     await expect(page.getByText('共识度（支持 Claim 占比）')).toBeVisible();
 
-    // 切换到人工决策：展示 Gate 草案区与决策按钮条
+    // 切换到人工决策：展示 Gate 草案区与决策按钮条（人工面板在可达阶段直接内嵌本页）
     await page.getByRole('button', { name: /人工决策/ }).click();
-    await expect(page.getByText('系统已暂停 AI 输出，最终结论必须由人工在工作台明确选择并提交')).toBeVisible();
+    await expect(page.getByText('系统已暂停 AI 输出，最终结论必须由人工在本页明确选择并提交')).toBeVisible();
     await expect(page.getByText('人工结论与 AI Gate 草案不同')).toBeVisible();
     // 结论文案会在结论链、人工理由与 Gate 版本历史多处展示。
     await expect(page.getByText('范围需要补齐').first()).toBeVisible();
     await expect(page.getByLabel('评审结论链').getByText('范围需要补齐', { exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: '进入人工决策' })).toBeVisible();
+    // 当前阶段尚未进入人工决策，内嵌面板保持隐藏并给出等待提示。
+    await expect(page.getByText('评审尚未进入人工决策阶段')).toBeVisible();
 });
 
 test('removes the temporary draft when the uploaded Markdown already has a review', async ({ page }) => {

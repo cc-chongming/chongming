@@ -34,7 +34,7 @@ async function mockPlatformDashboard(page) {
     }));
 }
 
-test('shows positive findings, unknown evidence and required-checkpoint coverage together', async ({ page }) => {
+test('initial review phase shows only role cards, without roundtable or coverage panels', async ({ page }) => {
     await mockPlatformDashboard(page);
     await page.route('**/api/reviews/**', async (route) => {
         const requestUrl = new URL(route.request().url());
@@ -127,15 +127,13 @@ test('shows positive findings, unknown evidence and required-checkpoint coverage
 
     await page.goto(`/index.html#/reviews/${reviewId}`);
 
-    await expect(page.getByRole('heading', { name: '检查点覆盖' })).toBeVisible();
-    await expect(page.getByRole('progressbar', { name: '必检检查点覆盖 80%' })).toHaveAttribute('aria-valuenow', '80');
-    await expect(page.getByText('确认无问题', { exact: true })).toBeVisible();
-    await expect(page.getByText('执行但未知')).toBeVisible();
-    await expect(page.getByText('确认 2', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('部分满足 1', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('证据不足 1', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('需求价值与验收目标合理。')).toBeVisible();
-    await expect(page.getByText('当前授权证据不足。')).toBeVisible();
+    // [AIREVIEW-PLAN-030] The live initial-review phase only renders the activated role cards;
+    // the roundtable and checkpoint-coverage panels were removed from this view.
+    await expect(page.getByText('产品经理')).toBeVisible();
+    await expect(page.getByText('✅ 初审完成').first()).toBeVisible();
+    await expect(page.getByText('前端工程师')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '检查点覆盖' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: '评审圆桌' })).toHaveCount(0);
 });
 
 test('completes waiting human review through notifying with report version and sent notification', async ({ page }) => {

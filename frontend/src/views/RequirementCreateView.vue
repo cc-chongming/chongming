@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
+import { authStore } from '../stores/auth-store';
 import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
 import RequirementDocInput from '../components/RequirementDocInput.vue';
 
@@ -20,9 +21,11 @@ const reusedReviewId = ref(null);
 const repositoryState = ref('loading');
 const configuredRepositoryIds = ref([]);
 const form = reactive({
-    title: '', description: '', assigneeId: '', priority: 'P1', branch: 'main', commit: '', submitter: 'demo-reviewer',
+    title: '', description: '', priority: 'P1', branch: 'main', commit: '',
     publicTasks: '核对需求范围、验收标准与实现风险', changeReason: '初始评审计划', initialMessage: '请根据公开计划开始需求评审.', remark: ''
 });
+// The submitter is always the logged-in account; no manual entry needed.
+const submitter = computed(() => authStore.currentUser.value?.username ?? '');
 // [AIREVIEW-PLAN-029] Repository binding mode: configured whitelist or caller-supplied online source.
 const repoSource = ref({ mode: 'configured', repositoryPath: '', remoteUrl: '', remoteRef: '', remoteToken: '' });
 const isRemoteSource = computed(() => repoSource.value.mode === 'remote');
@@ -110,19 +113,19 @@ async function submit() {
     if (docMode.value === 'text') {
         if (!manualMarkdown.value.trim()) { error.value = '请输入 Markdown 需求内容，或切换为上传文档。'; return; }
     } else if (!file.value?.name.toLowerCase().endsWith('.md')) { error.value = '请上传 Markdown 格式的评审需求文档。'; return; }
-    if (!form.title.trim() || !form.submitter.trim() || !tasks().length) { error.value = '请填写需求标题、提交人和至少一项公开计划。'; return; }
+    if (!form.title.trim() || !tasks().length) { error.value = '请填写需求标题和至少一项公开计划。'; return; }
     if (!isRemoteSource.value && !repoSource.value.repositoryPath.trim()) { error.value = '请选择评审仓库或切换到线上仓库填写地址。'; return; }
     if (isRemoteSource.value && !repoSource.value.remoteUrl.trim()) { error.value = '请填写线上仓库地址。'; return; }
     submitting.value = true;
     try {
         if (!await ensureRepositoryBinding()) return;
         const requirement = await reviewApi.createRequirement({
-            title: form.title.trim(), description: form.description, assigneeId: form.assigneeId, priority: form.priority,
+            title: form.title.trim(), description: form.description, priority: form.priority,
             ...requirementRepositoryPayload()
         });
         savedDraftId.value = requirement.id;
         const review = await reviewApi.createReview({
-            ...requirementDocumentPayload(), submitter: form.submitter.trim(), ...reviewRepositoryPayload()
+            ...requirementDocumentPayload(), submitter: submitter.value, ...reviewRepositoryPayload()
         });
         if (review.reused) {
             try {
@@ -137,7 +140,7 @@ async function submit() {
         }
         const submitted = await reviewApi.submitRequirement(requirement.id, { reviewId: review.reviewId, expectedVersion: requirement.version });
         await reviewApi.startReview(review.reviewId, {
-            expectedVersion: 0, idempotencyKey: idempotencyKey(), userId: form.submitter.trim(), publicTasks: tasks(), changeReason: form.changeReason.trim(), initialMessage: form.initialMessage.trim()
+            expectedVersion: 0, idempotencyKey: idempotencyKey(), userId: submitter.value, publicTasks: tasks(), changeReason: form.changeReason.trim(), initialMessage: form.initialMessage.trim()
         });
         await router.push({ name: 'requirement-detail', params: { requirementId: submitted.id } });
     } catch (requestError) {
@@ -154,7 +157,7 @@ async function saveDraft() {
     try {
         if (!await ensureRepositoryBinding()) return;
         const requirement = await reviewApi.createRequirement({
-            title: form.title.trim(), description: form.description, assigneeId: form.assigneeId, priority: form.priority,
+            title: form.title.trim(), description: form.description, priority: form.priority,
             ...requirementRepositoryPayload()
         });
         await router.push({ name: 'requirement-detail', params: { requirementId: requirement.id } });
@@ -188,7 +191,6 @@ onMounted(refreshRepositoryAvailability);
                 </div>
                 <div class="form-row">
                     <div class="form-field"><label>优先级</label><select v-model="form.priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></div>
-                    <div class="form-field"><label>负责人</label><input v-model="form.assigneeId" placeholder="（可选）" /></div>
                 </div>
                 <div v-if="!isRemoteSource" class="form-field"><label>Commit（可选）</label><input v-model="form.commit" placeholder="40 位 SHA" /></div>
                 <div class="form-field"><label>需求描述</label><textarea v-model="form.description" placeholder="详细描述需求背景、目标、验收标准..." /></div>
@@ -197,7 +199,7 @@ onMounted(refreshRepositoryAvailability);
 
             <details class="review-settings">
                 <summary>评审启动设置</summary>
-                <div class="form-field"><label>提交人</label><input v-model="form.submitter" required /></div>
+                <div class="form-field"><label>提交人</label><input :value="submitter" disabled /></div>
                 <div class="form-field"><label>公开评审计划（每行一项）</label><textarea v-model="form.publicTasks" required /></div>
                 <div class="form-field"><label>计划原因</label><input v-model="form.changeReason" required /></div>
                 <div class="form-field"><label>启动说明</label><textarea v-model="form.initialMessage" required /></div>

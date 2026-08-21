@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
 import { reviewApi } from './api/review-api';
 import { authStore } from './stores/auth-store';
@@ -27,7 +27,7 @@ const pageTitles = {
     'requirement-create': '新建需求',
     'requirement-detail': '需求详情',
     reviews: '评审列表',
-    'review-workbench': '评审工作台',
+    'review-live': '实时观察台',
     reports: '评审报告',
     'review-report': '评审报告',
     'review-create': '发起评审',
@@ -80,13 +80,18 @@ function toggleSidebar() {
     sidebarCollapsed.value = !sidebarCollapsed.value;
 }
 
-onMounted(async () => {
+async function refreshCounts() {
     try {
         counts.value = await reviewApi.getDashboard();
     } catch {
         counts.value = null;
     }
-});
+}
+
+onMounted(refreshCounts);
+// [AIREVIEW-PLAN-027] Sidebar badges are permission-scoped; refetch whenever the signed-in
+// account changes so the nav counts always match what the list pages will show.
+watch(() => authStore.currentUser.value?.username, refreshCounts);
 </script>
 
 <template>

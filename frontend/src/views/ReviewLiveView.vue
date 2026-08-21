@@ -3,8 +3,12 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatChinaTime } from '../services/china-time';
 import LiveAgentConversation from '../components/LiveAgentConversation.vue';
+import HumanReviewPanel from '../components/HumanReviewPanel.vue';
+import DebateTimeline from '../components/DebateTimeline.vue';
+import EvidenceDrawer from '../components/EvidenceDrawer.vue';
 import ReviewClaimList from '../components/ReviewClaimList.vue';
 import ReviewConversationDrawer from '../components/ReviewConversationDrawer.vue';
+import ReviewLifecyclePanel from '../components/ReviewLifecyclePanel.vue';
 import ScoutConclusionPanel from '../components/ScoutConclusionPanel.vue';
 import {
     buildRuntimeConversation,
@@ -15,6 +19,8 @@ import {
 } from '../services/runtime-conversation-adapter';
 import { describeLiveRunState } from '../services/live-run-status';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
+import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
+import { reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
 
@@ -26,13 +32,87 @@ const selectedRound = ref(1);
 const expandedRole = ref(null);
 const drawerOpen = ref(true);
 const latestReviewReady = ref(false);
+const humanPanelError = ref('');
+const commandBusy = ref(false);
+const commandMessage = ref('');
+const lifecycleError = ref('');
 const stage = computed(() => store.state.summary?.stage ?? 'PENDING');
+// [AIREVIEW-PLAN-030] The lifecycle card only earns its space when it is actionable:
+// pending start, or a terminal failure/cancellation needing retry. Running reviews keep
+// refresh/cancel as compact header buttons instead of a card on every phase.
+const lifecycleCardRelevant = computed(() => ['PENDING', 'FAILED', 'CANCELLED'].includes(stage.value)
+    || commandMessage.value !== '' || lifecycleError.value !== '');
+const liveCancelable = computed(() => store.state.summary?.reviewVersion != null
+    && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(stage.value));
 const liveRunState = computed(() => describeLiveRunState(stage.value, runtimeTrace.state.status));
 const runtimeItems = computed(() => buildRuntimeConversation(runtimeTrace.state.events));
 const loadQueue = createLatestOnlyLoadQueue(() => {
     store.dispose();
     runtimeTrace.dispose();
 }, (ready) => { latestReviewReady.value = ready; });
+
+function showLifecycleError(error) {
+    lifecycleError.value = error?.message ?? String(error);
+}
+
+async function startReview(command) {
+    commandBusy.value = true;
+    commandMessage.value = '';
+    lifecycleError.value = '';
+    try {
+        const result = await store.startReview(command);
+        commandMessage.value = result.replayed ? '启动命令已重放，正在等待服务端事件。' : '启动命令已受理，正在等待服务端事件。';
+    } catch (error) {
+        showLifecycleError(error);
+    } finally {
+        commandBusy.value = false;
+    }
+}
+
+async function cancelReview() {
+    commandBusy.value = true;
+    commandMessage.value = '';
+    lifecycleError.value = '';
+    try {
+        const result = await store.cancelReview(store.state.summary?.reviewVersion);
+        commandMessage.value = result.replayed ? '取消命令已重放。' : '评审已取消。';
+    } catch (error) {
+        showLifecycleError(error);
+    } finally {
+        commandBusy.value = false;
+    }
+}
+
+function cancelLiveWithConfirm() {
+    if (window.confirm('确定取消当前评审？该操作不可撤销。')) {
+        cancelReview();
+    }
+}
+
+async function retryReview() {
+    commandBusy.value = true;
+    commandMessage.value = '';
+    lifecycleError.value = '';
+    try {
+        const result = await store.retryReview(store.state.summary?.reviewVersion);
+        runtimeTrace.start(props.reviewId, result.attemptNo);
+        commandMessage.value = '已创建新的评审尝试，请填写公开计划后启动。';
+    } catch (error) {
+        showLifecycleError(error);
+    } finally {
+        commandBusy.value = false;
+    }
+}
+
+async function retryNotification(entry) {
+    lifecycleError.value = '';
+    try {
+        await reviewApi.retryNotification(props.reviewId, entry.notificationId, entry.version);
+        await store.refreshNotifications();
+    } catch (error) {
+        showLifecycleError(error);
+    }
+}
 
 const phases = [
     { id: 'scout', icon: '🔍', name: 'Context Scout', subtitle: '项目信息收集' },
@@ -167,7 +247,13 @@ const stageLabel = {
     COMPLETED: '已完成', CANCELLED: '已取消', FAILED: '已失败'
 };
 const debateSubject = computed(() => debateTopics.value[0]?.subjectKey ?? null);
-const gateDraft = computed(() => store.state.summary?.gate ?? null);
+// [AIREVIEW-PLAN-023#6.3] Summary.gate becomes the human result after finalization, so recover
+// the earlier AI draft from the replayed GATE_DRAFTED fact when needed.
+const gateDraft = computed(() => resolveAiGateDraft(
+    store.state.summary?.gate ?? null,
+    store.state.humanGateVersions,
+    store.events.value
+));
 const gateOverride = computed(() => gateDifference(gateDraft.value, store.state.humanGateVersions));
 const scoutConclusion = computed(() => store.state.summary?.contextScout?.conclusion
     ?? store.state.summary?.contextScoutConclusion
@@ -382,14 +468,18 @@ onUnmounted(() => loadQueue.dispose());
 <template>
     <section class="review-flow-page">
         <header class="review-flow-header">
-            <div class="review-flow-brand">重明</div>
+            <RouterLink class="flow-header-link flow-back-link" :to="{ name: 'reviews' }">← 评审列表</RouterLink>
+            <RouterLink class="review-flow-brand" :to="{ name: 'dashboard' }">重明</RouterLink>
             <div class="review-flow-title"><strong>需求评审全流程</strong><span>评审 #{{ reviewId }}</span></div>
             <div class="review-flow-header-status" :data-status="runtimeTrace.state.status"><span aria-hidden="true"></span>{{ liveRunState.connectionText }} · {{ stage }}</div>
+            <span class="flow-header-button flow-stage-chip" aria-label="评审阶段">{{ stage }}</span>
             <button class="flow-drawer-toggle" type="button" :aria-expanded="drawerOpen" @click="drawerOpen = !drawerOpen">{{ drawerOpen ? '收起观察' : '展开观察' }}</button>
-            <RouterLink class="flow-header-link" :to="{ name: 'review-workbench', params: { reviewId } }">返回评审工作台</RouterLink>
+            <button v-if="liveCancelable" class="flow-header-button" type="button" :disabled="commandBusy" @click="cancelLiveWithConfirm">取消评审</button>
+            <button class="flow-header-button" type="button" :disabled="commandBusy" @click="() => store.refreshSummary().catch(() => {})">刷新状态</button>
+            <RouterLink class="flow-header-link" :to="{ name: 'review-report', params: { reviewId } }">查看最终报告</RouterLink>
         </header>
 
-        <p v-if="latestReviewReady && store.state.error" class="flow-error" role="alert">加载评审观察数据失败，请返回工作台查看正式状态。</p>
+        <p v-if="latestReviewReady && store.state.error" class="flow-error" role="alert">加载评审观察数据失败，请稍后重试。</p>
         <div v-else-if="!latestReviewReady || store.state.loading" class="flow-loading" aria-label="正在连接评审运行流"><span></span><span></span><span></span></div>
         <div v-else :class="['review-flow-layout', { 'drawer-closed': !drawerOpen }]">
             <nav class="flow-pipeline" aria-label="评审流程">
@@ -411,6 +501,19 @@ onUnmounted(() => loadQueue.dispose());
                     </div>
                     <span :class="['flow-phase-badge', phaseState(phases.findIndex((phase) => phase.id === activePhase))]">{{ phaseBadgeText(phaseState(phases.findIndex((phase) => phase.id === activePhase))) }}</span>
                 </header>
+
+                <section v-if="lifecycleCardRelevant" class="flow-lifecycle" aria-label="评审生命周期">
+                    <ReviewLifecyclePanel
+                        :summary="store.state.summary"
+                        :busy="commandBusy"
+                        :message="commandMessage"
+                        @start="startReview"
+                        @cancel="cancelReview"
+                        @retry="retryReview"
+                        @refresh="() => store.refreshSummary().catch(() => {})"
+                    />
+                    <p v-if="lifecycleError" class="flow-error" role="alert">{{ lifecycleError }}</p>
+                </section>
 
                 <!-- ── 流式阶段：Scout / Director / Judge ── -->
                 <template v-if="streamPhases.includes(activePhase)">
@@ -462,6 +565,7 @@ onUnmounted(() => loadQueue.dispose());
                         </article>
                         <p v-if="!reviewCards.length" class="flow-empty flow-review-grid-empty"><strong>尚未激活独立审查角色</strong><span>Director 发布角色激活结果后，这里只展示实际参与评审的角色。</span></p>
                     </div>
+
                 </template>
 
                 <!-- ── 冲突检测 ── -->
@@ -547,6 +651,7 @@ onUnmounted(() => loadQueue.dispose());
                             <p v-else class="flow-debate-empty">该回合暂无公开的质询或答辩记录。</p>
                         </section>
                     </template>
+                    <DebateTimeline v-if="debateTopics.length" class="flow-debate-timeline" :debates="debateTopics" @open-evidence="store.selectEvidence" />
                     <div v-else class="flow-empty"><strong>尚未开启辩论议题</strong><p>冲突检测完成后，Director 会将冲突组合并为辩论议题并在此展示回合对阵。</p></div>
                 </template>
 
@@ -573,9 +678,20 @@ onUnmounted(() => loadQueue.dispose());
 
                     <section class="flow-verdict-bar">
                         <span class="flow-verdict-badge">🧑 人工决策</span>
-                        <span class="flow-verdict-text">系统已暂停 AI 输出，最终结论必须由人工在工作台明确选择并提交</span>
-                        <RouterLink class="flow-human-decision-link" :to="{ name: 'review-workbench', params: { reviewId } }">进入人工决策</RouterLink>
+                        <span class="flow-verdict-text">系统已暂停 AI 输出，最终结论必须由人工在本页明确选择并提交</span>
                     </section>
+                    <p v-if="humanPanelError" class="flow-error" role="alert">{{ humanPanelError }}</p>
+                    <HumanReviewPanel
+                        v-if="humanPhaseReachable"
+                        :review-id="reviewId"
+                        :gate-versions="store.state.humanGateVersions"
+                        :gate-draft="gateDraft"
+                        :debates="store.state.debates"
+                        :claims="store.state.claims"
+                        :review-version="store.state.summary?.reviewVersion ?? null"
+                        @changed="async () => { await store.refreshHumanData(); await store.refreshReports(); await store.refreshNotifications(); }"
+                        @error="(message) => { humanPanelError = message; }"
+                    />
 
                     <section v-if="store.state.humanGateVersions.length" class="flow-gate-history" aria-label="Gate 版本历史">
                         <article v-for="gate in store.state.humanGateVersions" :key="gate.gateVersion">
@@ -583,10 +699,24 @@ onUnmounted(() => loadQueue.dispose());
                             <p>{{ gate.reason }}</p>
                         </article>
                     </section>
+
+                    <section class="flow-notification-panel" aria-labelledby="flow-notification-title">
+                        <header><h2 id="flow-notification-title">通知状态</h2></header>
+                        <p class="flow-notification-note">通知失败不会改变评审事实；可对 FAILED 或 DEAD 的通知发起幂等重试。</p>
+                        <ul v-if="store.state.notifications.length" class="notification-list">
+                            <li v-for="entry in store.state.notifications" :key="entry.notificationId">
+                                <div><strong>{{ entry.deliveryStatus }}</strong><span>{{ entry.command?.channel }} · Gate v{{ entry.command?.gateVersion }}</span></div>
+                                <p>{{ entry.lastErrorCode || entry.responseCode || '等待投递结果' }}</p>
+                                <button v-if="['FAILED', 'DEAD'].includes(entry.deliveryStatus)" class="text-button" type="button" @click="retryNotification(entry)">重试（v{{ entry.version }}）</button>
+                            </li>
+                        </ul>
+                        <p v-else class="flow-empty">最终 Gate 提交后将显示通知 Outbox 状态。</p>
+                    </section>
                 </template>
             </main>
 
             <ReviewConversationDrawer :open="drawerOpen" :items="runtimeItems" :facts="factTimeline" :debug-items="debugItems" @close="drawerOpen = false" />
         </div>
+        <EvidenceDrawer :evidence="store.state.selectedEvidence" @close="store.state.selectedEvidence = null" />
     </section>
 </template>

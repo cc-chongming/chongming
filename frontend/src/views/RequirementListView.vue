@@ -108,14 +108,13 @@ onMounted(async () => {
         <p v-if="loading" class="empty-note">正在读取需求…</p>
         <div v-else class="platform-table-wrap">
             <table class="platform-table req-table">
-                <thead><tr><th>编号</th><th>需求名称</th><th>状态</th><th>优先级</th><th>负责人</th><th>更新时间</th><th>操作</th></tr></thead>
+                <thead><tr><th>编号</th><th>需求名称</th><th>状态</th><th>优先级</th><th>更新时间</th><th>操作</th></tr></thead>
                 <tbody>
                     <tr v-for="item in result.items" :key="item.id">
                         <td class="req-id">{{ shortId(item.id) }}</td>
                         <td class="req-title"><RouterLink :to="`/requirements/${item.id}`">{{ item.title }}</RouterLink></td>
                         <td><span class="tag" :class="statusTag[item.status] ?? 'tag-draft'">{{ statusLabel[item.status] ?? item.status }}</span></td>
                         <td><span v-if="item.priority" class="badge" :class="priorityBadge[item.priority] ?? 'b-p2'">{{ item.priority }}</span><span v-else>—</span></td>
-                        <td class="req-assignee">{{ item.assigneeId || '—' }}</td>
                         <td class="req-date">{{ formatChinaTime(item.updatedAt) }}</td>
                         <td><button v-if="canDelete(item)" class="text-button danger" type="button" :disabled="loading" @click="remove(item)">删除</button></td>
                     </tr>

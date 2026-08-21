@@ -1,7 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 import { authStore } from '../stores/auth-store';
 import ReviewCreateView from '../views/ReviewCreateView.vue';
-import ReviewWorkbenchView from '../views/ReviewWorkbenchView.vue';
 import ReviewLiveView from '../views/ReviewLiveView.vue';
 import ReviewReportView from '../views/ReviewReportView.vue';
 import ContextScoutPreviewView from '../views/ContextScoutPreviewView.vue';
@@ -33,7 +32,9 @@ const router = createRouter({
         { path: '/create', name: 'review-create', component: ReviewCreateView },
         { path: '/reviews/:reviewId/live', name: 'review-live', component: ReviewLiveView, props: true },
         { path: '/reviews/:reviewId/scout', name: 'context-scout-preview', component: ContextScoutPreviewView, props: true },
-        { path: '/reviews/:reviewId', name: 'review-workbench', component: ReviewWorkbenchView, props: true },
+        // The standalone workbench page was merged into the live observation console; keep the
+        // old URL working by redirecting it there.
+        { path: '/reviews/:reviewId', redirect: (to) => `/reviews/${to.params.reviewId}/live` },
         { path: '/reviews/:reviewId/report', name: 'review-report', component: ReviewReportView, props: true },
         { path: '/:pathMatch(.*)*', redirect: '/dashboard' }
     ]

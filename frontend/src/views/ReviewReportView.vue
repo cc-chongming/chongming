@@ -174,7 +174,7 @@ onMounted(() => load(selectedVersion.value));
                             <span v-if="summary?.occurredAt">· 评审至 {{ formatChinaTime(summary.occurredAt) }}</span>
                         </div>
                     </div>
-                    <RouterLink class="button secondary" :to="{ name: 'review-workbench', params: { reviewId } }">返回工作台</RouterLink>
+                    <RouterLink class="button secondary" :to="{ name: 'review-live', params: { reviewId } }">返回实时观察台</RouterLink>
                 </div>
 
                 <div class="rpt-section"><h3>评审概览</h3>
@@ -365,15 +365,15 @@ onMounted(() => load(selectedVersion.value));
 .asmt-uncovered { margin: 10px 0; padding: 10px 12px; color: #57534e; background: #f5f5f4; border-radius: 8px; font-size: 13px; }
 .asmt-uncovered code { display: inline-block; margin: 2px 6px 0 0; padding: 1px 6px; color: #44403c; background: #fff; border: 1px solid #e7e5e4; border-radius: 6px; font-size: 11px; overflow-wrap: anywhere; }
 .asmt-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
-.asmt-block { padding: 12px; border: 1px solid #e7e5e4; border-radius: 10px; background: #fff; }
+.asmt-block { padding: 12px; border: 1px solid #e7e5e4; border-radius: 10px; background: #fff; min-width: 0; }
 .asmt-block h4 { margin: 0; font-size: 14px; }
 .asmt-hint { margin: 4px 0 10px; color: #78716c; font-size: 12px; }
 .asmt-block ol { display: grid; gap: 10px; margin: 0; padding-left: 18px; }
-.asmt-block li { line-height: 1.5; }
+.asmt-block li { line-height: 1.5; min-width: 0; }
 .asmt-entry-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
 .asmt-entry-head code { color: #78716c; font-size: 11px; overflow-wrap: anywhere; }
-.asmt-summary { margin: 3px 0; font-size: 13px; }
-.asmt-reason { margin: 0; color: #57534e; font-size: 12px; }
+.asmt-summary { margin: 3px 0; font-size: 13px; overflow-wrap: anywhere; }
+.asmt-reason { margin: 0; color: #57534e; font-size: 12px; overflow-wrap: anywhere; }
 .asmt-evidence { display: inline-block; margin-top: 4px; padding: 1px 7px; color: #1d4ed8; background: #dbeafe; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .asmt-block.asmt-confirmed { border-top: 3px solid #16a34a; }
 .asmt-block.asmt-partial { border-top: 3px solid #d97706; }

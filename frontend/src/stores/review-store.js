@@ -18,12 +18,21 @@ const DEBATE_AFFECTING_EVENTS = new Set([
 ]);
 const SUMMARY_AFFECTING_EVENTS = new Set([
     'GATE_DRAFTED', 'HUMAN_GATE_FINALIZED', 'REVIEW_FAILED', 'REVIEW_CANCELLED',
-    'REVIEW_RETRIED', 'REVIEW_RECOVERED'
+    'REVIEW_RETRIED', 'REVIEW_RECOVERED',
+    // The structured scout conclusion is persisted when the scout stream ends; without a live
+    // summary refresh the conclusion panel stays on "waiting" until a manual page reload.
+    'CONTEXT_SCOUT_COMPLETED'
 ]);
 // [AIREVIEW-PLAN-024#方案5] Assessments are persisted server-side as roles complete their
 // checkpoint coverage; those facts and attempt resets invalidate the five-status projection.
 const ASSESSMENT_AFFECTING_EVENTS = new Set([
     'ROLE_COMPLETED', 'INITIAL_REVIEW_COMPLETED', 'REVIEW_RETRIED'
+]);
+// [AIREVIEW-PLAN-011#1.7] Outbox delivery facts change the notification panel; without a live
+// refresh the SENDING/DEAD badges stay stale until a manual page reload.
+const NOTIFICATION_AFFECTING_EVENTS = new Set([
+    'NOTIFICATION_QUEUED', 'NOTIFICATION_SENT', 'NOTIFICATION_FAILED', 'NOTIFICATION_DEAD',
+    'NOTIFICATION_RETRY_REQUESTED'
 ]);
 
 function optional(promise, fallback) {
@@ -221,6 +230,14 @@ export function createReviewStore({ api = reviewApi, storage = defaultStorage(),
             }
             if (ASSESSMENT_AFFECTING_EVENTS.has(domainEvent.type)) {
                 refreshAssessments().catch(() => {});
+            }
+            if (NOTIFICATION_AFFECTING_EVENTS.has(domainEvent.type)) {
+                refreshNotifications().catch(() => {});
+            }
+            if (domainEvent.type === 'NOTIFICATION_SENT') {
+                // Delivery completes the review (NOTIFYING -> COMPLETED); keep the header banner
+                // live alongside the notification panel.
+                refreshSummary().catch(() => {});
             }
             return true;
         }
