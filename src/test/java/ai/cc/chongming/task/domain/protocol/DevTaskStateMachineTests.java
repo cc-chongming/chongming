@@ -52,6 +52,12 @@ class DevTaskStateMachineTests {
                 boolean expected =
                         (from == DevTaskStatus.PENDING_ASSIGN && to == DevTaskStatus.DEVELOPING)
                                 || (from == DevTaskStatus.DEVELOPING && to == DevTaskStatus.PENDING_ACCEPTANCE)
+                                // [AIREVIEW-PLAN-030] pause/resume/cancel edges.
+                                || (from == DevTaskStatus.DEVELOPING && to == DevTaskStatus.PAUSED)
+                                || (from == DevTaskStatus.DEVELOPING && to == DevTaskStatus.CANCELLED)
+                                || (from == DevTaskStatus.PAUSED && to == DevTaskStatus.DEVELOPING)
+                                || (from == DevTaskStatus.PAUSED && to == DevTaskStatus.CANCELLED)
+                                || (from == DevTaskStatus.PENDING_ACCEPTANCE && to == DevTaskStatus.CANCELLED)
                                 || (from == DevTaskStatus.PENDING_ACCEPTANCE && to == DevTaskStatus.DONE)
                                 || (from == DevTaskStatus.PENDING_ACCEPTANCE && to == DevTaskStatus.DEVELOPING);
                 assertThat(stateMachine.canTransition(from, to))
@@ -63,7 +69,8 @@ class DevTaskStateMachineTests {
             }
         }
         assertThat(allowed).containsExactlyInAnyOrder(
-                DevTaskStatus.DEVELOPING, DevTaskStatus.PENDING_ACCEPTANCE, DevTaskStatus.DONE);
+                DevTaskStatus.DEVELOPING, DevTaskStatus.PENDING_ACCEPTANCE, DevTaskStatus.DONE,
+                DevTaskStatus.PAUSED, DevTaskStatus.CANCELLED);
     }
 
     @Test

@@ -199,3 +199,71 @@ test('ADMIN rejects a pending-acceptance task back to development with a note', 
     expect(rejectBody).toEqual({ note: '报告导出仍有缺陷，请修复后重新提验', expectedVersion: 7 });
     await expect(page.locator('.rd-info .tag')).toHaveText('开发中');
 });
+
+// [AIREVIEW-PLAN-031#2] Handoff reads the non-admin directory and the detail page carries a
+// delivery-attachment panel shared by handoff and acceptance.
+test('holder picks a non-admin handoff target and shares delivery attachments', async ({ page }) => {
+    const devUser = { username: 'dev-li', displayName: '李开发', role: 'DEVELOPER' };
+    await page.addInitScript(({ token, user }) => {
+        localStorage.setItem('chongming-auth', JSON.stringify({ token, user }));
+    }, { token: makeJwt({ sub: devUser.username, exp: 4102444800 }), user: devUser });
+
+    const attachmentTask = {
+        taskId: 'task-attachments', title: '附件流转任务', requirementId: 'req-1',
+        requirementTitle: '任务流转需求', status: 'DEVELOPING', assigneeUsername: 'dev-li',
+        currentHolderUsername: 'dev-li', dispatcherUsername: 'admin-user',
+        updatedAt: '2026-08-20 10:00', createdAt: '2026-08-19 09:00',
+        acceptanceNote: null, reviewId: null, handoffHistory: [], version: 2
+    };
+    let attachments = [{
+        attachmentId: 'att-1', taskId: 'task-attachments', fileName: 'design.md',
+        contentType: 'text/markdown', fileSize: 1024, uploadedBy: 'dev-li',
+        createdAt: '2026-08-20T02:00:00Z'
+    }];
+    await page.route((url) => url.pathname === '/api/tasks/task-attachments', (route) => route.fulfill(json(attachmentTask)));
+    await page.route((url) => url.pathname === '/api/tasks/assignable-users', (route) => route.fulfill(json([
+        { username: 'dev-li', displayName: '李开发' },
+        { username: 'dev-zhang', displayName: '张开发' }
+    ])));
+    await page.route((url) => url.pathname === '/api/tasks/task-attachments/attachments', (route) => {
+        if (route.request().method() === 'POST') {
+            const entry = {
+                attachmentId: 'att-2', taskId: 'task-attachments', fileName: 'self-test.md',
+                contentType: 'text/markdown', fileSize: 128, uploadedBy: 'dev-li',
+                createdAt: '2026-08-20T03:00:00Z'
+            };
+            attachments = [...attachments, entry];
+            return route.fulfill(json(entry));
+        }
+        return route.fulfill(json(attachments));
+    });
+    await page.route((url) => url.pathname === '/api/tasks/task-attachments/attachments/att-1', (route) => route.fulfill({
+        status: 200,
+        contentType: 'text/markdown',
+        headers: { 'Content-Disposition': "attachment; filename*=UTF-8''design.md" },
+        body: '# 设计文档'
+    }));
+
+    await page.goto('/index.html#/tasks/task-attachments');
+
+    // 流转下拉只读非管理员用户目录，且排除当前持有人。
+    const handoffSelect = page.locator('.review-form select');
+    await expect(handoffSelect).toBeVisible();
+    await expect(handoffSelect.locator('option')).toHaveCount(2); // 占位 + 张开发
+    await expect(handoffSelect.locator('option', { hasText: 'dev-li' })).toHaveCount(0);
+    await handoffSelect.selectOption('dev-zhang');
+
+    // 附件面板展示已上传交付物，可下载。
+    await expect(page.getByText('design.md')).toBeVisible();
+    const downloadRequest = page.waitForRequest(
+        (request) => request.url().includes('/api/tasks/task-attachments/attachments/att-1'));
+    await page.getByRole('link', { name: 'design.md' }).click();
+    await downloadRequest;
+
+    // 持有人上传新附件后列表即时刷新。
+    await page.setInputFiles('.review-form input[type="file"]', {
+        name: 'self-test.md', mimeType: 'text/markdown', buffer: Buffer.from('# 自测报告')
+    });
+    await page.getByRole('button', { name: '上传', exact: true }).click();
+    await expect(page.getByText('self-test.md')).toBeVisible();
+});

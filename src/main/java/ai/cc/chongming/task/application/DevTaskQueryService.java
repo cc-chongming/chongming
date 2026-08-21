@@ -75,6 +75,8 @@ public class DevTaskQueryService {
                 task.assigneeDisplayName(),
                 task.dispatcherUsername(),
                 task.acceptanceNote(),
+                task.currentHolderUsername(),
+                task.handoffHistory(),
                 task.version(),
                 task.createdAt().toString(),
                 task.updatedAt().toString());
@@ -130,6 +132,8 @@ public class DevTaskQueryService {
             String assigneeDisplayName,
             String dispatcherUsername,
             String acceptanceNote,
+            String currentHolderUsername,
+            List<ai.cc.chongming.task.domain.DevTaskTypes.HandoffEntry> handoffHistory,
             long version,
             String createdAt,
             String updatedAt) {

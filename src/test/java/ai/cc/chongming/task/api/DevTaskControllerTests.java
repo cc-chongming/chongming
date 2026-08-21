@@ -2,6 +2,7 @@ package ai.cc.chongming.task.api;
 
 import ai.cc.chongming.auth.api.AuthJwtFilter;
 import ai.cc.chongming.auth.application.JwtTokenService.AuthPrincipal;
+import ai.cc.chongming.auth.domain.UserRepository;
 import ai.cc.chongming.task.application.DevTaskCommandService;
 import ai.cc.chongming.task.application.DevTaskProvisioningListener;
 import ai.cc.chongming.task.application.DevTaskQueryService;
@@ -11,6 +12,7 @@ import ai.cc.chongming.task.domain.DevTaskTypes.DevTaskId;
 import ai.cc.chongming.task.domain.exception.TaskDomainException;
 import ai.cc.chongming.task.domain.exception.TaskErrorCode;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,7 +73,7 @@ class DevTaskControllerTests {
         when(queryService.findPage("PENDING_ASSIGN", null, null, null, 1, 20)).thenReturn(new TaskPage(
                 List.of(new DevTaskView(
                         taskId, requirementId, "统一身份同步", null, "统一身份同步", "PENDING_ASSIGN",
-                        null, null, null, null, 0L, "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z")),
+                        null, null, null, null, null, List.of(), 0L, "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z")),
                 1, 20, 1L));
 
         mockMvc.perform(get("/api/tasks")
@@ -116,7 +118,7 @@ class DevTaskControllerTests {
         UUID taskId = UUID.randomUUID();
         when(queryService.findById(new DevTaskId(taskId))).thenReturn(new DevTaskView(
                 taskId, UUID.randomUUID(), "统一身份同步", null, "统一身份同步", "DEVELOPING",
-                "bob", "李开发", "admin", null, 2L, "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z"));
+                "bob", "李开发", "admin", null, null, List.of(), 2L, "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z"));
 
         mockMvc.perform(get("/api/tasks/{taskId}", taskId)
                         .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, USER))
@@ -138,7 +140,7 @@ class DevTaskControllerTests {
         UUID taskId = UUID.randomUUID();
         DevTaskView assigned = new DevTaskView(
                 taskId, UUID.randomUUID(), "统一身份同步", null, "统一身份同步", "DEVELOPING",
-                "bob", "李开发", "admin", null, 1L, "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z");
+                "bob", "李开发", "admin", null, null, List.of(), 1L, "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z");
         when(queryService.findById(new DevTaskId(taskId))).thenReturn(assigned);
 
         mockMvc.perform(post("/api/tasks/{taskId}/assign", taskId)
@@ -184,7 +186,7 @@ class DevTaskControllerTests {
         UUID taskId = UUID.randomUUID();
         DevTaskView submitted = new DevTaskView(
                 taskId, UUID.randomUUID(), "统一身份同步", null, "统一身份同步", "PENDING_ACCEPTANCE",
-                "bob", "李开发", "admin", null, 2L, "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z");
+                "bob", "李开发", "admin", null, null, List.of(), 2L, "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z");
         when(queryService.findById(new DevTaskId(taskId))).thenReturn(submitted);
 
         mockMvc.perform(post("/api/tasks/{taskId}/submit-acceptance", taskId)
@@ -278,5 +280,44 @@ class DevTaskControllerTests {
         mockMvc.perform(get("/api/tasks"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void assignableUsersListsNonAdminAccountsForAnyParticipant() throws Exception {
+        UserRepository userRepository = mock(UserRepository.class);
+        when(userRepository.findAll()).thenReturn(List.of(
+                new UserRepository.UserView("admin", "管理员", "ADMIN"),
+                new UserRepository.UserView("bob", "Bob", "DEVELOPER"),
+                new UserRepository.UserView("carol", "Carol", "PRODUCT_MANAGER")));
+        MockMvc directoryMvc = MockMvcBuilders.standaloneSetup(new DevTaskController(
+                        commandService, queryService, provisioningListener, null, userRepository))
+                .setControllerAdvice(new DevTaskExceptionHandler())
+                .setValidator(new LocalValidatorFactoryBean())
+                .build();
+
+        directoryMvc.perform(get("/api/tasks/assignable-users")
+                        .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, USER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].username").value("bob"))
+                .andExpect(jsonPath("$[1].username").value("carol"));
+    }
+
+    @Test
+    void handoffRejectsUnknownTargetUserWith404() throws Exception {
+        UserRepository userRepository = mock(UserRepository.class);
+        when(userRepository.findByUsername("ghost")).thenReturn(Optional.empty());
+        MockMvc directoryMvc = MockMvcBuilders.standaloneSetup(new DevTaskController(
+                        commandService, queryService, provisioningListener, null, userRepository))
+                .setControllerAdvice(new DevTaskExceptionHandler())
+                .setValidator(new LocalValidatorFactoryBean())
+                .build();
+
+        directoryMvc.perform(post("/api/tasks/{taskId}/handoff", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"toUsername\":\"ghost\",\"expectedVersion\":1}")
+                        .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, ADMIN))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
     }
 }

@@ -2,9 +2,9 @@
  * Thin REST client for the task-center endpoints (dispatch / acceptance workflow).
  * Reuses the shared `request()` pipeline from review-api so ProblemDetail parsing,
  * `ReviewApiError` semantics and Bearer-token injection stay identical.
- * Task status vocabulary: PENDING_ASSIGN / DEVELOPING / PENDING_ACCEPTANCE / DONE.
+ * Task status vocabulary: PENDING_ASSIGN / DEVELOPING / PAUSED / PENDING_ACCEPTANCE / DONE / CANCELLED.
  */
-import { request } from './review-api';
+import { request, requestBlob } from './review-api';
 
 function jsonBody(value) {
     return {
@@ -51,5 +51,53 @@ export const taskApi = {
         return request(`/api/tasks/${taskId}/reject`, {
             method: 'POST', ...jsonBody({ note, expectedVersion })
         });
+    },
+
+    // [AIREVIEW-PLAN-030] Multi-hop flow commands.
+    handoff(taskId, { toUsername, note, expectedVersion }) {
+        return request(`/api/tasks/${taskId}/handoff`, {
+            method: 'POST', ...jsonBody({ toUsername, note, expectedVersion })
+        });
+    },
+
+    pause(taskId, { note, expectedVersion }) {
+        return request(`/api/tasks/${taskId}/pause`, {
+            method: 'POST', ...jsonBody({ note, expectedVersion })
+        });
+    },
+
+    resume(taskId, { note, expectedVersion }) {
+        return request(`/api/tasks/${taskId}/resume`, {
+            method: 'POST', ...jsonBody({ note, expectedVersion })
+        });
+    },
+
+    cancel(taskId, { note, expectedVersion }) {
+        return request(`/api/tasks/${taskId}/cancel`, {
+            method: 'POST', ...jsonBody({ note, expectedVersion })
+        });
+    },
+
+    // [AIREVIEW-PLAN-031#2] Handoff directory plus delivery attachments.
+    listAssignableUsers() {
+        return request('/api/tasks/assignable-users');
+    },
+
+    listAttachments(taskId) {
+        return request(`/api/tasks/${taskId}/attachments`);
+    },
+
+    uploadAttachment(taskId, file) {
+        const form = new FormData();
+        form.append('file', file);
+        return request(`/api/tasks/${taskId}/attachments`, { method: 'POST', body: form });
+    },
+
+    downloadAttachment(taskId, attachmentId) {
+        return requestBlob(`/api/tasks/${taskId}/attachments/${attachmentId}`);
+    },
+
+    deleteAttachment(taskId, attachmentId) {
+        return request(`/api/tasks/${taskId}/attachments/${attachmentId}`, { method: 'DELETE' });
     }
 };

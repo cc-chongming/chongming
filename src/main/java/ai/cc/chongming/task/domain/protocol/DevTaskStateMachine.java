@@ -22,8 +22,11 @@ public final class DevTaskStateMachine {
 
     public DevTaskStateMachine() {
         allow(DevTaskStatus.PENDING_ASSIGN, DevTaskStatus.DEVELOPING);
-        allow(DevTaskStatus.DEVELOPING, DevTaskStatus.PENDING_ACCEPTANCE);
-        allow(DevTaskStatus.PENDING_ACCEPTANCE, DevTaskStatus.DONE, DevTaskStatus.DEVELOPING);
+        allow(DevTaskStatus.DEVELOPING, DevTaskStatus.PENDING_ACCEPTANCE, DevTaskStatus.PAUSED,
+                DevTaskStatus.CANCELLED);
+        allow(DevTaskStatus.PAUSED, DevTaskStatus.DEVELOPING, DevTaskStatus.CANCELLED);
+        allow(DevTaskStatus.PENDING_ACCEPTANCE, DevTaskStatus.DONE, DevTaskStatus.DEVELOPING,
+                DevTaskStatus.CANCELLED);
     }
 
     public DevTaskStatus transition(DevTaskStatus current, DevTaskStatus next) {

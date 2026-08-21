@@ -21,10 +21,12 @@ public interface DevTaskMapper {
     @Insert("""
             INSERT INTO dev_task
                 (task_id, requirement_id, review_id, title, task_status, assignee_username,
-                 dispatcher_username, acceptance_note, version, created_at, updated_at)
+                 dispatcher_username, acceptance_note, version, created_at, updated_at,
+                 current_holder_username, handoff_history)
             VALUES
                 (#{taskId}, #{requirementId}, #{reviewId}, #{title}, #{status}, #{assigneeUsername},
-                 #{dispatcherUsername}, #{acceptanceNote}, #{version}, #{createdAt}, #{updatedAt})
+                 #{dispatcherUsername}, #{acceptanceNote}, #{version}, #{createdAt}, #{updatedAt},
+                 #{currentHolderUsername}, #{handoffHistoryJson})
             """)
     int insert(DevTaskRow row);
 
@@ -32,7 +34,9 @@ public interface DevTaskMapper {
             UPDATE dev_task
             SET task_status = #{row.status}, assignee_username = #{row.assigneeUsername},
                 dispatcher_username = #{row.dispatcherUsername}, acceptance_note = #{row.acceptanceNote},
-                version = #{row.version}, updated_at = #{row.updatedAt}
+                version = #{row.version}, updated_at = #{row.updatedAt},
+                current_holder_username = #{row.currentHolderUsername},
+                handoff_history = #{row.handoffHistoryJson}
             WHERE task_id = #{row.taskId} AND version = #{expectedVersion}
             """)
     int update(@Param("row") DevTaskRow row, @Param("expectedVersion") long expectedVersion);
@@ -42,6 +46,7 @@ public interface DevTaskMapper {
                    t.title, t.task_status AS status, t.assignee_username AS assigneeUsername,
                    t.dispatcher_username AS dispatcherUsername, t.acceptance_note AS acceptanceNote,
                    t.version, t.created_at AS createdAt, t.updated_at AS updatedAt,
+                   t.current_holder_username AS currentHolderUsername, t.handoff_history AS handoffHistoryJson,
                    r.title AS requirementTitle, u.display_name AS assigneeDisplayName
             FROM dev_task t
             LEFT JOIN requirement r ON r.requirement_id = t.requirement_id
@@ -55,6 +60,7 @@ public interface DevTaskMapper {
                    title, task_status AS status, assignee_username AS assigneeUsername,
                    dispatcher_username AS dispatcherUsername, acceptance_note AS acceptanceNote,
                    version, created_at AS createdAt, updated_at AS updatedAt,
+                   current_holder_username AS currentHolderUsername, handoff_history AS handoffHistoryJson,
                    NULL AS requirementTitle, NULL AS assigneeDisplayName
             FROM dev_task WHERE requirement_id = #{requirementId}
             """)
@@ -66,6 +72,7 @@ public interface DevTaskMapper {
                    t.title, t.task_status AS status, t.assignee_username AS assigneeUsername,
                    t.dispatcher_username AS dispatcherUsername, t.acceptance_note AS acceptanceNote,
                    t.version, t.created_at AS createdAt, t.updated_at AS updatedAt,
+                   t.current_holder_username AS currentHolderUsername, t.handoff_history AS handoffHistoryJson,
                    r.title AS requirementTitle, u.display_name AS assigneeDisplayName
             FROM dev_task t
             LEFT JOIN requirement r ON r.requirement_id = t.requirement_id
@@ -136,6 +143,8 @@ public interface DevTaskMapper {
             long version,
             LocalDateTime createdAt,
             LocalDateTime updatedAt,
+            String currentHolderUsername,
+            String handoffHistoryJson,
             String requirementTitle,
             String assigneeDisplayName) {
     }

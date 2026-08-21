@@ -4,10 +4,13 @@ import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.task.domain.DevTaskTypes.DevTaskId;
 import ai.cc.chongming.task.domain.DevTaskTypes.DevTaskStatus;
+import ai.cc.chongming.task.domain.DevTaskTypes.HandoffEntry;
 import ai.cc.chongming.task.domain.exception.TaskDomainException;
 import ai.cc.chongming.task.domain.exception.TaskErrorCode;
 import ai.cc.chongming.task.domain.protocol.DevTaskStateMachine;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -34,6 +37,8 @@ public final class DevTask {
     private long version;
     private String requirementTitle;
     private String assigneeDisplayName;
+    private String currentHolderUsername;
+    private final List<HandoffEntry> handoffHistory = new ArrayList<>();
 
     private DevTask(
             DevTaskId taskId,
@@ -91,7 +96,28 @@ public final class DevTask {
             Instant createdAt,
             Instant updatedAt,
             long version) {
-        return new DevTask(
+        return restore(taskId, requirementId, reviewId, title, status, assigneeUsername, dispatcherUsername,
+                acceptanceNote, createdAt, updatedAt, version, assigneeUsername, List.of());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-030] Restore carrying the handoff chain facts.
+     */
+    public static DevTask restore(
+            DevTaskId taskId,
+            RequirementId requirementId,
+            ReviewId reviewId,
+            String title,
+            DevTaskStatus status,
+            String assigneeUsername,
+            String dispatcherUsername,
+            String acceptanceNote,
+            Instant createdAt,
+            Instant updatedAt,
+            long version,
+            String currentHolderUsername,
+            List<HandoffEntry> handoffHistory) {
+        DevTask task = new DevTask(
                 taskId,
                 requirementId,
                 reviewId,
@@ -103,6 +129,11 @@ public final class DevTask {
                 createdAt,
                 updatedAt,
                 version);
+        task.currentHolderUsername = normalizeOptional(currentHolderUsername);
+        if (handoffHistory != null) {
+            task.handoffHistory.addAll(handoffHistory);
+        }
+        return task;
     }
 
     public DevTaskId taskId() {
@@ -135,6 +166,16 @@ public final class DevTask {
 
     public String acceptanceNote() {
         return acceptanceNote;
+    }
+
+    /** [AIREVIEW-PLAN-030] Current holder; falls back to the assignee for pre-handoff tasks. */
+    public String currentHolderUsername() {
+        return currentHolderUsername != null ? currentHolderUsername : assigneeUsername;
+    }
+
+    /** [AIREVIEW-PLAN-030] Append-only handoff timeline. */
+    public List<HandoffEntry> handoffHistory() {
+        return List.copyOf(handoffHistory);
     }
 
     public Instant createdAt() {
@@ -193,6 +234,44 @@ public final class DevTask {
         transitionTo(DevTaskStatus.DEVELOPING, stateMachine);
         this.assigneeUsername = assignee;
         this.dispatcherUsername = dispatcher;
+        this.currentHolderUsername = assignee;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-030] Directed holder change while developing; appends an immutable
+     * handoff entry and re-points the assignee so legacy visibility keeps working.
+     */
+    public void handoff(String toUsername, String note, DevTaskStateMachine stateMachine) {
+        Objects.requireNonNull(stateMachine, "stateMachine must not be null");
+        if (status != DevTaskStatus.DEVELOPING) {
+            throw new TaskDomainException(
+                    TaskErrorCode.ILLEGAL_TASK_TRANSITION,
+                    "handoff requires DEVELOPING, but was " + status);
+        }
+        String to = required(toUsername, "toUsername");
+        String from = currentHolderUsername != null ? currentHolderUsername : assigneeUsername;
+        handoffHistory.add(new HandoffEntry(handoffHistory.size() + 1, from, to, normalizeNote(note), Instant.now()));
+        this.currentHolderUsername = to;
+        this.assigneeUsername = to;
+        touch();
+    }
+
+    /** [AIREVIEW-PLAN-030] Pauses a developing task; the note carries the blocking reason. */
+    public void pause(String note, DevTaskStateMachine stateMachine) {
+        transitionTo(DevTaskStatus.PAUSED, stateMachine);
+        this.acceptanceNote = normalizeNote(note);
+    }
+
+    /** [AIREVIEW-PLAN-030] Resumes a paused task back to development. */
+    public void resume(String note, DevTaskStateMachine stateMachine) {
+        transitionTo(DevTaskStatus.DEVELOPING, stateMachine);
+        this.acceptanceNote = normalizeNote(note);
+    }
+
+    /** [AIREVIEW-PLAN-030] Terminally closes the task without completion. */
+    public void cancel(String note, DevTaskStateMachine stateMachine) {
+        transitionTo(DevTaskStatus.CANCELLED, stateMachine);
+        this.acceptanceNote = normalizeNote(note);
     }
 
     /**

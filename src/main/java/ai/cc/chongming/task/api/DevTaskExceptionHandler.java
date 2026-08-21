@@ -20,7 +20,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  *
  * @author wangli
  */
-@RestControllerAdvice(assignableTypes = DevTaskController.class)
+@RestControllerAdvice(assignableTypes = {DevTaskController.class, TaskAttachmentController.class})
 public class DevTaskExceptionHandler {
 
     /** Correlation header echoed on every task error response. */
@@ -29,8 +29,9 @@ public class DevTaskExceptionHandler {
     @ExceptionHandler(TaskDomainException.class)
     public ResponseEntity<ProblemDetail> taskDomainFailure(TaskDomainException exception, HttpServletResponse response) {
         HttpStatus status = switch (exception.errorCode()) {
-            case TASK_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case TASK_NOT_FOUND, USER_NOT_FOUND, ATTACHMENT_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case ATTACHMENT_TOO_LARGE -> HttpStatus.PAYLOAD_TOO_LARGE;
             case VERSION_CONFLICT, ILLEGAL_TASK_TRANSITION, TASK_REQUIREMENT_STATE_CONFLICT -> HttpStatus.CONFLICT;
         };
         return toResponse(status, exception.errorCode().name(), exception.getMessage(), response);
