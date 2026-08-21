@@ -72,10 +72,25 @@ public class InMemoryUserRepository implements UserRepository {
     }
 
     @Override
+    public Optional<User> updateContacts(String username, String email) {
+        if (username == null) {
+            return Optional.empty();
+        }
+        User current = usersByUsername.get(username);
+        if (current == null) {
+            return Optional.empty();
+        }
+        User updated = current.withContacts(email);
+        usersByUsername.put(username, updated);
+        return Optional.of(updated);
+    }
+
+    @Override
     public List<UserView> findAll() {
         return usersByUsername.values().stream()
                 .sorted(Comparator.comparing(User::username))
-                .map(user -> new UserView(user.username(), user.displayName(), user.role(), user.companyUid()))
+                .map(user -> new UserView(user.username(), user.displayName(), user.role(), user.companyUid(),
+                        user.email()))
                 .toList();
     }
 }

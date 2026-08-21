@@ -55,8 +55,8 @@ export function createAuthStore({ api = authApi } = {}) {
         return result;
     }
 
-    async function register(username, password, displayName, role, uid) {
-        const result = await api.register(username, password, displayName, role, uid);
+    async function register(username, password, displayName, role, uid, contacts) {
+        const result = await api.register(username, password, displayName, role, uid, contacts);
         saveAuthSession({ token: result.token, user: result.user });
         applySession({ token: result.token, user: result.user });
         return result;

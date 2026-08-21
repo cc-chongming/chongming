@@ -13,6 +13,8 @@ const password = ref('');
 const role = ref(DEFAULT_REGISTRATION_ROLE);
 // [AIREVIEW-PLAN-025] Optional company-internal uid used later for message binding.
 const companyUid = ref('');
+// [AIREVIEW-PLAN-030] Optional mail destination for the transition notification matrix.
+const email = ref('');
 const errorMessage = ref(null);
 const submitting = ref(false);
 
@@ -24,7 +26,8 @@ async function handleSubmit() {
         // Registration signs the user in automatically per the backend contract.
         await authStore.register(
             username.value.trim(), password.value, displayName.value.trim(), role.value,
-            companyUid.value.trim() || null);
+            companyUid.value.trim() || null,
+            { email: email.value.trim() || null });
         router.push('/dashboard');
     } catch (error) {
         errorMessage.value = error instanceof ReviewApiError ? error.message : formatApiError(error);
@@ -65,6 +68,11 @@ async function handleSubmit() {
                     公司 UID（可选）
                     <input v-model.trim="companyUid" type="text" name="companyUid" maxlength="64"
                         placeholder="用于公司内部消息绑定">
+                </label>
+                <label>
+                    邮箱（可选）
+                    <input v-model.trim="email" type="email" name="email" maxlength="128"
+                        placeholder="用于任务流转邮件通知">
                 </label>
                 <label>
                     密码

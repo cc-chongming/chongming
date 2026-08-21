@@ -56,7 +56,8 @@ public class MyBatisUserRepository implements UserRepository {
                 nonNullUser.passwordHash(),
                 nonNullUser.displayName(),
                 nonNullUser.role(),
-                nonNullUser.companyUid());
+                nonNullUser.companyUid(),
+                nonNullUser.email());
         try {
             mapper.insert(row);
         } catch (DuplicateKeyException ex) {
@@ -78,14 +79,27 @@ public class MyBatisUserRepository implements UserRepository {
     }
 
     @Override
+    public java.util.Optional<User> updateContacts(String username, String email) {
+        if (username == null || mapper.findByUsername(username) == null) {
+            return java.util.Optional.empty();
+        }
+        User current = toUser(mapper.findByUsername(username));
+        User updated = current.withContacts(email);
+        mapper.updateContacts(username, updated.email());
+        return java.util.Optional.of(toUser(mapper.findByUsername(username)));
+    }
+
+    @Override
     public List<UserView> findAll() {
         return mapper.findAll().stream()
-                .map(row -> new UserView(row.username(), row.displayName(), row.role(), row.companyUid()))
+                .map(row -> new UserView(row.username(), row.displayName(), row.role(), row.companyUid(),
+                        row.email()))
                 .toList();
     }
 
     private User toUser(UserMapper.UserRow row) {
         return new User(
-                row.id(), row.username(), row.passwordHash(), row.displayName(), row.role(), row.companyUid());
+                row.id(), row.username(), row.passwordHash(), row.displayName(), row.role(),
+                row.companyUid(), row.email());
     }
 }

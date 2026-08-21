@@ -60,7 +60,8 @@ public class AuthController {
     @PostMapping("/api/auth/register")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
         AuthResult result = authService.register(
-                request.username(), request.password(), request.displayName(), request.role(), request.uid());
+                request.username(), request.password(), request.displayName(), request.role(), request.uid(),
+                request.email());
         return AuthResponse.from(result);
     }
 
@@ -73,9 +74,32 @@ public class AuthController {
     @GetMapping("/api/auth/me")
     public UserResponse me(HttpServletRequest request) {
         AuthPrincipal authPrincipal = requirePrincipal(request);
-        // [AIREVIEW-PLAN-025] The JWT claim set intentionally stays unchanged; the company uid is
-        // not part of the token and is reported as absent on this endpoint.
+        // [AIREVIEW-PLAN-030] Contact channels are resolved from the directory when available so
+        // the profile page can prefill them; the JWT claim set itself stays unchanged.
+        if (userRepository != null) {
+            return userRepository.findByUsername(authPrincipal.username())
+                    .map(user -> new UserResponse(user.username(), user.displayName(), user.role(),
+                            user.companyUid(), user.email()))
+                    .orElseGet(() -> new UserResponse(authPrincipal.username(), authPrincipal.displayName(),
+                            authPrincipal.role(), null));
+        }
         return new UserResponse(authPrincipal.username(), authPrincipal.displayName(), authPrincipal.role(), null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-030] Self-service mail destination maintenance used as the notification
+     * matrix destination source.
+     */
+    @PostMapping("/api/auth/me/contacts")
+    public UserResponse updateContacts(HttpServletRequest request, @Valid @RequestBody ContactsRequest body) {
+        AuthPrincipal authPrincipal = requirePrincipal(request);
+        if (userRepository == null) {
+            throw new AuthException(AuthErrorCode.FORBIDDEN, "用户目录当前不可用");
+        }
+        return userRepository.updateContacts(authPrincipal.username(), body.email())
+                .map(user -> new UserResponse(user.username(), user.displayName(), user.role(),
+                        user.companyUid(), user.email()))
+                .orElseThrow(() -> new AuthException(AuthErrorCode.FORBIDDEN, "账号不存在"));
     }
 
     /**
@@ -97,7 +121,8 @@ public class AuthController {
             throw new AuthException(AuthErrorCode.FORBIDDEN, "用户目录当前不可用");
         }
         return userRepository.findAll().stream()
-                .map(user -> new UserResponse(user.username(), user.displayName(), user.role(), user.companyUid()))
+                .map(user -> new UserResponse(user.username(), user.displayName(), user.role(), user.companyUid(),
+                        user.email()))
                 .toList();
     }
 
@@ -131,7 +156,16 @@ public class AuthController {
             @NotBlank @Size(min = 8, max = 128) String password,
             @Size(max = 64) String displayName,
             @Size(max = 32) String role,
-            @Size(max = 64) String uid) {
+            @Size(max = 64) String uid,
+            @Size(max = 128) String email) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-030] Mail destination update body; blank value clears the destination.
+     *
+     * @author wangli
+     */
+    public record ContactsRequest(@Size(max = 128) String email) {
     }
 
     /**
@@ -158,11 +192,17 @@ public class AuthController {
      *
      * @author wangli
      */
-    public record UserResponse(String username, String displayName, String role, String uid) {
+    public record UserResponse(String username, String displayName, String role, String uid,
+                               String email) {
 
         /** Legacy projection without the company uid. */
         public UserResponse(String username, String displayName, String role) {
-            this(username, displayName, role, null);
+            this(username, displayName, role, null, null);
+        }
+
+        /** [AIREVIEW-PLAN-025] Legacy projection without the mail destination. */
+        public UserResponse(String username, String displayName, String role, String uid) {
+            this(username, displayName, role, uid, null);
         }
     }
 }

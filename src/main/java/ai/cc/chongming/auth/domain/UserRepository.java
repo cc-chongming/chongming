@@ -45,6 +45,15 @@ public interface UserRepository {
     User save(User user);
 
     /**
+     * [AIREVIEW-PLAN-030] Updates the optional mail destination of an existing account.
+     *
+     * @param username login name of the account to update
+     * @param email    optional mail destination, blank clears
+     * @return the updated user when present, empty otherwise
+     */
+    Optional<User> updateContacts(String username, String email);
+
+    /**
      * Lists every account as a credential-free projection; implementations must not load
      * the stored password hash.
      *
@@ -58,11 +67,16 @@ public interface UserRepository {
      *
      * @author wangli
      */
-    record UserView(String username, String displayName, String role, String companyUid) {
+    record UserView(String username, String displayName, String role, String companyUid, String email) {
 
         /** Legacy projection without the company uid. */
         public UserView(String username, String displayName, String role) {
-            this(username, displayName, role, null);
+            this(username, displayName, role, null, null);
+        }
+
+        /** [AIREVIEW-PLAN-025] Legacy projection without the mail destination. */
+        public UserView(String username, String displayName, String role, String companyUid) {
+            this(username, displayName, role, companyUid, null);
         }
     }
 }

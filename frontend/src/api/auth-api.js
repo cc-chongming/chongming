@@ -23,14 +23,21 @@ export const authApi = {
      * [AIREVIEW-PLAN-025] The optional `uid` binds the company-internal identifier used later
      * for message delivery.
      */
-    register(username, password, displayName, role, uid) {
+    register(username, password, displayName, role, uid, contacts = {}) {
         const body = { username, password, displayName };
         if (role) body.role = role;
         if (uid) body.uid = uid;
+        // [AIREVIEW-PLAN-030] Optional mail destination for the notification matrix.
+        if (contacts.email) body.email = contacts.email;
         return request('/api/auth/register', {
             method: 'POST',
             ...jsonBody(body)
         });
+    },
+
+    /** [AIREVIEW-PLAN-030] Self-service mail destination maintenance. */
+    updateContacts(email) {
+        return request('/api/auth/me/contacts', { method: 'POST', ...jsonBody({ email }) });
     },
 
     me() {

@@ -183,13 +183,15 @@ test('registers a new account, signs it in and enters the dashboard', async ({ p
     await expect(submit).toBeDisabled();
     await page.locator('input[name="username"]').fill('demo-user');
     await page.locator('input[name="displayName"]').fill('演示评审员');
+    // [AIREVIEW-PLAN-025] 公司 UID 可选，填写后随注册请求上送。
+    await page.locator('input[name="companyUid"]').fill('corp-10086');
     await page.locator('input[name="password"]').fill('secret');
     await submit.click();
 
     await expect(page).toHaveURL(/#\/dashboard$/);
     await expect(page.locator('.user-area .user-name')).toHaveText('演示评审员');
     expect(authState.lastRegisterBody).toEqual({
-        username: 'demo-user', password: 'secret', displayName: '演示评审员', role: 'DEVELOPER'
+        username: 'demo-user', password: 'secret', displayName: '演示评审员', role: 'DEVELOPER', uid: 'corp-10086'
     });
 });
 

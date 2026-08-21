@@ -93,6 +93,19 @@ public class AuthService {
      * @return token plus the registered user view
      */
     public AuthResult register(String username, String password, String displayName, String role, String companyUid) {
+        return register(username, password, displayName, role, companyUid, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-030] Registration carrying the optional mail destination used later by the
+     * notification matrix.
+     *
+     * @param email optional mail destination
+     * @return token plus the registered user view
+     */
+    public AuthResult register(
+            String username, String password, String displayName, String role, String companyUid,
+            String email) {
         String trimmedUsername = username == null ? "" : username.trim();
         if (trimmedUsername.isEmpty() || trimmedUsername.length() > MAX_USERNAME_LENGTH) {
             throw new IllegalArgumentException("username must be 1-" + MAX_USERNAME_LENGTH + " characters");
@@ -116,7 +129,8 @@ public class AuthService {
             throw new AuthException(AuthErrorCode.UID_TAKEN, "公司 UID 已被其他账号绑定");
         }
         User user = User.newUser(
-                trimmedUsername, passwordHasher.hash(password), trimmedDisplayName, effectiveRole, trimmedCompanyUid);
+                trimmedUsername, passwordHasher.hash(password), trimmedDisplayName, effectiveRole, trimmedCompanyUid)
+                .withContacts(email);
         return issue(userRepository.save(user));
     }
 
@@ -142,7 +156,8 @@ public class AuthService {
         return new AuthResult(
                 issuedToken.token(),
                 issuedToken.expiresAt(),
-                new UserView(user.username(), user.displayName(), user.role(), user.companyUid()));
+                new UserView(user.username(), user.displayName(), user.role(), user.companyUid(),
+                        user.email()));
     }
 
     /**
@@ -159,11 +174,17 @@ public class AuthService {
      *
      * @author wangli
      */
-    public record UserView(String username, String displayName, String role, String companyUid) {
+    public record UserView(String username, String displayName, String role, String companyUid,
+                           String email) {
 
         /** Legacy projection without the company uid. */
         public UserView(String username, String displayName, String role) {
-            this(username, displayName, role, null);
+            this(username, displayName, role, null, null);
+        }
+
+        /** [AIREVIEW-PLAN-025] Legacy projection without the mail destination. */
+        public UserView(String username, String displayName, String role, String companyUid) {
+            this(username, displayName, role, companyUid, null);
         }
     }
 }

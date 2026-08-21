@@ -80,7 +80,7 @@ class AuthControllerTests {
     @Test
     void registerWithTakenUsernameReturnsConflict() throws Exception {
         // [AIREVIEW-PLAN-027] Bodies without a role field pass null through to the service.
-        when(authService.register("bob", "password123", "Bobby", null, null))
+        when(authService.register("bob", "password123", "Bobby", null, null, null))
                 .thenThrow(new AuthException(AuthErrorCode.USERNAME_TAKEN, "用户名已被占用"));
 
         mockMvc.perform(post("/api/auth/register")
@@ -110,7 +110,7 @@ class AuthControllerTests {
      */
     @Test
     void registerWithAdminRoleReturnsBadRequest() throws Exception {
-        when(authService.register("bob", "password123", "Bobby", "ADMIN", null))
+        when(authService.register("bob", "password123", "Bobby", "ADMIN", null, null))
                 .thenThrow(new IllegalArgumentException("role must be one of PRODUCT_MANAGER, PROJECT_MANAGER, DEVELOPER"));
 
         mockMvc.perform(post("/api/auth/register")
@@ -128,7 +128,7 @@ class AuthControllerTests {
      */
     @Test
     void registerWithWhitelistedRoleIssuesTokenWithThatRole() throws Exception {
-        when(authService.register("bob", "password123", "Bobby", "PRODUCT_MANAGER", null)).thenReturn(new AuthResult(
+        when(authService.register("bob", "password123", "Bobby", "PRODUCT_MANAGER", null, null)).thenReturn(new AuthResult(
                 "signed-token",
                 Instant.parse("2026-08-12T12:00:00Z"),
                 new UserView("bob", "Bobby", "PRODUCT_MANAGER")));
@@ -149,7 +149,7 @@ class AuthControllerTests {
      */
     @Test
     void registerWithCompanyUidIssuesTokenCarryingTheUid() throws Exception {
-        when(authService.register("bob", "password123", "Bobby", null, "corp-10086")).thenReturn(new AuthResult(
+        when(authService.register("bob", "password123", "Bobby", null, "corp-10086", null)).thenReturn(new AuthResult(
                 "signed-token",
                 Instant.parse("2026-08-12T12:00:00Z"),
                 new UserView("bob", "Bobby", "DEVELOPER", "corp-10086")));
@@ -169,7 +169,7 @@ class AuthControllerTests {
      */
     @Test
     void registerWithTakenCompanyUidReturnsConflict() throws Exception {
-        when(authService.register("bob", "password123", "Bobby", null, "corp-10086"))
+        when(authService.register("bob", "password123", "Bobby", null, "corp-10086", null))
                 .thenThrow(new AuthException(AuthErrorCode.UID_TAKEN, "公司 UID 已被其他账号绑定"));
 
         mockMvc.perform(post("/api/auth/register")

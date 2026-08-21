@@ -14,10 +14,13 @@ public record User(
         String passwordHash,
         String displayName,
         String role,
-        String companyUid) {
+        String companyUid,
+        String email) {
 
     /** Upper bound matching the {@code company_uid} persistence column. */
     public static final int MAX_COMPANY_UID_LENGTH = 64;
+    /** Upper bound matching the {@code email} persistence column. */
+    public static final int MAX_EMAIL_LENGTH = 128;
 
     public User {
         username = Objects.requireNonNull(username, "username must not be null");
@@ -34,11 +37,21 @@ public record User(
             throw new IllegalArgumentException(
                     "companyUid must be at most " + MAX_COMPANY_UID_LENGTH + " characters");
         }
+        // [AIREVIEW-PLAN-030] Optional mail destination used by the notification matrix.
+        email = email == null || email.isBlank() ? null : email.trim();
+        if (email != null && email.length() > MAX_EMAIL_LENGTH) {
+            throw new IllegalArgumentException("email must be at most " + MAX_EMAIL_LENGTH + " characters");
+        }
     }
 
     /** [AIREVIEW-PLAN-025] Legacy constructor without the company uid. */
     public User(Long id, String username, String passwordHash, String displayName, String role) {
-        this(id, username, passwordHash, displayName, role, null);
+        this(id, username, passwordHash, displayName, role, null, null);
+    }
+
+    /** [AIREVIEW-PLAN-030] Legacy constructor without the mail destination. */
+    public User(Long id, String username, String passwordHash, String displayName, String role, String companyUid) {
+        this(id, username, passwordHash, displayName, role, companyUid, null);
     }
 
     /**
@@ -79,6 +92,17 @@ public record User(
                 passwordHash,
                 displayName,
                 role,
-                companyUid);
+                companyUid,
+                email);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-030] Returns a copy carrying an updated mail destination.
+     *
+     * @param email optional mail destination
+     * @return user copy with the new contact
+     */
+    public User withContacts(String email) {
+        return new User(id, username, passwordHash, displayName, role, companyUid, email);
     }
 }
