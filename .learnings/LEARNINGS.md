@@ -633,6 +633,33 @@ AgentScope Director 不能在核心角色注册之前同步耗尽首轮对话；
 
 ---
 
+## [LRN-20260812-001] Playwright route glob intercepts Vite module scripts in dev mode
+
+**Logged**: 2026-08-12T00:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: frontend-e2e
+
+### Summary
+
+Playwright `page.route('**/api/**')` 等宽泛 glob 会同时命中 Vite 开发服务器的模块请求（如 `/src/api/review-api.js`），mock 返回 JSON 后浏览器因 MIME 类型拒绝加载模块，整个应用无法启动，表现为元素定位超时的假性 UI 故障。
+
+### Details
+
+E2E 的 webServer 是 `npm run dev`，源码模块均从 `/src/**` 加载，路径中含 `api` 字样。`**/api/**` 与正则 `\/api\/(repositories|requirements|reviews)` 这类模式若只按路径片段匹配，可能误伤模块脚本。定位手段：在 route handler 内打印命中的 URL，或用 `page.on('console')` 观察 `Failed to load module script ... MIME type "application/json"` 错误。修复方式是改用谓词 `page.route((url) => url.pathname.startsWith('/api/'), handler)`，只对真实 API 请求生效。
+
+### Suggested Action
+
+新增 E2E mock 时优先使用 pathname 谓词或以 `/api/` 开头的精确 glob（如 `**/api/requirements**` 仍需复核是否命中 `/src/api/`），并在提交前完整跑一次 `npx playwright test`（本机可通过 `npx playwright install chromium` 安装浏览器二进制）。
+
+### Metadata
+
+- Source: T3 前端登录模块测试与构建产物同步
+- Related Files: frontend/tests/review-workbench.e2e.js, frontend/playwright.config.js
+- Tags: playwright, vite, e2e, route-mock
+
+---
+
 ## [LRN-20260811-001] persistence
 
 **Logged**: 2026-08-11T12:10:00+08:00
@@ -711,5 +738,140 @@ Playwright route 使用带主机/API 根边界的正则；版本冲突重试场�
 
 - **Resolved**: 2026-08-12T10:45:00+08:00
 - **Notes**: IDEA MCP 编译通过；定向测试覆盖跨需求隔离、同需求重放、持久化键隔离和启动命令范围传递。
+
+---
+
+## [LRN-20260820-001] persistence-timezone
+
+**Logged**: 2026-08-20T21:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: persistence
+
+### Summary
+
+本项目并存两种 DATETIME 列约定：Java 写入的列存 UTC 墙钟（`atOffset(UTC).toLocalDateTime()` ↔ `toInstant(UTC)`），而 `DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` 的 DB 自动生成列存的是 MySQL 服务器本地（中国）墙钟。两类列混用同一个 `toInstant(UTC)` 还原会把后者推快 8 小时。
+
+### Details
+
+评审列表/首页的 `review_request.updated_at` 是 DB 自动生成列，被按 UTC 还原后前端再转 Asia/Shanghai，显示为“次日凌晨”。事件表 `occurred_at` 等 Java 写入列则正常，造成“只有列表时间错”的迷惑现象。修复在 `MyBatisReviewPlatformProjectionStore` 对该列单独按 `Asia/Shanghai` 还原并加注释。新建表若需要 DB 默认时间，读取侧必须按服务器时区还原，或改为 Java 显式写入 UTC 墙钟。
+
+### Suggested Action
+
+新增 DATETIME 列时先标注“谁写入”：Java 写入走 UTC 墙钟约定；DB 自动生成列读取侧用 `ZoneId.of("Asia/Shanghai")` 还原。Code Review 时检查 `toInstant(ZoneOffset.UTC)` 的列来源。
+
+### Metadata
+
+- Source: user-reported wrong list times
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/persistence/repository/MyBatisReviewPlatformProjectionStore.java, src/main/resources/db/migration/V1__create_review_request_and_runtime_tables.sql
+- Tags: persistence, timezone, datetime, utc-wall-clock, db-generated
+
+---
+
+## [LRN-20260821-001] mybatis-mapper-scan
+
+**Logged**: 2026-08-21T09:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: persistence
+
+### Summary
+
+新增 MyBatis Mapper 接口必须放在 `@MapperScan` 声明的包（`ai.cc.chongming.review.infrastructure.persistence.mapper`）内；放在其他包在内存模式/单测里一切正常，但 `review.persistence.enabled=true` 启动时 Bean 缺失直接启动失败。
+
+### Details
+
+`ReviewPersistenceConfiguration` 的 `@MapperScan` 只扫描上述包，且显式 MapperScannerConfigurer 会抑制 mybatis-spring-boot 自动配置对 `@Mapper` 注解的全包扫描。PLAN-031 初版把 `TaskAttachmentMapper` 放在 `task.infrastructure`，定向测试（InMemory 仓储 + standalone MockMvc）全绿但 MySQL 模式无法启动。已移至扫描包，与 `DevTaskMapper`（task 域却住在 review 持久化包）的既有约定一致。
+
+### Suggested Action
+
+新增 Mapper 一律放 `review.infrastructure.persistence.mapper`；若确需新包，同步扩展 `@MapperScan` 数组。验证 MySQL 路径不能只靠 InMemory 单测，至少跑一次 persistence=true 的上下文或集成测试。
+
+### Metadata
+
+- Source: code review of PLAN-031 against ReviewPersistenceConfiguration
+- Related Files: src/main/java/ai/cc/chongming/review/config/ReviewPersistenceConfiguration.java, src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/TaskAttachmentMapper.java
+- Tags: mybatis, mapper-scan, package-convention, persistence-enabled, startup-failure
+
+---
+
+## [LRN-20260821-002] mybatis-blob-scalar-return
+
+**Logged**: 2026-08-21T11:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: persistence
+
+### Summary
+
+MyBatis `@Select` 方法直接返回裸 `byte[]` 时会被误路由到 `ByteTypeHandler`，对 BLOB/LONGBLOB 列调 `getByte` 抛 `NumberOutOfRange`（Spring 译为 `DataIntegrityViolationException`，HTTP 500）。读 BLOB 必须返回行记录（record/POJO）让 MyBatis 按列元数据选 `ByteArrayTypeHandler`，再取字段。
+
+### Details
+
+PLAN-031 附件下载初版 `byte[] findContent(...)` 在 MySQL LONGBLOB 上 500；列表/元数据查询（返回 record）正常，造成“能传能列、不能下载”的迷惑现象。独立 MyBatis 会话复现确认：裸 `byte[]` → `SQLDataException: Value '...' is outside of valid range for type java.lang.Byte`；改返回 record 后 `getBytes` 正常。单测用 InMemory 仓储覆盖不到该路径，BLOB 读写需对真实 MySQL 验证。
+
+### Suggested Action
+
+Mapper 读 BLOB 一律返回 record/行对象并在 store 层取字节字段；不要写裸 `byte[]`/`Byte` 标量返回。涉及 BLOB 的改动至少跑一次 persistence=true 的集成验证或独立 MyBatis 复现脚本。
+
+### Metadata
+
+- Source: live download 500 + standalone MyBatis repro
+- Related Files: src/main/java/ai/cc/chongming/review/infrastructure/persistence/mapper/TaskAttachmentMapper.java, src/main/java/ai/cc/chongming/task/infrastructure/MyBatisTaskAttachmentStore.java
+- Tags: mybatis, blob, longblob, type-handler, byte-array, data-integrity
+
+---
+
+## [LRN-20260821-003] debate-silent-stall-hybrid-convergence
+
+**Logged**: 2026-08-21T15:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: orchestration
+
+### Summary
+
+事件驱动的 Director 唤醒计数无法捕捉“静默死锁”（末次唤醒后无任何事件产生），只能靠墙钟兜底，导致停顿卡满预算（实测 879s）。收敛看门狗应升级为“三信号最快优先”：已过期 PENDING 调度命令（精准、秒级）→ 无进展空闲（no-progress）→ 墙钟兜底。
+
+### Details
+
+真实评审 `116b0609` 在并发=4 后单调用已快（2~10s），但 14:18:49→14:33:31 静默 879s：Director 末次唤醒未发出再唤醒事件、角色空闲，`noteDirectorWake` 不再触发，事件计数停摆，仅 60s 巡检等满 20 分钟墙钟才强制收敛。混合版在 `scanForStalledDebates` 增加两条更快路径：①`hasExpiredPending`——attempt 仍有已过期的 PENDING 调度命令（指派了但目标角色永不消费）立即收敛；②`no-progress`——`lastWakeAt` 起超过 `debate-no-progress-timeout`（默认 PT6M，需大于单次 director 调用上限 PT300S 防误收敛）仍无活动即收敛；③原墙钟 PT20M 兜底。`forceConvergence` 日志带 `reason=` 区分路径。
+
+### Suggested Action
+
+多 Agent 事件驱动编排必须为“无事件产生”的死锁设计独立看门狗，且看门狗不能只依赖墙钟：优先用“已指派但过期未消费的工作”这类精准信号秒级救回，再用空闲窗口，墙钟仅作最后兜底。无进展窗口必须大于单次模型调用上限，避免把正常长调用误判为死锁。
+
+### Metadata
+
+- Source: live review 116b0609 log gap analysis (879s silent stall)
+- Related Files: src/main/java/ai/cc/chongming/review/application/DebateConvergenceGuard.java, src/main/java/ai/cc/chongming/review/config/AgentScopeProperties.java
+- Tags: orchestration, debate, convergence, silent-stall, watchdog, liveness, dispatch
+
+---
+
+## [LRN-20260821-004] multi-channel-notification-fanout
+
+**Logged**: 2026-08-21T16:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: notification
+
+### Summary
+
+多端通知不应改 Outbox 状态机，而应在入队侧做“每收件人 × 每通道”扇出：每个通道一条独立 Outbox 行（幂等键含 channel），各自重试/退避/DEAD，互不牵连；路由侧按 channel 分发到对应 `NotificationDeliveryPort` 适配器。新通道默认关闭、失败关闭，不冲击既有主通道。
+
+### Details
+
+学习通 uid 通道接入：`enqueueMatrix` 在 mail/local 之外，当 `chaoxing.enabled` 且 `users.company_uid` 为数字 uid 时并行追加 `chaoxing` 行；`NotificationDeliveryRouter` 增 `chaoxing` 分支；`ChaoxingNotificationAdapter` 用 `@ConditionalOnProperty` 条件装配。参考 `sendNotice` 适配为 RestTemplate+Jackson（项目无 hutool/fastjson）。第三方签名（`fillParams_encnew`）隔离为独立方法并标 TODO，配置缺失时抛不可重试异常，保证未配置时绝不发出错误签名请求且邮件通道不受影响。
+
+### Suggested Action
+
+接入新通知通道时：入队侧扇出（一条/通道）而非改状态机；适配器条件装配+失败关闭；第三方签名/密钥隔离为可替换缝并经环境变量注入；默认关闭新通道。验证至少跑 test-compile 与路由禁用用例。
+
+### Metadata
+
+- Source: user-provided Chaoxing sendNotice integration
+- Related Files: src/main/java/ai/cc/chongming/review/application/NotificationOutboxService.java, src/main/java/ai/cc/chongming/review/infrastructure/notification/NotificationDeliveryRouter.java, src/main/java/ai/cc/chongming/review/infrastructure/notification/ChaoxingNoticeClient.java
+- Tags: notification, outbox, multi-channel, fan-out, chaoxing, adapter, fail-closed
 
 ---
