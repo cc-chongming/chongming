@@ -569,7 +569,7 @@ class AgentScopeReviewRuntimeAdapterTests {
         AgentScopeProperties properties = new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString());
         List<String> requiredKeys = List.of("product.requirement_completeness", "product.acceptance_criteria",
                 "product.user_value", "product.scope_boundary", "product.testability",
-                "product.adversarial_scrutiny", "product.core_value_stance");
+                "product.adversarial_scrutiny", "product.core_value_stance", "product.recognized_strengths");
         List<ModelGateway.ModelResponse> script = new ArrayList<>();
         // The role first tries to complete without any assessment: the coverage guard must reject it.
         script.add(toolCallResponse("call-complete-early", "complete_initial_review",

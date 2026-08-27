@@ -78,6 +78,34 @@ class ConflictDetectorTests {
                 .containsExactlyInAnyOrder("auth.refresh_flow", "auth.session_ui");
     }
 
+    /** [AIREVIEW-PLAN-033] 多角色对同一主题的反对本身构成异议分歧：没有 SUPPORT 也要形成候选。 */
+    @Test
+    void recallsOpposeDivergenceWhenMultipleRolesOpposeTheSameSubjectWithoutSupport() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ConflictDetector.ConflictDetectionResult result = new ConflictDetector().detect(List.of(
+                claim(reviewId, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE),
+                claim(reviewId, RoleType.PROJECT, ClaimSeverity.P1, ClaimPosition.OPPOSE)));
+
+        assertThat(result.candidates()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.rules()).containsExactly(ConflictDetector.ConflictRule.OPPOSE_DIVERGENCE);
+            assertThat(candidate.score()).isGreaterThanOrEqualTo(50);
+            assertThat(candidate.claimIds()).hasSize(2);
+        });
+        assertThat(result.noConflicts()).isEmpty();
+    }
+
+    /** [AIREVIEW-PLAN-033] 同一角色的多条反对不构成异议分歧。 */
+    @Test
+    void doesNotTreatSingleRoleOppositionAsDivergence() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ConflictDetector.ConflictDetectionResult result = new ConflictDetector().detect(List.of(
+                claim(reviewId, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE),
+                claim(reviewId, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE)));
+
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.noConflicts()).singleElement();
+    }
+
     private Claim claim(ReviewId reviewId, RoleType roleType, ClaimSeverity severity, ClaimPosition position) {
         return new Claim(new ClaimId(UUID.randomUUID()), reviewId, roleType, "authentication", severity, position,
                 "Statement", "Reason", List.of());

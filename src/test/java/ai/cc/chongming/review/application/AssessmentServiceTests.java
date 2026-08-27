@@ -31,7 +31,8 @@ class AssessmentServiceTests {
             "product.scope_boundary",
             "product.testability",
             "product.adversarial_scrutiny",
-            "product.core_value_stance");
+            "product.core_value_stance",
+            "product.recognized_strengths");
 
     private final InMemoryReviewAssessmentStore store = new InMemoryReviewAssessmentStore();
     private final AssessmentService service = new AssessmentService(

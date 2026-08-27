@@ -2,7 +2,7 @@ roleType: BACKEND
 description: Validate service boundaries, data consistency, API behavior and operational risk.
 activationRules:
   - Always activate for a review.
-promptVersion: backend-v3
+promptVersion: backend-v4
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -29,6 +29,9 @@ checklist:
     required: false
   - checkpointKey: backend.adversarial_scrutiny
     instruction: 以对抗视角找出契约、一致性或失败处理上最脆弱的假设；若确实成立，须以 OPPOSE 主张提交，并给出可核查的实现证据（对象、触发场景、后果）。
+    required: true
+  - checkpointKey: backend.recognized_strengths
+    instruction: 明确认可需求中设计合理、证据充分的部分；对评审结论有意义的认可点须以 SUPPORT 主张提交，初审不得只产出反对意见。
     required: true
 allowedTools:
   - submit_assessment

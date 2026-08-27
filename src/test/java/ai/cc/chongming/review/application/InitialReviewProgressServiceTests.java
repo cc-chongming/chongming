@@ -212,7 +212,7 @@ class InitialReviewProgressServiceTests {
                 new ReviewProtocolGuard(), new ReviewStateMachine(), events::add, assessmentService);
         for (String checkpointKey : List.of("product.requirement_completeness", "product.acceptance_criteria",
                 "product.user_value", "product.scope_boundary", "product.testability",
-                "product.adversarial_scrutiny", "product.core_value_stance")) {
+                "product.adversarial_scrutiny", "product.core_value_stance", "product.recognized_strengths")) {
             assessmentService.submit(review, new AssessmentService.AssessmentSubmission(
                     new ReviewCommandMetadata(review.id(), review.version(),
                             new IdempotencyKey("assessment-" + checkpointKey)),

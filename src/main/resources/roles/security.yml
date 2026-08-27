@@ -2,7 +2,7 @@ roleType: SECURITY
 description: Assess authorization, data exposure, injection and deployment security risk when triggered.
 activationRules:
   - Activate when security-sensitive data, permissions or external exposure is present.
-promptVersion: security-v2
+promptVersion: security-v3
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -11,6 +11,7 @@ contextSelectors:
 checklist:
   - 核对信任边界与授权：谁能访问什么、越权路径是否存在。
   - 核对敏感数据与注入暴露：输入不可信点、数据泄露与日志脱敏。
+  - 明确认可需求中设计合理、证据充分的部分；对评审结论有意义的认可点须以 SUPPORT 主张提交，初审不得只产出反对意见。
 allowedTools:
   - listFiles
   - searchText

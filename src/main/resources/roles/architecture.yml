@@ -2,7 +2,7 @@ roleType: ARCHITECTURE
 description: Assess component boundaries, coupling, extensibility and cross-cutting technical risk when triggered.
 activationRules:
   - Activate when the change crosses services, shared modules or platform boundaries.
-promptVersion: architecture-v2
+promptVersion: architecture-v3
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -11,6 +11,7 @@ contextSelectors:
 checklist:
   - 核对组件所有权与依赖方向是否清晰、无反向依赖。
   - 核对可扩展性与韧性约束是否覆盖变更需求。
+  - 明确认可需求中设计合理、证据充分的部分；对评审结论有意义的认可点须以 SUPPORT 主张提交，初审不得只产出反对意见。
 allowedTools:
   - listFiles
   - findSymbol

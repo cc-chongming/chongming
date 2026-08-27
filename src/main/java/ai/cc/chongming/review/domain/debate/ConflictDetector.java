@@ -83,6 +83,18 @@ public final class ConflictDetector {
         if (hasSupport && hasOppose) {
             rules.add(ConflictRule.OPPOSING_POSITION);
         }
+        // [AIREVIEW-PLAN-033] Objections from different roles on the same subject can still conflict
+        // with each other (divergent diagnoses or incompatible remedies). Surface such subjects even
+        // without a SUPPORT position so the debate can reconcile the objections themselves — unanimous
+        // opposition is not the absence of conflict.
+        long opposingRoles = claims.stream()
+                .filter(claim -> claim.position() == ClaimPosition.OPPOSE)
+                .map(Claim::roleType)
+                .distinct()
+                .count();
+        if (opposingRoles >= 2) {
+            rules.add(ConflictRule.OPPOSE_DIVERGENCE);
+        }
         // [AIREVIEW-PLAN-024#方案4] A positive conclusion (CONFIRMED assessment or SUPPORT claim)
         // contradicts a negative conclusion (GAP assessment or OPPOSE claim) on the same subject.
         // A lone GAP/UNKNOWN is a risk, not a conflict.
@@ -105,7 +117,7 @@ public final class ConflictDetector {
         }
         boolean opposing = rules.contains(ConflictRule.OPPOSING_POSITION)
                 || rules.contains(ConflictRule.ASSESSMENT_STATUS_CONFLICT);
-        int score = opposing ? 80 : 20;
+        int score = opposing ? 80 : rules.contains(ConflictRule.OPPOSE_DIVERGENCE) ? 40 : 20;
         score += claims.stream().mapToInt(claim -> severityWeight(claim.severity())).max().orElse(0);
         if (rules.contains(ConflictRule.SEVERITY_MISMATCH)) {
             score += 10;
@@ -159,7 +171,8 @@ public final class ConflictDetector {
         OPPOSING_POSITION,
         ASSESSMENT_STATUS_CONFLICT,
         SEVERITY_MISMATCH,
-        CONTRADICTORY_EVIDENCE
+        CONTRADICTORY_EVIDENCE,
+        OPPOSE_DIVERGENCE
     }
 
     /**

@@ -2,7 +2,7 @@ roleType: FRONTEND
 description: Validate interaction flows, interface contracts, accessibility and client-side risk.
 activationRules:
   - Always activate for a review.
-promptVersion: frontend-v3
+promptVersion: frontend-v4
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
@@ -29,6 +29,9 @@ checklist:
     required: false
   - checkpointKey: frontend.adversarial_scrutiny
     instruction: 以对抗视角找出交互、契约或客户端状态上最脆弱的假设；若确实成立，须以 OPPOSE 主张提交，理由用前端视角表达。
+    required: true
+  - checkpointKey: frontend.recognized_strengths
+    instruction: 明确认可需求中设计合理、证据充分的部分；对评审结论有意义的认可点须以 SUPPORT 主张提交，初审不得只产出反对意见。
     required: true
 allowedTools:
   - submit_assessment
