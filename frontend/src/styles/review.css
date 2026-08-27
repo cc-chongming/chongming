@@ -331,7 +331,8 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-round-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; }
 .flow-round-tab { padding: .4rem .9rem; color: var(--flow-dim); background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .4rem; font-size: .72rem; font-weight: 700; cursor: pointer; }.flow-round-tab span { margin-left: .3rem; font-size: .62rem; opacity: .8; }.flow-round-tab:hover { color: var(--flow-text); border-color: var(--flow-accent); }.flow-round-tab.active { color: #fff; background: var(--flow-accent); border-color: var(--flow-accent); }
 /* [AIREVIEW-PLAN-045#1] 议题 Tab 栏（辩论分支顶部）：flex + 横向滚动；卡片式比回合 Tab 更强调（编号 + 标题 + 状态小字）。 */
-.flow-topic-tabs { display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem; overflow-x: auto; }
+/* [AIREVIEW-PLAN-045#2] 议题 Tab 改为换行排布：不再产生横向滚动条，全部议题直接可见。 */
+.flow-topic-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .6rem; }
 .flow-topic-tab { display: inline-flex; align-items: center; gap: .4rem; flex: 0 0 auto; max-width: 19rem; padding: .45rem .85rem; color: var(--flow-text); background: var(--flow-surface-2); border: 1px solid var(--flow-border); border-radius: .5rem; font-size: .74rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .flow-topic-tab strong { flex: 0 0 auto; }
 .flow-topic-tab:hover { color: var(--flow-accent); border-color: var(--flow-accent); }
