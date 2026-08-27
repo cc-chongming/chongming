@@ -53,7 +53,7 @@ class ReviewDispatchServiceTests {
         assertThat(command.status()).isEqualTo(DispatchCommandStatus.PENDING);
         assertThat(command.reviewId()).isEqualTo(fixture.review().id());
         assertThat(command.attemptNo()).isEqualTo(fixture.review().attemptNo());
-        assertThat(command.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(command.stage()).isEqualTo(ReviewStage.DEBATE);
         assertThat(command.round()).isEqualTo(1);
         assertThat(command.recipientRole()).isEqualTo(RoleType.PRODUCT);
         assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
@@ -170,7 +170,7 @@ class ReviewDispatchServiceTests {
                 .satisfies(exception -> {
                     assertThat(((ReviewDomainException) exception).errorCode())
                             .isEqualTo(ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
-                    assertThat(exception.getMessage()).contains("does not match the current review stage");
+                    assertThat(exception.getMessage()).contains("does not match the current round of the dispatch topic");
                 });
     }
 
@@ -296,7 +296,7 @@ class ReviewDispatchServiceTests {
         Fixture fixture = openChallengeFixture();
         ReviewDispatchCommand stale = new ReviewDispatchCommand(
                 new CommandId(UUID.randomUUID()), fixture.review().id(), fixture.review().attemptNo(),
-                ReviewStage.DEBATE_ROUND_1, 1, RoleType.PRODUCT, DispatchedAction.CHALLENGE,
+                ReviewStage.DEBATE, 1, RoleType.PRODUCT, DispatchedAction.CHALLENGE,
                 fixture.topic().id(), fixture.claim().claimId(), null,
                 Instant.now().minusSeconds(5), DispatchCommandStatus.PENDING,
                 key("stale-command"), Instant.now().minusSeconds(60));
@@ -393,13 +393,75 @@ class ReviewDispatchServiceTests {
                 .contains("exactly this one write action");
     }
 
+    // --- [AIREVIEW-PLAN-047#1] topic-level round semantics ---------------------
+
+    @Test
+    void issuesRoundTwoDispatchOnlyAfterTheTopicBeganItsSecondRound() {
+        Fixture fixture = openChallengeFixture();
+        // A topic that itself reached round two (in-memory store keeps the same instance, so
+        // mutating it is the authoritative snapshot update).
+        TopicId topicId = new TopicId(UUID.randomUUID());
+        DebateTopic roundTwoTopic = DebateTopic.restore(topicId, fixture.review().id(), "api.contract",
+                List.of(fixture.claim().claimId()), DebateTopicStatus.REBUTTED, 1, List.of(), null, null);
+        debateStore.saveTopic(roundTwoTopic);
+        roundTwoTopic.beginSecondRound();
+
+        ReviewDispatchService.DispatchIssueResult roundTwo = service.issue(fixture.review(),
+                new ReviewDispatchService.DispatchProposal(
+                        metadata(fixture.review()), RoleType.PRODUCT, DispatchedAction.CHALLENGE, 2,
+                        topicId, fixture.claim().claimId(), null, later(),
+                        RoleType.DIRECTOR, "DIRECTOR"));
+
+        assertThat(roundTwo.replayed()).isFalse();
+        assertThat(roundTwo.command().round()).isEqualTo(2);
+        assertThat(roundTwo.command().topicId()).isEqualTo(topicId);
+
+        // A round-one proposal for the same topic is now rejected: the topic itself is on round two.
+        // (A different recipient keeps the content-level dedup from returning the round-two envelope.)
+        assertThatThrownBy(() -> service.issue(fixture.review(),
+                new ReviewDispatchService.DispatchProposal(
+                        metadata(fixture.review()), RoleType.BACKEND, DispatchedAction.CHALLENGE, 1,
+                        topicId, fixture.claim().claimId(), null, later(),
+                        RoleType.DIRECTOR, "DIRECTOR")))
+                .isInstanceOf(ReviewDomainException.class)
+                .extracting(exception -> ((ReviewDomainException) exception).errorCode())
+                .isEqualTo(ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
+    }
+
+    @Test
+    void resolveForWriteRejectsRoundOneCommandAfterTheTopicBeganRoundTwo() {
+        Fixture fixture = openChallengeFixture();
+        TopicId topicId = new TopicId(UUID.randomUUID());
+        DebateTopic advanced = DebateTopic.restore(topicId, fixture.review().id(), "api.contract",
+                List.of(fixture.claim().claimId()), DebateTopicStatus.REBUTTED, 1, List.of(), null, null);
+        debateStore.saveTopic(advanced);
+        ReviewDispatchCommand command = service.issue(fixture.review(),
+                new ReviewDispatchService.DispatchProposal(
+                        metadata(fixture.review()), RoleType.PRODUCT, DispatchedAction.CHALLENGE, 1,
+                        topicId, fixture.claim().claimId(), null, later(),
+                        RoleType.DIRECTOR, "DIRECTOR")).command();
+        // The topic itself begins round two while the round-one envelope is still pending.
+        advanced.beginSecondRound();
+
+        assertThatThrownBy(() -> service.resolveForWrite(
+                fixture.review(), RoleType.PRODUCT, command.commandId(), DispatchedAction.CHALLENGE))
+                .isInstanceOf(ReviewDomainException.class)
+                .extracting(exception -> ((ReviewDomainException) exception).errorCode())
+                .isEqualTo(ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
+        assertThat(dispatchStore.findById(fixture.review().id(), command.commandId()))
+                .get()
+                .extracting(ReviewDispatchCommand::status)
+                .isEqualTo(DispatchCommandStatus.REJECTED);
+    }
+
     // --- fixtures -----------------------------------------------------------
 
     private record Fixture(Review review, DebateTopic topic, Claim claim) {
     }
 
+    /** [AIREVIEW-PLAN-047#1] New reviews dispatch inside the single DEBATE phase. */
     private Fixture openChallengeFixture() {
-        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE_ROUND_1, 1, 0,
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
                 List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
                         new RoleActivation(RoleType.BACKEND, "backend", true)),
                 Map.of());

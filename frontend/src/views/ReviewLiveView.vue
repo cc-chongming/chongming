@@ -310,7 +310,9 @@ const HUMAN_REACHABLE_STAGES = new Set(['JUDGING', 'WAITING_HUMAN', 'NOTIFYING',
 const humanPhaseReachable = computed(() => HUMAN_REACHABLE_STAGES.has(stage.value));
 const stageLabel = {
     PENDING: '待处理', SNAPSHOTTING: '快照中', PLANNING: '规划中', INITIAL_REVIEW: '初审中',
-    CONFLICT_DETECTION: '冲突检测', DEBATE_ROUND_1: '辩论第 1 轮', DEBATE_ROUND_2: '辩论第 2 轮',
+    CONFLICT_DETECTION: '冲突检测',
+    // [AIREVIEW-PLAN-047#3] 单一 DEBATE 阶段（议题级轮次）；旧轮次标签兼容存量评审。
+    DEBATE: '辩论中', DEBATE_ROUND_1: '辩论第 1 轮', DEBATE_ROUND_2: '辩论第 2 轮',
     JUDGING: '裁决中', WAITING_HUMAN: '待人工决策', NOTIFYING: '通知中',
     COMPLETED: '已完成', CANCELLED: '已取消', FAILED: '已失败'
 };

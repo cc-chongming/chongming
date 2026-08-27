@@ -68,7 +68,7 @@ class DebateGoldenPathIntegrationTests {
                 metadata(review, "round-one-evidence-request"), RoleType.BACKEND, RoleType.PRODUCT, opened.id(), 1,
                 productClaim.claimId(), "Provide the signed requirement that defines the token policy."));
 
-        debateService.beginSecondRound(review);
+        debateService.beginTopicSecondRound(review, metadata(review, "begin-topic-round-two"), opened.id());
         DebateService.TurnResult secondChallenge = debateService.submitChallenge(review, new DebateToolCommands.Challenge(
                 metadata(review, "round-two-challenge"), RoleType.BACKEND, RoleType.PRODUCT, opened.id(), 2,
                 productClaim.claimId(), "Confirm the policy owner and expiry criteria.", List.of(),
@@ -121,7 +121,7 @@ class DebateGoldenPathIntegrationTests {
         assertThat(result.topics()).hasSize(2);
         assertThat(store.findTopics(review.id())).hasSize(2);
         assertThat(store.batchWrites).isEqualTo(1);
-        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE);
 
         // Replaying the same idempotency key returns the registered topics without a second migration.
         DebateService.RegisterTopicsResult replayed = debateService.registerTopics(review,
@@ -133,7 +133,7 @@ class DebateGoldenPathIntegrationTests {
         assertThat(replayed.topics()).hasSize(2);
         assertThat(store.findTopics(review.id())).hasSize(2);
         assertThat(store.batchWrites).isEqualTo(1);
-        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE);
     }
 
     @Test
@@ -199,7 +199,7 @@ class DebateGoldenPathIntegrationTests {
         DebateTopic after = store.findTopic(review.id(), opened.id()).orElseThrow();
         assertThat(after.status()).isEqualTo(before.status());
         assertThat(after.turns()).hasSize(before.turns().size());
-        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE);
 
         // The challenged role itself may answer, keeping the challenge's true turn id as target.
         DebateService.TurnResult rebuttal = debateService.submitRebuttal(review, new DebateToolCommands.Rebuttal(
@@ -226,9 +226,10 @@ class DebateGoldenPathIntegrationTests {
         debateService.closeTopic(review, new DebateToolCommands.CloseTopic(
                 metadata(review, "close-early"), opened.id(), DebateTopicStatus.ESCALATED, "Escalated during round one."));
 
-        assertThatThrownBy(() -> debateService.beginSecondRound(review))
+        assertThatThrownBy(() -> debateService.beginTopicSecondRound(
+                review, metadata(review, "begin-round-two-rejected"), opened.id()))
                 .isInstanceOf(ReviewDomainException.class)
-                .hasMessageContaining("empty second round");
+                .hasMessageContaining("terminal topic");
 
         debateService.beginJudging(review);
         assertThat(review.stage()).isEqualTo(ReviewStage.JUDGING);
@@ -253,7 +254,7 @@ class DebateGoldenPathIntegrationTests {
                 metadata(review, "cross-round-challenge"), RoleType.PRODUCT, RoleType.BACKEND, opened.id(), 1,
                 backendClaim.claimId(), "Provide the refresh-token contract.", List.of(),
                 "No evidence defines the refresh-token contract."));
-        debateService.beginSecondRound(review);
+        debateService.beginTopicSecondRound(review, metadata(review, "begin-cross-round"), opened.id());
 
         DebateService.TurnResult lateRebuttal = debateService.submitRebuttal(review, new DebateToolCommands.Rebuttal(
                 metadata(review, "cross-round-rebuttal"), RoleType.BACKEND, RoleType.PRODUCT, opened.id(), 2,

@@ -164,7 +164,9 @@ public class DebateConvergenceGuard {
             return;
         }
         synchronized (review) {
-            if (review.stage() != ReviewStage.DEBATE_ROUND_1 && review.stage() != ReviewStage.DEBATE_ROUND_2) {
+            // [AIREVIEW-PLAN-047#1] The guard watches the single DEBATE phase plus the legacy
+            // round stages so paused in-flight reviews stay covered.
+            if (!isDebateStage(review.stage())) {
                 return;
             }
             List<DebateTopic> openTopics = debateStore.findTopics(review.id()).stream()
@@ -182,6 +184,12 @@ public class DebateConvergenceGuard {
             log.warn("DEBATE_FORCED_CONVERGENCE reviewId={} attemptNo={} directorWakes={} elapsed={} reason={} escalatedTopics={}",
                     reviewId.value(), attemptNo, wakes, elapsed, reason, openTopics.size());
         }
+    }
+
+    private static boolean isDebateStage(ReviewStage stage) {
+        return stage == ReviewStage.DEBATE
+                || stage == ReviewStage.DEBATE_ROUND_1
+                || stage == ReviewStage.DEBATE_ROUND_2;
     }
 
     private static String key(ReviewId reviewId, int attemptNo) {

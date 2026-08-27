@@ -16,6 +16,8 @@ describe('review phase landing', () => {
         expect(resolvePhaseLanding({ stage: 'SNAPSHOTTING', runtimeItems: [], scoutConcluded: false })).toBe(0);
         expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: false })).toBe(2);
         expect(resolvePhaseLanding({ stage: 'CONFLICT_DETECTION', runtimeItems: [], scoutConcluded: false })).toBe(3);
+        // [AIREVIEW-PLAN-047#3] 单一 DEBATE 阶段与旧轮次值同样落位辩论。
+        expect(resolvePhaseLanding({ stage: 'DEBATE', runtimeItems: [], scoutConcluded: false })).toBe(4);
         expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_1', runtimeItems: [], scoutConcluded: false })).toBe(4);
         expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_2', runtimeItems: [], scoutConcluded: false })).toBe(4);
         expect(resolvePhaseLanding({ stage: 'JUDGING', runtimeItems: [], scoutConcluded: false })).toBe(5);

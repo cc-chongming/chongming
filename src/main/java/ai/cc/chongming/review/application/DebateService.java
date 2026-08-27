@@ -30,7 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-010#1.5][AIREVIEW-PLAN-024#方案4] Applies bounded, reference-safe debate turns
+ * [AIREVIEW-PLAN-010#1.5][AIREVIEW-PLAN-024#方案4][AIREVIEW-PLAN-047#1] Applies bounded,
+ * reference-safe debate turns
  * while the review aggregate owns idempotency and versions. Conflict candidates come from the
  * deterministic {@link ConflictDetectionService}; topic registration is batch, idempotent and
  * atomic, and rebuttals are bound to the challenged role by identity.
@@ -99,7 +100,7 @@ public class DebateService {
      * [AIREVIEW-PLAN-024#方案4] Registers every Director-chosen conflict candidate in one batch.
      * All proposals are fully validated and deduplicated before anything is persisted, all topics
      * are then saved atomically inside this one operation, and only afterwards does the review
-     * migrate from CONFLICT_DETECTION to DEBATE_ROUND_1 exactly once. Replaying the same
+     * migrate from CONFLICT_DETECTION to the single DEBATE phase exactly once. Replaying the same
      * idempotency key returns the already registered topics without touching the stage again.
      */
     @Transactional
@@ -161,8 +162,9 @@ public class DebateService {
                 deduplicated.values().stream().map(DebateToolCommands.TopicProposal::subjectKey).toList());
         debateStore.saveTopics(topicsToSave);
         review.recordCommand(command.metadata(), String.join(",", persistedIds));
-        // The stage migrates exactly once, after every topic of the batch is persisted.
-        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_1);
+        // The stage migrates exactly once, after every topic of the batch is persisted. Rounds are
+        // topic-level from here on (AIREVIEW-PLAN-047#1).
+        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE);
         for (TopicResult result : registered) {
             eventPublisher.publish(ReviewEventDrafts.completedCommand(
                     review,
@@ -186,7 +188,7 @@ public class DebateService {
         if (existing != null) {
             return new TurnResult(requireTurn(review.id(), existing), true);
         }
-        requireVersionAndRound(review, command.metadata(), command.round());
+        requireVersionAndRound(review, topic, command.metadata(), command.round());
         Claim target = requireClaimInTopic(review.id(), topic, command.targetClaimId());
         requireActiveRole(review, command.actorRole());
         if (target.roleType() != command.targetRole() || command.actorRole() == command.targetRole()) {
@@ -216,7 +218,7 @@ public class DebateService {
         if (existing != null) {
             return new TurnResult(requireTurn(review.id(), existing), true);
         }
-        requireVersionAndRound(review, command.metadata(), command.round());
+        requireVersionAndRound(review, topic, command.metadata(), command.round());
         // The target turn must belong to this topic (any of its rounds); the action must match a
         // challenge, and only the challenged role itself may answer it.
         DebateTurn target = debateStore.findTurn(review.id(), command.targetTurnId())
@@ -260,7 +262,7 @@ public class DebateService {
         if (existing != null) {
             return new TurnResult(requireTurn(review.id(), existing), true);
         }
-        requireVersionAndRound(review, command.metadata(), command.round());
+        requireVersionAndRound(review, topic, command.metadata(), command.round());
         Claim claim = requireClaimInTopic(review.id(), topic, command.targetClaimId());
         requireActiveRole(review, command.actorRole());
         if (claim.roleType() != command.actorRole()) {
@@ -289,7 +291,7 @@ public class DebateService {
         if (existing != null) {
             return new TurnResult(requireTurn(review.id(), existing), true);
         }
-        requireVersionAndRound(review, command.metadata(), command.round());
+        requireVersionAndRound(review, topic, command.metadata(), command.round());
         Claim target = requireClaimInTopic(review.id(), topic, command.targetClaimId());
         requireActiveRole(review, command.actorRole());
         if (target.roleType() != command.targetRole() || command.actorRole() == command.targetRole()) {
@@ -305,52 +307,73 @@ public class DebateService {
         return new TurnResult(turn, false);
     }
 
-    /** Advances the review only after round one; the two-round bound remains enforced by DebateStateMachine. */
-    public void beginSecondRound(Review review) {
+    /**
+     * [AIREVIEW-PLAN-047#1] Begins the bounded second round for ONE topic without moving the whole
+     * review: the review stays in the single DEBATE phase while every other topic keeps its own
+     * round. The topic must still be non-terminal and must have completed round one
+     * (currentRound == 1). A topic that already reached round two is treated as an idempotent
+     * replay, so the two-round cap is hard. The DEBATE_ROUND_2_STARTED fact now names the topicId
+     * so the live page and the Director wake interpret it per topic.
+     */
+    @Transactional
+    public TopicRoundResult beginTopicSecondRound(
+            Review review, ReviewCommandMetadata metadata, TopicId topicId) {
         Objects.requireNonNull(review, "review must not be null");
-        validateBeginSecondRound(review);
-        review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.DEBATE_ROUND_2);
-        // The round transition is itself a public fact: without it the live page keeps painting
-        // round one until the first round-two turn is committed (AIREVIEW-PLAN-022 follow-up).
-        eventPublisher.publish(ReviewEventDrafts.completedCommand(
-                review,
-                ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_ROUND_2_STARTED,
-                RoleType.DIRECTOR,
-                null,
-                null,
-                null,
-                null,
-                2,
-                65,
-                Map.of()));
-    }
-
-    /** Validates that the second round can begin without changing aggregate state. */
-    public void validateBeginSecondRound(Review review) {
-        Objects.requireNonNull(review, "review must not be null");
-        if (review.stage() != ReviewStage.DEBATE_ROUND_1) {
-            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "second debate round can begin only after round one");
-        }
-        // [AIREVIEW-PLAN-024#方案4] No empty rounds: without a valid open action (evidence owed, an
-        // unanswered challenge, or unclarified positions) the Director converges to judging instead.
-        // Evidence requests persist only in the store, so topics are rehydrated with their store turns.
-        if (!debateStateMachine.hasOpenSecondRoundActions(topicsWithStoreTurns(review))) {
-            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "no valid open debate action remains; converge to judging instead of running an empty second round");
+        Objects.requireNonNull(metadata, "metadata must not be null");
+        Objects.requireNonNull(topicId, "topicId must not be null");
+        synchronized (review) {
+            DebateTopic topic = requireTopic(review, metadata, topicId);
+            String existing = review.commandResults().get(metadata.idempotencyKey());
+            if (existing != null || topic.currentRound() == 2) {
+                // [AIREVIEW-PLAN-047#1] Replay semantics: the same command key, or an already
+                // round-two topic under a fresh key, never starts a third round.
+                return new TopicRoundResult(topic, true);
+            }
+            requireDebateStage(review, "a second debate round can begin only during an active debate");
+            if (topic.status().isTerminal()) {
+                throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                        "a second debate round cannot begin for a terminal topic; converge to judging instead");
+            }
+            if (topic.currentRound() != 1) {
+                throw new ReviewDomainException(ReviewErrorCode.DEBATE_ROUND_EXCEEDED,
+                        "a second round may begin only for a topic that completed round one");
+            }
+            // [AIREVIEW-PLAN-024#方案4] No empty rounds at topic level: without a valid open action
+            // (evidence owed, an unanswered challenge, or unclarified positions) the topic converges
+            // to judging instead of running an empty second round. Evidence requests persist only in
+            // the store, so the topic is rehydrated with its store turns before the check.
+            if (!debateStateMachine.requiresSecondRoundAction(topicWithStoreTurns(review, topic))) {
+                throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                        "no valid open debate action remains on this topic; converge to judging instead of running an empty second round");
+            }
+            topic.beginSecondRound();
+            debateStore.saveTopic(topic);
+            review.recordCommand(metadata, topic.id().value().toString());
+            // The topic-level round transition is a public fact: without it the live page keeps
+            // painting round one until the first round-two turn commits (AIREVIEW-PLAN-047#1).
+            eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                    review,
+                    ai.cc.chongming.review.domain.event.ReviewEventType.DEBATE_ROUND_2_STARTED,
+                    RoleType.DIRECTOR,
+                    null,
+                    topic.id(),
+                    null,
+                    null,
+                    2,
+                    65,
+                    Map.of("topicId", topic.id().value().toString())));
+            return new TopicRoundResult(topic, false);
         }
     }
 
     /**
-     * [AIREVIEW-PLAN-024#方案4] Rebuilds every topic snapshot with the authoritative store turns so
-     * convergence checks see evidence requests, which never mutate the topic aggregate itself.
+     * [AIREVIEW-PLAN-047#1] Rebuilds one topic snapshot with the authoritative store turns so the
+     * topic-level round check sees evidence requests, which never mutate the topic aggregate itself.
      */
-    private List<DebateTopic> topicsWithStoreTurns(Review review) {
-        return debateStore.findTopics(review.id()).stream()
-                .map(topic -> DebateTopic.restore(topic.id(), topic.reviewId(), topic.subjectKey(),
-                        topic.claimIds(), topic.publicTitle(), topic.status(), topic.currentRound(),
-                        debateStore.findTurns(review.id(), topic.id()), topic.resolution(), topic.closedAt()))
-                .toList();
+    private DebateTopic topicWithStoreTurns(Review review, DebateTopic topic) {
+        return DebateTopic.restore(topic.id(), topic.reviewId(), topic.subjectKey(), topic.claimIds(),
+                topic.publicTitle(), topic.status(), topic.currentRound(),
+                debateStore.findTurns(review.id(), topic.id()), topic.resolution(), topic.closedAt());
     }
 
     /** Enters judging only when every opened topic reached a terminal resolution or escalation. */
@@ -376,12 +399,10 @@ public class DebateService {
     /** Validates that judging can begin without changing aggregate state. */
     public void validateBeginJudging(Review review) {
         Objects.requireNonNull(review, "review must not be null");
-        // [AIREVIEW-PLAN-024#方案4] Early convergence: judging may start directly from round one when
-        // every topic is already terminal, skipping a would-be empty second round.
-        if (review.stage() != ReviewStage.DEBATE_ROUND_2 && review.stage() != ReviewStage.DEBATE_ROUND_1) {
-            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "judging can begin only during an active debate round");
-        }
+        // [AIREVIEW-PLAN-024#方案4][AIREVIEW-PLAN-047#1] Early convergence: judging may start from
+        // the single DEBATE phase (or a legacy round stage) when every topic is already terminal,
+        // skipping a would-be empty second round.
+        requireDebateStage(review, "judging can begin only during an active debate round");
         if (debateStore.findTopics(review.id()).stream().anyMatch(topic -> !topic.status().isTerminal())) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "all debate topics must be terminal before judging");
@@ -422,8 +443,9 @@ public class DebateService {
         }
         conflictDetectionService.recordTopicRegistration(review, List.of());
         ReviewStateMachine stateMachine = new ReviewStateMachine();
-        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
-        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_2);
+        // [AIREVIEW-PLAN-047#1] Enter the single DEBATE phase and immediately converge to judging,
+        // keeping the audit trail one hop from conflict detection instead of two round stages.
+        review.transitionTo(stateMachine, ReviewStage.DEBATE);
         review.transitionTo(stateMachine, ReviewStage.JUDGING);
         eventPublisher.publish(ReviewEventDrafts.completedCommand(
                 review,
@@ -445,10 +467,7 @@ public class DebateService {
         if (existing != null) {
             return new TopicResult(topic, true);
         }
-        if (review.stage() != ReviewStage.DEBATE_ROUND_1 && review.stage() != ReviewStage.DEBATE_ROUND_2) {
-            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "a debate topic can be closed only during an active debate round");
-        }
+        requireDebateStage(review, "a debate topic can be closed only during an active debate round");
         requireVersion(review, command.metadata());
 topic.close(debateStateMachine, command.status(), command.publicResolution(), Instant.now());
         debateStore.saveTopic(topic);
@@ -462,9 +481,9 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
                 null,
                 null,
                 // A never-challenged topic keeps currentRound 0; the event round must reflect the
-                // active review stage instead so the draft stays valid.
-                review.stage() == ReviewStage.DEBATE_ROUND_2 ? 2 : 1,
-                review.stage() == ReviewStage.DEBATE_ROUND_1 ? 60 : 70,
+                // topic's own round instead so the draft stays valid (AIREVIEW-PLAN-047#1).
+                topic.currentRound() == 2 ? 2 : 1,
+                topic.currentRound() == 2 ? 70 : 60,
                 Map.of("status", topic.status().name())));
         return new TopicResult(topic, false);
     }
@@ -486,7 +505,8 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
                 turn.targetClaimId(),
                 turn.turnId(),
                 turn.round(),
-                review.stage() == ReviewStage.DEBATE_ROUND_1 ? 60 : 70,
+                // [AIREVIEW-PLAN-047#1] Progress follows the turn's own round (topic-level).
+                turn.round() == 1 ? 60 : 70,
                 Map.of("turnType", turn.turnType().name())));
     }
     private DebateTopic requireTopic(Review review, ReviewCommandMetadata metadata, TopicId topicId) {
@@ -540,14 +560,38 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
         requireVersion(review, metadata);
     }
 
-    private void requireVersionAndRound(Review review, ReviewCommandMetadata metadata, int round) {
+    /**
+     * [AIREVIEW-PLAN-047#1] Turn gates are phase- and topic-level: the review must be in the single
+     * DEBATE phase (legacy round stages tolerated for in-flight reviews) and the claimed round must
+     * match the topic's own round. Round-two turns are accepted only after the topic itself began
+     * its second round; round-one turns are accepted only before it did.
+     */
+    private void requireVersionAndRound(
+            Review review, DebateTopic topic, ReviewCommandMetadata metadata, int round) {
         debateStateMachine.validateRound(round);
-        ReviewStage requiredStage = round == 1 ? ReviewStage.DEBATE_ROUND_1 : ReviewStage.DEBATE_ROUND_2;
-        if (review.stage() != requiredStage) {
+        requireDebateStage(review, "debate turns are allowed only during an active debate");
+        if (round == 2 && topic.currentRound() != 2) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "debate round does not match current review stage");
+                    "round two turn requires the topic to have begun its second round");
+        }
+        if (round == 1 && topic.currentRound() == 2) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "round one turn is no longer accepted after the topic began its second round");
         }
         requireVersion(review, metadata);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-047#1] Accepts the single DEBATE phase for new reviews and the legacy round
+     * stages so paused in-flight reviews can still finish.
+     */
+    private void requireDebateStage(Review review, String message) {
+        ReviewStage stage = review.stage();
+        if (stage != ReviewStage.DEBATE
+                && stage != ReviewStage.DEBATE_ROUND_1
+                && stage != ReviewStage.DEBATE_ROUND_2) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION, message);
+        }
     }
 
     private void rejectRepeatedRoundOneChallenge(DebateTopic topic, DebateToolCommands.Challenge command) {
@@ -599,5 +643,14 @@ topic.close(debateStateMachine, command.status(), command.publicResolution(), In
 
     /** @author zyj */
     public record TurnResult(DebateTurn turn, boolean replayed) {
+    }
+
+    /**
+     * [AIREVIEW-PLAN-047#1] Topic-level second-round start output with an explicit
+     * idempotent-replay indicator.
+     *
+     * @author zyj
+     */
+    public record TopicRoundResult(DebateTopic topic, boolean replayed) {
     }
 }

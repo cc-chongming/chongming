@@ -69,6 +69,8 @@ public final class ReviewTypes {
         PLANNING,
         INITIAL_REVIEW,
         CONFLICT_DETECTION,
+        // [AIREVIEW-PLAN-047#1] Single debate phase; rounds now live on each topic (currentRound).
+        DEBATE,
         DEBATE_ROUND_1,
         DEBATE_ROUND_2,
         JUDGING,

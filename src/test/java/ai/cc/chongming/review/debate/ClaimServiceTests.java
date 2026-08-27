@@ -170,6 +170,61 @@ class ClaimServiceTests {
                 .isEqualTo(DispatchCommandStatus.PENDING);
     }
 
+    /** [AIREVIEW-PLAN-047#1] 闸门：JUDGING 阶段拒绝辩论期 Claim（即使带 DEFENSE 命令）。 */
+    @Test
+    void rejectsDebateClaimDuringJudgingEvenWithAValidDefenseCommand() {
+        ReviewDispatchService dispatchService =
+                new ReviewDispatchService(defenseDispatchStore, defenseDebateStore, ignored -> { });
+        ClaimService service = new ClaimService(
+                new EvidenceLedgerService(), defenseDebateStore, new ReviewProtocolGuard(),
+                ai.cc.chongming.review.application.ReviewEventPublisher.noop(), dispatchService);
+        Review review = debateRoundOne();
+        TopicId topicId = defenseTopic(review.id());
+        // The envelope is issued while the debate is still active; judging then starts.
+        ReviewDispatchCommand command = issueDefense(review, topicId, "defense-during-judging");
+        review.transitionTo(new ReviewStateMachine(), ReviewStage.JUDGING);
+
+        assertThatThrownBy(() -> service.submit(review, defenseSubmission(
+                review, new IdempotencyKey("defense-claim-judging"), ClaimPosition.SUPPORT,
+                "authentication", command.commandId())))
+                .isInstanceOf(ReviewDomainException.class)
+                .extracting(exception -> ((ReviewDomainException) exception).errorCode())
+                .isEqualTo(ai.cc.chongming.review.domain.exception.ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
+    }
+
+    /** [AIREVIEW-PLAN-047#1] 闸门兼容：存量评审停留在 DEBATE_ROUND_1 时仍可走 DEFENSE 派发。 */
+    @Test
+    void legacyDebateRoundStageStillAcceptsDefenseDispatchClaims() {
+        InMemoryReviewDispatchStore store = new InMemoryReviewDispatchStore();
+        InMemoryReviewDebateStore debate = new InMemoryReviewDebateStore();
+        ReviewDispatchService dispatchService = new ReviewDispatchService(store, debate, ignored -> { });
+        ClaimService service = new ClaimService(
+                new EvidenceLedgerService(), debate, new ReviewProtocolGuard(),
+                ai.cc.chongming.review.application.ReviewEventPublisher.noop(), dispatchService);
+        ReviewStateMachine stateMachine = new ReviewStateMachine();
+        Review review = initialReview();
+        review.transitionTo(stateMachine, ReviewStage.CONFLICT_DETECTION);
+        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(),
+                "authentication", List.of());
+        debate.saveTopic(topic);
+        ReviewDispatchCommand command = dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(
+                new ReviewCommandMetadata(review.id(), review.version(), new IdempotencyKey("legacy-defense")),
+                RoleType.PRODUCT, DispatchedAction.DEFENSE, 1, topic.id(), null, null,
+                Instant.now().plusSeconds(600), RoleType.DIRECTOR, "DIRECTOR")).command();
+
+        ClaimService.ClaimSubmissionResult result = service.submit(review, defenseSubmission(
+                review, new IdempotencyKey("legacy-defense-claim"), ClaimPosition.SUPPORT,
+                "authentication", command.commandId()));
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.claim().subjectKey()).isEqualTo("authentication");
+        assertThat(store.findById(review.id(), command.commandId()))
+                .get()
+                .extracting(ReviewDispatchCommand::status)
+                .isEqualTo(DispatchCommandStatus.CONSUMED);
+    }
+
     // --- helpers ---------------------------------------------------------------
 
     private final InMemoryReviewDispatchStore defenseDispatchStore = new InMemoryReviewDispatchStore();
@@ -189,11 +244,12 @@ class ClaimServiceTests {
         return review;
     }
 
+    /** [AIREVIEW-PLAN-047#1] New reviews debate inside the single DEBATE phase. */
     private Review debateRoundOne() {
         ReviewStateMachine stateMachine = new ReviewStateMachine();
         Review review = initialReview();
         review.transitionTo(stateMachine, ReviewStage.CONFLICT_DETECTION);
-        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
+        review.transitionTo(stateMachine, ReviewStage.DEBATE);
         return review;
     }
 

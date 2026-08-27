@@ -123,16 +123,23 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             // defence side of an objector-only topic; the server then issues the CHALLENGE envelopes.
             issueChallengeAfterDefenseClaim(event);
         } else if (event.type() == ReviewEventType.DEBATE_ROUND_2_STARTED) {
-            wakeDirector(event, "Debate round two is active. Issue dispatch_debate_action commands for every still-required round-two action with the matching targets, or converge with close_debate_topic/begin_judging when no further action is necessary. Do not run an empty round.");
+            // [AIREVIEW-PLAN-047#1] Round two is topic-level: only the named topic advances; the
+            // review stays in the single DEBATE phase while every other topic keeps its own round.
+            wakeDirector(event, "Debate round two started only for topic "
+                    + (event.topicId() == null ? "-" : event.topicId().value())
+                    + " (仅该议题进入第二轮，其余议题保持各自轮次，评审仍处于 DEBATE 阶段). "
+                    + "Issue dispatch_debate_action commands for every still-required round-two action on that "
+                    + "topic with the matching targets, or close it with close_debate_topic and converge with "
+                    + "begin_judging when nothing further is required. Do not run an empty round.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {
-            wakeDirector(event, "A debate topic was closed. If more topics need round one or two, use the stage tools; when every topic is terminal, use begin_judging.");
+            wakeDirector(event, "A debate topic was closed. If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
         } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
             issueRebuttalDispatch(event);
-            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
         } else if (event.type() == ReviewEventType.REBUTTAL_SUBMITTED
                 || event.type() == ReviewEventType.POSITION_CHANGED
                 || event.type() == ReviewEventType.EVIDENCE_REQUESTED) {
-            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, start round two, or continue the bounded debate.");
+            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
         } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_ISSUED) {
             deliverDispatchEnvelope(event);
         } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_EXPIRED
@@ -237,7 +244,9 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         if (dispatchService == null || reviewRegistry == null || debateStore == null || event.claimId() == null) {
             return;
         }
-        if (event.stage() != ReviewStage.DEBATE_ROUND_1 && event.stage() != ReviewStage.DEBATE_ROUND_2) {
+        // [AIREVIEW-PLAN-047#1] The single DEBATE phase (plus legacy round stages) is the trigger
+        // window for server-side challenges after a defence SUPPORT claim lands.
+        if (!isDebateStage(event.stage())) {
             return;
         }
         Claim submitted = debateStore.findClaim(event.reviewId(), event.claimId()).orElse(null);
@@ -296,8 +305,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                     event.reviewId().value(), topicId.value());
             return;
         }
-        int round = debateRoundOf(review.stage());
-        if (round == 0) {
+        if (!isDebateStage(review.stage())) {
             LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=STAGE_NOT_DEBATE stage={}",
                     event.reviewId().value(), topicId.value(), review.stage());
             return;
@@ -322,6 +330,9 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                     event.reviewId().value(), topicId.value());
             return;
         }
+        // [AIREVIEW-PLAN-047#1] The envelope round follows the topic's own round: a topic whose
+        // second round began gets round-two challenge envelopes, everything else round one.
+        int round = topic.currentRound() == 2 ? 2 : 1;
         Claim target = highestSeveritySupportClaim(review.id(), topic);
         if (target == null) {
             LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=NO_SUPPORT_CLAIM",
@@ -385,12 +396,15 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         return best;
     }
 
-    private static int debateRoundOf(ReviewStage stage) {
-        return switch (stage) {
-            case DEBATE_ROUND_1 -> 1;
-            case DEBATE_ROUND_2 -> 2;
-            default -> 0;
-        };
+    /**
+     * [AIREVIEW-PLAN-047#1] The single DEBATE phase plus the legacy round stages are all "debate"
+     * for challenge/rebuttal dispatch and stage-gating; per-topic rounds come from
+     * {@code DebateTopic.currentRound()}.
+     */
+    private static boolean isDebateStage(ReviewStage stage) {
+        return stage == ReviewStage.DEBATE
+                || stage == ReviewStage.DEBATE_ROUND_1
+                || stage == ReviewStage.DEBATE_ROUND_2;
     }
 
     /** Injects the persisted envelope into exactly the recipient role's context. */

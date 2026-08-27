@@ -26,6 +26,21 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class DebateConvergenceGuardTests {
 
+    /** [AIREVIEW-PLAN-047#1] 收敛守卫同样覆盖单一 DEBATE 阶段（议题级轮次）。 */
+    @Test
+    void forcesEscalationAndJudgingFromTheSingleDebateStage() {
+        Fixture fixture = fixture(2, Duration.ofMinutes(20), ReviewStage.DEBATE);
+
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+
+        assertThat(fixture.review.stage()).isEqualTo(ReviewStage.JUDGING);
+        assertThat(fixture.store.findTopics(fixture.review.id()))
+                .hasSize(2)
+                .allSatisfy(topic -> assertThat(topic.status())
+                        .isEqualTo(ai.cc.chongming.review.domain.model.ReviewTypes.DebateTopicStatus.ESCALATED));
+    }
+
     @Test
     void wakesBelowBudgetKeepTheDebateRunning() {
         Fixture fixture = fixture(3, Duration.ofMinutes(20));
@@ -124,13 +139,21 @@ class DebateConvergenceGuardTests {
     }
 
     private Fixture fixture(int maxWakes, Duration timeout) {
-        return fixture(maxWakes, timeout, Duration.ofMinutes(20));
+        return fixture(maxWakes, timeout, Duration.ofMinutes(20), ReviewStage.DEBATE_ROUND_1);
+    }
+
+    private Fixture fixture(int maxWakes, Duration timeout, ReviewStage stage) {
+        return fixture(maxWakes, timeout, Duration.ofMinutes(20), stage);
     }
 
     private Fixture fixture(int maxWakes, Duration timeout, Duration noProgress) {
+        return fixture(maxWakes, timeout, noProgress, ReviewStage.DEBATE_ROUND_1);
+    }
+
+    private Fixture fixture(int maxWakes, Duration timeout, Duration noProgress, ReviewStage stage) {
         InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
         InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
-        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE_ROUND_1, 1, 0,
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), stage, 1, 0,
                 List.of(), Map.of());
         registry.register(review);
         store.saveTopic(new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "cache.default_enable", List.of()));

@@ -159,11 +159,22 @@ public class ClaimService {
         if (review.stage() == ReviewStage.INITIAL_REVIEW) {
             return null;
         }
-        if (review.stage() == ReviewStage.DEBATE_ROUND_1 || review.stage() == ReviewStage.DEBATE_ROUND_2) {
+        // [AIREVIEW-PLAN-047#1] The debate gate accepts the single DEBATE phase and tolerates the
+        // legacy round stages so in-flight reviews can still submit DEFENSE claims.
+        if (isDebateStage(review.stage())) {
             return requireDefenseDispatch(review, actorRole, submission);
         }
         throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                 "claims may be submitted only during initial review or an active debate round");
+    }
+
+    /**
+     * [AIREVIEW-PLAN-047#1] One shared phase predicate for the claim gate.
+     */
+    private static boolean isDebateStage(ReviewStage stage) {
+        return stage == ReviewStage.DEBATE
+                || stage == ReviewStage.DEBATE_ROUND_1
+                || stage == ReviewStage.DEBATE_ROUND_2;
     }
 
     private void requireActiveClaimRole(Review review, RoleType actorRole) {

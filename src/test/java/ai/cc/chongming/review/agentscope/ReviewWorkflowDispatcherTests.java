@@ -88,7 +88,8 @@ class ReviewWorkflowDispatcherTests {
         when(adapter.deliverDispatchCommand(anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
         when(adapter.stopRoleRuns(anyString())).thenReturn(Mono.empty());
 
-        review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE_ROUND_1, 1, 0,
+        // [AIREVIEW-PLAN-047#1] New reviews debate inside the single DEBATE phase.
+        review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
                 List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
                         new RoleActivation(RoleType.BACKEND, "backend", true)),
                 Map.of());
@@ -299,7 +300,7 @@ class ReviewWorkflowDispatcherTests {
         // The defender's SUPPORT claim lands on the topic and completes both sides.
         Claim defense = claim(defending, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
         objectorOnly.attachClaim(defense.claimId());
-        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE_ROUND_1, defense.claimId()));
+        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE, defense.claimId()));
 
         List<ReviewDispatchCommand> commands =
                 dispatchStore.findByReview(defending.id(), defending.attemptNo());
@@ -367,7 +368,7 @@ class ReviewWorkflowDispatcherTests {
         debateStore.saveTopic(topic);
         topic.attachClaim(support.claimId());
 
-        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE_ROUND_1, support.claimId()));
+        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE, support.claimId()));
         List<ReviewDispatchCommand> first =
                 dispatchStore.findByReview(defending.id(), defending.attemptNo());
         assertThat(first).hasSize(2);
@@ -375,15 +376,52 @@ class ReviewWorkflowDispatcherTests {
         // A later SUPPORT claim on an already two-sided topic must not stack (nor re-arm) envelopes.
         Claim laterSupport = claim(defending, RoleType.PRODUCT, ClaimSeverity.P2, ClaimPosition.SUPPORT);
         topic.attachClaim(laterSupport.claimId());
-        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE_ROUND_1, laterSupport.claimId()));
+        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE, laterSupport.claimId()));
 
         assertThat(dispatchStore.findByReview(defending.id(), defending.attemptNo())).hasSize(2);
+    }
+
+    // --- [AIREVIEW-PLAN-047#1] topic-level round behaviour --------------------
+
+    @Test
+    void topicAtCurrentRoundTwoDispatchesRoundTwoChallengeEnvelopes() {
+        Review opposing = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
+        Claim support = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim opposeBackend = claim(opposing, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim opposeFrontend = claim(opposing, RoleType.FRONTEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        // Synthetic in-memory snapshot: a topic whose own second round already began.
+        DebateTopic roundTwoTopic = DebateTopic.restore(new TopicId(UUID.randomUUID()), opposing.id(),
+                "api.contract", List.of(support.claimId(), opposeBackend.claimId(), opposeFrontend.claimId()),
+                DebateTopicStatus.OPEN, 2, List.of(), null, null);
+        debateStore.saveTopic(roundTwoTopic);
+
+        dispatcher.onCommitted(openedEvent(opposing, roundTwoTopic));
+
+        List<ReviewDispatchCommand> commands =
+                dispatchStore.findByReview(opposing.id(), opposing.attemptNo());
+        assertThat(commands).hasSize(2);
+        assertThat(commands).allSatisfy(command -> {
+            assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+            // [AIREVIEW-PLAN-047#1] The envelope round follows the topic's own currentRound.
+            assertThat(command.round()).isEqualTo(2);
+            assertThat(command.topicId()).isEqualTo(roundTwoTopic.id());
+        });
+    }
+
+    @Test
+    void roundTwoStartedWakeNamesTheTopicAndStatesOnlyThatTopicAdvances() {
+        dispatcher.onCommitted(event(ReviewEventType.DEBATE_ROUND_2_STARTED, null, Map.of(), topic.id()));
+
+        verify(adapter, timeout(3000)).send(eq(runtimeId), eq(runtimeId + "-director"),
+                argThat((String message) -> message != null
+                        && message.contains(topic.id().value().toString())
+                        && message.contains("仅该议题进入第二轮")));
     }
 
     // --- helpers -------------------------------------------------------------
 
     private Review freshReview(RoleType... roles) {
-        Review fresh = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE_ROUND_1, 1, 0,
+        Review fresh = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
                 Arrays.stream(roles)
                         .map(role -> new RoleActivation(
                                 role, role.name().toLowerCase(java.util.Locale.ROOT), true))
@@ -420,8 +458,12 @@ class ReviewWorkflowDispatcherTests {
     }
 
     private ReviewEvent event(ReviewEventType type, TurnId turnId, Map<String, String> payload) {
+        return event(type, turnId, payload, topic.id());
+    }
+
+    private ReviewEvent event(ReviewEventType type, TurnId turnId, Map<String, String> payload, TopicId eventTopicId) {
         return new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(), type, type.category(),
-                review.stage(), null, null, topic.id(), claim.claimId(), turnId, 1, null,
+                review.stage(), null, null, eventTopicId, claim.claimId(), turnId, 1, null,
                 Instant.now(), 1, payload);
     }
 }

@@ -34,10 +34,10 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
  * and when to converge; this service freezes those decisions into verifiable envelopes and refuses
  * any attempt by a model to widen its own authority.
  *
- * <p>Validation before persistence: the recipient role is activated, the topic/claim/turn targets
  * belong to the current review, the allowed action applies to the current topic status, the round
- * matches the current debate stage, and the expiry lies in the future. Issuance is idempotent on
- * the command idempotencyKey; consumption, expiry and rejection are public runtime events.
+ * matches the topic's own current round (the review is in the single DEBATE phase), and the expiry
+ * lies in the future. Issuance is idempotent on the command idempotencyKey; consumption, expiry
+ * and rejection are public runtime events.
  *
  * <p>The event publisher is resolved lazily: {@code ReviewEventService} collects every
  * {@code ReviewEventListener} (including the dispatcher that depends on this service), so a direct
@@ -215,13 +215,16 @@ public class ReviewDispatchService {
                                 + ", not " + expectedAction
                                 + "; legal pending actions: " + legalActions(review, actorRole));
             }
-            int stageRound = debateRoundOf(review.stage());
-            if (stageRound != command.round()) {
+            // [AIREVIEW-PLAN-047#1] Both the phase and the topic-level round must still match:
+            // a round-one envelope for a topic that advanced to round two (or a review that left
+            // the debate phase) is stale and rejected with the drift reason.
+            int expectedRound = expectedCommandRound(review, command);
+            if (expectedRound == 0 || expectedRound != command.round()) {
                 transition(review, command, DispatchCommandStatus.REJECTED,
                         ReviewEventType.DISPATCH_COMMAND_REJECTED, "STAGE_ROUND_DRIFT");
                 throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                         "dispatch command round " + command.round()
-                                + " no longer matches the current review stage " + review.stage()
+                                + " no longer matches the current debate round"
                                 + "; legal pending actions: " + legalActions(review, actorRole));
             }
             return command;
@@ -303,16 +306,20 @@ public class ReviewDispatchService {
     }
 
     private void validateProposal(Review review, DispatchProposal proposal) {
-        int stageRound = debateRoundOf(review.stage());
-        if (stageRound == 0) {
+        // [AIREVIEW-PLAN-047#1] Commands are issued per topic: the expected round comes from the
+        // topic's own currentRound (fallback 1), while the review must be in the single DEBATE
+        // phase (legacy round stages tolerated for in-flight reviews).
+        int expectedRound = expectedProposalRound(review, proposal);
+        if (expectedRound == 0) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                     "dispatch commands can be issued only during an active debate round, current stage is "
                             + review.stage());
         }
-        if (proposal.round() != stageRound) {
+        if (proposal.round() != expectedRound) {
             throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "dispatch round " + proposal.round() + " does not match the current review stage "
-                            + review.stage());
+                    "dispatch round " + proposal.round()
+                            + " does not match the current round of the dispatch topic "
+                            + proposal.topicId().value());
         }
         boolean activeRecipient = review.roleActivations().stream()
                 .anyMatch(activation -> activation.roleType() == proposal.recipientRole());
@@ -497,12 +504,49 @@ public class ReviewDispatchService {
         };
     }
 
-    private static int debateRoundOf(ReviewStage stage) {
-        return switch (stage) {
-            case DEBATE_ROUND_1 -> 1;
-            case DEBATE_ROUND_2 -> 2;
-            default -> 0;
-        };
+    /**
+     * [AIREVIEW-PLAN-047#1] Expected round when issuing a command: legacy global stages keep their
+     * old mapping; in the single DEBATE phase the topic's own currentRound is authoritative (a
+     * never-challenged topic falls back to round one; 0 outside the debate phases).
+     */
+    private int expectedProposalRound(Review review, DispatchProposal proposal) {
+        if (review.stage() == ReviewStage.DEBATE_ROUND_1) {
+            return 1;
+        }
+        if (review.stage() == ReviewStage.DEBATE_ROUND_2) {
+            return 2;
+        }
+        if (review.stage() != ReviewStage.DEBATE) {
+            return 0;
+        }
+        if (proposal.topicId() == null) {
+            return 1;
+        }
+        return debateStore.findTopic(review.id(), proposal.topicId())
+                .map(topic -> topic.currentRound() == 2 ? 2 : 1)
+                .orElse(1);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-047#1] Expected round when a role resolves a command for write: same mapping
+     * as {@link #expectedProposalRound}; 0 means the review left the debate phases.
+     */
+    private int expectedCommandRound(Review review, ReviewDispatchCommand command) {
+        if (review.stage() == ReviewStage.DEBATE_ROUND_1) {
+            return 1;
+        }
+        if (review.stage() == ReviewStage.DEBATE_ROUND_2) {
+            return 2;
+        }
+        if (review.stage() != ReviewStage.DEBATE) {
+            return 0;
+        }
+        if (command.topicId() == null) {
+            return 1;
+        }
+        return debateStore.findTopic(review.id(), command.topicId())
+                .map(topic -> topic.currentRound() == 2 ? 2 : 1)
+                .orElse(1);
     }
 
     /**

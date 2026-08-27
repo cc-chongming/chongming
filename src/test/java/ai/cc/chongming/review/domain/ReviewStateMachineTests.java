@@ -31,8 +31,7 @@ class ReviewStateMachineTests {
                 ReviewStage.PLANNING,
                 ReviewStage.INITIAL_REVIEW,
                 ReviewStage.CONFLICT_DETECTION,
-                ReviewStage.DEBATE_ROUND_1,
-                ReviewStage.DEBATE_ROUND_2,
+                ReviewStage.DEBATE,
                 ReviewStage.JUDGING,
                 ReviewStage.WAITING_HUMAN,
                 ReviewStage.NOTIFYING,
@@ -81,9 +80,44 @@ class ReviewStateMachineTests {
 
     @Test
     void permitsEarlyConvergenceFromRoundOneToJudging() {
-        // [AIREVIEW-PLAN-024#方案4] When no valid open action survives round one the debate may
+        // [AIREVIEW-PLAN-024#方案4] When no valid open action survives round one the legacy flow may
         // converge straight to judging instead of running an empty second round.
         assertThat(stateMachine.transition(ReviewStage.DEBATE_ROUND_1, ReviewStage.JUDGING))
+                .isEqualTo(ReviewStage.JUDGING);
+    }
+
+    /** [AIREVIEW-PLAN-047#1] Legacy round stages stay fully walkable so paused in-flight reviews finish. */
+    @Test
+    void legacyRoundStagesArePreservedForInFlightReviews() {
+        assertThat(stateMachine.transition(ReviewStage.DEBATE_ROUND_1, ReviewStage.DEBATE_ROUND_2))
+                .isEqualTo(ReviewStage.DEBATE_ROUND_2);
+        assertThat(stateMachine.transition(ReviewStage.DEBATE_ROUND_2, ReviewStage.JUDGING))
+                .isEqualTo(ReviewStage.JUDGING);
+    }
+
+    /** [AIREVIEW-PLAN-047#1] A legacy round review may also migrate into the single DEBATE phase. */
+    @Test
+    void legacyRoundStagesCanMigrateIntoTheSingleDebatePhase() {
+        assertThat(stateMachine.transition(ReviewStage.DEBATE_ROUND_1, ReviewStage.DEBATE))
+                .isEqualTo(ReviewStage.DEBATE);
+        assertThat(stateMachine.transition(ReviewStage.DEBATE_ROUND_2, ReviewStage.DEBATE))
+                .isEqualTo(ReviewStage.DEBATE);
+    }
+
+    @Test
+    void debateStageCanFailOrCancel() {
+        assertThat(stateMachine.transition(ReviewStage.DEBATE, ReviewStage.FAILED))
+                .isEqualTo(ReviewStage.FAILED);
+
+        assertThat(stateMachine.transition(ReviewStage.DEBATE, ReviewStage.CANCELLING))
+                .isEqualTo(ReviewStage.CANCELLING);
+        assertThat(stateMachine.transition(ReviewStage.CANCELLING, ReviewStage.CANCELLED))
+                .isEqualTo(ReviewStage.CANCELLED);
+    }
+
+    @Test
+    void debateStageConvergesDirectlyToJudging() {
+        assertThat(stateMachine.transition(ReviewStage.DEBATE, ReviewStage.JUDGING))
                 .isEqualTo(ReviewStage.JUDGING);
     }
 
@@ -91,6 +125,9 @@ class ReviewStateMachineTests {
         return Stream.of(
                 Arguments.of(ReviewStage.PENDING, ReviewStage.PLANNING),
                 Arguments.of(ReviewStage.INITIAL_REVIEW, ReviewStage.DEBATE_ROUND_1),
+                Arguments.of(ReviewStage.INITIAL_REVIEW, ReviewStage.DEBATE),
+                Arguments.of(ReviewStage.DEBATE, ReviewStage.DEBATE_ROUND_1),
+                Arguments.of(ReviewStage.DEBATE, ReviewStage.DEBATE_ROUND_2),
                 Arguments.of(ReviewStage.WAITING_HUMAN, ReviewStage.COMPLETED),
                 Arguments.of(ReviewStage.CANCELLED, ReviewStage.SNAPSHOTTING));
     }

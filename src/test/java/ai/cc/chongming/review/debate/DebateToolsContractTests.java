@@ -59,7 +59,7 @@ class DebateToolsContractTests {
                 metadata(review, "open-action-round-one"), RoleType.PRODUCT, RoleType.BACKEND,
                 opened.topic().id(), 1, backendClaim.claimId(),
                 "Provide the backend policy that covers refresh-token renewal."));
-        debateService.beginSecondRound(review);
+        debateService.beginTopicSecondRound(review, metadata(review, "begin-round-two"), opened.topic().id());
 
         DebateService.TurnResult evidenceRequest = tools.requestAdditionalEvidence(review,
                 new DebateToolCommands.EvidenceRequest(metadata(review, "request-evidence"), RoleType.BACKEND,
@@ -94,7 +94,7 @@ class DebateToolsContractTests {
                                 List.of(productClaim.claimId(), backendClaim.claimId())))));
         DebateService.TopicResult opened = registered.topics().get(0);
 
-        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE);
         assertThat(opened.topic().claimIds()).containsExactlyInAnyOrder(productClaim.claimId(), backendClaim.claimId());
     }
 
@@ -114,7 +114,7 @@ class DebateToolsContractTests {
                                 List.of(backendClaim.claimId())))));
         DebateService.TopicResult opened = registered.topics().get(0);
 
-        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE_ROUND_1);
+        assertThat(review.stage()).isEqualTo(ReviewStage.DEBATE);
         assertThat(opened.topic().claimIds()).containsExactly(backendClaim.claimId());
     }
 

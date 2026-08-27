@@ -32,8 +32,8 @@ import reactor.core.publisher.Mono;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
 
 /**
- * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案3/方案4] Binds debate and Judge operations to the
- * active review attempt. The model never supplies review identity, actor identity, optimistic
+ * [AIREVIEW-PLAN-009#1.4][AIREVIEW-PLAN-024#方案3/方案4][AIREVIEW-PLAN-047#1] Binds debate and
+ * Judge operations to the active review attempt. The model never supplies review identity, actor identity, optimistic
  * version, or idempotency; every debate write action must additionally reference a valid
  * server-issued dispatch commandId, and the Director steers roles through the dispatch tool
  * instead of broadcast text. Topic registration is batch ({@code register_topics}) and fed by the
@@ -306,7 +306,7 @@ public class ReviewDebateToolFactory {
     private final class RegisterTopicsTool extends BoundTool {
         private RegisterTopicsTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "register_topics"; }
-        @Override public String getDescription() { return "Register ALL chosen conflict topics in one batch from list_conflict_candidates subjects; the server validates and deduplicates every proposal first, then atomically saves all topics and moves the stage to debate round one exactly once. claimIds may be empty for assessment-only contradiction subjects."; }
+        @Override public String getDescription() { return "Register ALL chosen conflict topics in one batch from list_conflict_candidates subjects; the server validates and deduplicates every proposal first, then atomically saves all topics and moves the stage to the single DEBATE phase exactly once (rounds are topic-level). claimIds may be empty for assessment-only contradiction subjects."; }
         @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
                 "topics", Map.of("type", "array", "description", "Every candidate subject to register",
                         "items", objectSchema(Map.of(
@@ -446,7 +446,10 @@ public class ReviewDebateToolFactory {
             long ttlSeconds = input.get("expiresInSeconds") instanceof Number number
                     ? number.longValue() : DISPATCH_DEFAULT_TTL_SECONDS;
             ttlSeconds = Math.max(DISPATCH_MIN_TTL_SECONDS, Math.min(DISPATCH_MAX_TTL_SECONDS, ttlSeconds));
-            int round = review.stage() == ReviewStage.DEBATE_ROUND_2 ? 2 : 1;
+            TopicId dispatchTopicId = topicId(input);
+            // [AIREVIEW-PLAN-047#1] Round is per topic: a topic that began its own second round gets
+            // round-two envelopes, everything else stays round one.
+            int round = debateRoundFor(review, dispatchTopicId);
             UUID targetClaimUuid = optionalUuid(input, "targetClaimId");
             UUID targetTurnUuid = optionalUuid(input, "targetTurnId");
             ReviewDispatchService.DispatchProposal proposal = new ReviewDispatchService.DispatchProposal(
@@ -454,7 +457,7 @@ public class ReviewDebateToolFactory {
                     role(input, "recipientRole"),
                     DispatchedAction.valueOf(text(input, "allowedAction")),
                     round,
-                    topicId(input),
+                    dispatchTopicId,
                     targetClaimUuid == null ? null : new ClaimId(targetClaimUuid),
                     targetTurnUuid == null ? null : new TurnId(targetTurnUuid),
                     Instant.now().plus(Duration.ofSeconds(ttlSeconds)),
@@ -483,17 +486,20 @@ public class ReviewDebateToolFactory {
     private final class BeginSecondRoundTool extends BoundTool {
         private BeginSecondRoundTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "begin_second_debate_round"; }
-        @Override public String getDescription() { return "Move the review from debate round one to the bounded second round."; }
-        @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(), List.of()); }
+        @Override public String getDescription() { return "Begin the bounded second round for ONE topic only: the topic must still be open after round one and carry a valid open action. The review stage stays in the single DEBATE phase; other topics keep their own round."; }
+        @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
+                "topicId", stringSchema("Debate topic UUID to advance to its second round")),
+                List.of("topicId")); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
-            requireNoInput(input);
-            if (!review.commandResults().containsKey(metadata.idempotencyKey())) {
-                debateService.validateBeginSecondRound(review);
-            }
-            boolean replayed = advanceStage(review, metadata, ReviewStage.DEBATE_ROUND_1, "begin-second-round", () -> debateService.beginSecondRound(review));
-            // [AIREVIEW-PLAN-024#方案3] The broadcast round-two prompt is removed; the committed
-            // DEBATE_ROUND_2_STARTED event wakes the Director to issue directed dispatch commands.
-            return ToolResultBlock.text("stage=" + review.stage() + "; replayed=" + replayed);
+            // [AIREVIEW-PLAN-047#1] The service owns idempotency: the same callId replays, a topic
+            // already on round two is treated as replayed (hard two-round cap), and the committed
+            // DEBATE_ROUND_2_STARTED fact (with topicId) wakes the Director to issue directed
+            // dispatch commands for that topic only.
+            DebateService.TopicRoundResult result = debateService.beginTopicSecondRound(review, metadata, topicId(input));
+            return ToolResultBlock.text("topicId=" + result.topic().id().value()
+                    + "; round=" + result.topic().currentRound()
+                    + "; stage=" + review.stage()
+                    + "; replayed=" + result.replayed());
         }
     }
 
@@ -507,7 +513,7 @@ public class ReviewDebateToolFactory {
             if (!review.commandResults().containsKey(metadata.idempotencyKey())) {
                 debateService.validateBeginJudging(review);
             }
-            boolean replayed = advanceStage(review, metadata, List.of(ReviewStage.DEBATE_ROUND_2, ReviewStage.DEBATE_ROUND_1),
+            boolean replayed = advanceStage(review, metadata, List.of(ReviewStage.DEBATE, ReviewStage.DEBATE_ROUND_2, ReviewStage.DEBATE_ROUND_1),
                     "begin-judging", () -> debateService.beginJudging(review));
             // The Judge wake is owned by ReviewWorkflowDispatcher's JUDGING_STARTED handler so every
             // path into judging (Director tool, forced convergence) dispatches exactly once.
@@ -615,6 +621,26 @@ public class ReviewDebateToolFactory {
         }
     }
 
+    /**
+     * [AIREVIEW-PLAN-047#1] The dispatch round is per topic: a topic that began its own second
+     * round gets round-two envelopes, everything else stays round one. Legacy global stages keep
+     * their old mapping so in-flight reviews keep dispatching.
+     */
+    private int debateRoundFor(Review review, TopicId topicId) {
+        if (review.stage() == ReviewStage.DEBATE_ROUND_1) {
+            return 1;
+        }
+        if (review.stage() == ReviewStage.DEBATE_ROUND_2) {
+            return 2;
+        }
+        if (review.stage() == ReviewStage.DEBATE) {
+            return debateStore.findTopic(review.id(), topicId)
+                    .map(topic -> topic.currentRound() == 2 ? 2 : 1)
+                    .orElse(1);
+        }
+        throw new IllegalStateException("dispatch_debate_action requires an active debate stage");
+    }
+
     private Review requireReview(ReviewRuntimeContext context) {
         return reviewRegistry.find(context.reviewId()).filter(review -> review.attemptNo() == context.attemptNo())
                 .orElseThrow(() -> new IllegalStateException("active review was not found"));
@@ -632,8 +658,8 @@ public class ReviewDebateToolFactory {
     }
 
     /**
-     * [AIREVIEW-PLAN-024#方案4] Stage transitions may permit several source stages (early
-     * convergence from DEBATE_ROUND_1 straight to JUDGING).
+     * [AIREVIEW-PLAN-024#方案4][AIREVIEW-PLAN-047#1] Stage transitions may permit several source
+     * stages (early convergence from DEBATE, or a legacy DEBATE_ROUND_*, straight to JUDGING).
      */
     private boolean advanceStage(
             Review review, ReviewCommandMetadata metadata, List<ReviewStage> expectedStages, String reference, Runnable operation) {

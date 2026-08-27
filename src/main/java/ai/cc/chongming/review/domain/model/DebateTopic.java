@@ -140,6 +140,21 @@ public final class DebateTopic {
         return List.copyOf(turns);
     }
 
+    /**
+     * [AIREVIEW-PLAN-047#1] Topic-level second round: the topic's own currentRound moves to 2
+     * without touching the review's global stage. The two-round cap is hard: only a topic that
+     * completed round one can start round two, and a topic already on round two can never start a
+     * third.
+     */
+    public void beginSecondRound() {
+        if (currentRound != 1) {
+            throw new ai.cc.chongming.review.domain.exception.ReviewDomainException(
+                    ai.cc.chongming.review.domain.exception.ReviewErrorCode.DEBATE_ROUND_EXCEEDED,
+                    "a topic may begin its second round only once, after completing round one");
+        }
+        currentRound = 2;
+    }
+
     public void addChallenge(DebateStateMachine stateMachine, DebateTurn turn) {
         stateMachine.validateChallenge(turn.round(), turn.targetClaimId());
         status = stateMachine.transition(status, DebateTopicStatus.CHALLENGED);

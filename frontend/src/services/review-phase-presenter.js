@@ -12,6 +12,8 @@ export const PHASE_INDEX_BY_STAGE = {
     PLANNING: 1,
     INITIAL_REVIEW: 2,
     CONFLICT_DETECTION: 3,
+    // [AIREVIEW-PLAN-047#3] 单一 DEBATE 阶段落位辩论；旧轮次值兼容存量评审。
+    DEBATE: 4,
     DEBATE_ROUND_1: 4,
     DEBATE_ROUND_2: 4,
     JUDGING: 5,

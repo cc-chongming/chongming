@@ -80,6 +80,28 @@ class ReviewDebateToolFactoryTests {
         assertThat(dispatchTool.getDescription()).contains("DEFENSE");
     }
 
+    /** [AIREVIEW-PLAN-047#1] 工具契约：begin_second_round 必须携带必填 topicId 且声明议题级语义。 */
+    @Test
+    void beginSecondDebateRoundSchemaRequiresTopicIdAndDescribesTopicLevelSemantics() {
+        ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
+                mock(ReviewRegistry.class), mock(DebateTools.class), mock(DebateService.class),
+                mock(ReviewDebateStore.class));
+        io.agentscope.core.tool.AgentTool beginSecondRound = factory.directorTools(new ReviewRuntimeContext(
+                new ReviewId(UUID.randomUUID()), 1, "test-user", "test-trace", IntakeCancellation.neverCancelled()))
+                .stream()
+                .filter(tool -> tool.getName().equals("begin_second_debate_round"))
+                .findFirst()
+                .orElseThrow();
+
+        String schema = String.valueOf(beginSecondRound.getParameters());
+        assertThat(schema)
+                .as("begin_second_debate_round must require the topicId")
+                .contains("topicId", "required");
+        assertThat(beginSecondRound.getDescription())
+                .as("begin_second_debate_round must describe topic-level semantics")
+                .contains("ONE topic", "single DEBATE phase");
+    }
+
     /** [AIREVIEW-PLAN-024#方案3] With the dispatch service wired, every role write tool demands a commandId. */
     @Test
     void roleWriteToolsRequireAnAuthorizingDispatchCommandIdWhenDispatchServiceIsWired() {
