@@ -15,7 +15,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +31,8 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.*;
  */
 @Service
 public class ClaimService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ClaimService.class);
 
     private final EvidenceLedgerService evidenceLedgerService;
     private final ReviewDebateStore debateStore;
@@ -99,6 +104,9 @@ public class ClaimService {
         debateStore.saveClaim(claim);
         review.recordCommand(submission.metadata(), claim.claimId().value().toString());
         consumeDefenseCommand(review, defenseCommand);
+        // [AIREVIEW-PLAN-040#1] Mount the accepted DEFENSE claim onto its topic so the court's
+        // support side sees it; initial-review submissions (no dispatch command) never touch topics.
+        attachDefenseClaimToTopic(review, defenseCommand, claim);
         eventPublisher.publish(ReviewEventDrafts.completedCommand(
                 review,
                 ai.cc.chongming.review.domain.event.ReviewEventType.CLAIM_SUBMITTED,
@@ -203,6 +211,26 @@ public class ClaimService {
         if (command != null && dispatchService != null) {
             dispatchService.consume(review, command);
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-040#1] Appends the accepted claim to the dispatch topic's membership and re-saves
+     * the topic snapshot. The submission gate already verified the topic belongs to this review, so a
+     * vanished topic is only a defensive warning: it must never roll back an accepted claim.
+     */
+    private void attachDefenseClaimToTopic(Review review, ReviewDispatchCommand defenseCommand, Claim claim) {
+        if (defenseCommand == null || defenseCommand.topicId() == null) {
+            return;
+        }
+        Optional<DebateTopic> topic = debateStore.findTopic(review.id(), defenseCommand.topicId());
+        if (topic.isEmpty()) {
+            LOG.warn("[AIREVIEW-PLAN-040#1] DEFENSE claim {} accepted but topic {} is no longer present; "
+                    + "support-side mount skipped", claim.claimId().value(), defenseCommand.topicId().value());
+            return;
+        }
+        DebateTopic mounted = topic.get();
+        mounted.attachClaim(claim.claimId());
+        debateStore.saveTopic(mounted);
     }
 
     private void requireExpectedVersion(Review review, ReviewCommandMetadata metadata) {

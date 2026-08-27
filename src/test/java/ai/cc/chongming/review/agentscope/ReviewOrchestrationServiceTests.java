@@ -1,8 +1,10 @@
 package ai.cc.chongming.review.agentscope;
 
 import ai.cc.chongming.review.application.IntakeCancellation;
+import ai.cc.chongming.review.application.ReviewEventPublisher;
 import ai.cc.chongming.review.application.ReviewOrchestrationService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.application.RuntimeNoticeBroadcaster;
 import ai.cc.chongming.review.application.RoleActivationService;
 import ai.cc.chongming.review.config.ReviewOrchestrationProperties;
 import ai.cc.chongming.review.config.ReviewProperties;
@@ -39,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Verifies director total planning, mandatory-role launch, bounded revisions and cancellation.
  * [AIREVIEW-PLAN-020#0.5.1] Also verifies that role rounds are dispatched in parallel only after
  * every role (including the pre-registered Judge) has been registered and applied in order.
+ * [AIREVIEW-PLAN-038#1] Also verifies orchestration runtime notices are published in lifecycle order.
  *
  * @author wangli
  */
@@ -154,19 +157,102 @@ class ReviewOrchestrationServiceTests {
                         RoleType.FRONTEND, RoleType.BACKEND, RoleType.JUDGE);
     }
 
+    /**
+     * [AIREVIEW-PLAN-038#1] The full start flow publishes exactly one review-created notice, then
+     * one role-activated notice per mandatory role in registration order, then one role-dispatched
+     * notice per role, all addressed to the director run.
+     */
+    @Test
+    void publishesOrchestrationNoticesInLifecycleOrder() {
+        RecordingNoticeBroadcaster notices = new RecordingNoticeBroadcaster();
+        ReviewStateMachine stateMachine = new ReviewStateMachine();
+        ReviewOrchestrationService service = buildService(
+                new FakeAgentRuntimeAdapter(), stateMachine, new ReviewOrchestrationProperties(3, 4), notices);
+        Review review = Review.pending(new ReviewId(UUID.randomUUID()));
+        review.transitionTo(stateMachine, ReviewStage.SNAPSHOTTING);
+        review.transitionTo(stateMachine, ReviewStage.PLANNING);
+        ReviewRuntimeContext context = new ReviewRuntimeContext(
+                review.id(), review.attemptNo(), "user-001", "trace-001", IntakeCancellation.neverCancelled());
+
+        startReview(service, review, context);
+
+        List<String> discriminators = notices.discriminators();
+        assertThat(discriminators).hasSize(11);
+        assertThat(discriminators.getFirst()).isEqualTo("review-created-v1");
+        assertThat(discriminators.subList(1, 6))
+                .containsExactly("role-activated-PRODUCT", "role-activated-PROJECT",
+                        "role-activated-FRONTEND", "role-activated-BACKEND", "role-activated-JUDGE");
+        assertThat(discriminators.subList(6, 11))
+                .containsExactly("role-dispatched-PRODUCT", "role-dispatched-PROJECT",
+                        "role-dispatched-FRONTEND", "role-dispatched-BACKEND", "role-dispatched-JUDGE");
+        assertThat(notices.agentIds()).containsOnly(context.directorLabel());
+
+        notices.requireText("review-created-v1",
+                "评审已创建：协调者发布评审计划 v1，按评审协议决策启用 5 个子代理");
+        notices.requireText("role-activated-PRODUCT",
+                "决策启用子代理「产品经理」：协议要求的核心初审角色，运行体已注册");
+        notices.requireText("role-activated-JUDGE",
+                "决策启用子代理「裁决者」：裁决者预注册，待辩论议题全部终态后裁决，运行体已注册");
+        notices.requireText("role-dispatched-PRODUCT",
+                "已调用子代理「产品经理」开始执行初审任务");
+    }
+
     private ReviewOrchestrationService buildService(
             AgentRuntimeAdapter adapter, ReviewStateMachine stateMachine, ReviewOrchestrationProperties properties) {
+        return buildService(adapter, stateMachine, properties, RuntimeNoticeBroadcaster.noop());
+    }
+
+    private ReviewOrchestrationService buildService(
+            AgentRuntimeAdapter adapter, ReviewStateMachine stateMachine, ReviewOrchestrationProperties properties,
+            RuntimeNoticeBroadcaster noticeBroadcaster) {
         ReviewProperties reviewProperties = new ReviewProperties(temporaryDirectory.toString(), 8, 2);
         ReviewWorkspaceLayout workspaceLayout = new ReviewWorkspaceLayout(reviewProperties, new ObjectMapper());
         RoleActivationService activationService = new RoleActivationService(
                 new ReviewProtocolGuard(), new RolePackRegistry(new PathMatchingResourcePatternResolver()), reviewProperties);
-        return new ReviewOrchestrationService(adapter, workspaceLayout, activationService, stateMachine, properties);
+        return new ReviewOrchestrationService(adapter, workspaceLayout, activationService, stateMachine, properties,
+                ReviewEventPublisher.noop(), noticeBroadcaster);
     }
 
     private ReviewOrchestrationService.StartResult startReview(
             ReviewOrchestrationService service, Review review, ReviewRuntimeContext context) {
         return service.start(new ReviewOrchestrationService.StartRequest(
                 review, context, List.of("Run mandatory role review"), "Initial total plan", "Begin review")).block();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-038#1] Records every orchestration notice in call order for lifecycle assertions.
+     *
+     * @author wangli
+     */
+    private static final class RecordingNoticeBroadcaster implements RuntimeNoticeBroadcaster {
+
+        private final List<Notice> notices = new java.util.ArrayList<>();
+
+        @Override
+        public void publish(
+                ReviewRuntimeContext context, String agentId, String discriminator, String text) {
+            notices.add(new Notice(agentId, discriminator, text));
+        }
+
+        List<String> discriminators() {
+            return notices.stream().map(Notice::discriminator).toList();
+        }
+
+        List<String> agentIds() {
+            return notices.stream().map(Notice::agentId).toList();
+        }
+
+        void requireText(String discriminator, String expectedText) {
+            String text = notices.stream()
+                    .filter(notice -> discriminator.equals(notice.discriminator))
+                    .map(Notice::text)
+                    .findFirst()
+                    .orElse(null);
+            assertThat(text).isEqualTo(expectedText);
+        }
+
+        record Notice(String agentId, String discriminator, String text) {
+        }
     }
 
     /**

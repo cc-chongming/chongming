@@ -13,6 +13,7 @@ import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewAssessment;
 import ai.cc.chongming.review.domain.model.ReviewTypes.AssessmentStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
 import ai.cc.chongming.review.domain.model.ReviewTypes.EvidenceId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.JudgeDecision;
@@ -385,11 +386,22 @@ public class ReviewQueryService {
             Map<ClaimId, Claim> claimsById,
             Map<TopicId, List<DebateTurn>> turnsByTopic,
             Map<TopicId, JudgeDecision> decisionsByTopic) {
-        List<ClaimView> claims = topic.claimIds().stream()
+        List<ClaimView> claims = new ArrayList<>(topic.claimIds().stream()
                 .map(claimsById::get)
                 .filter(java.util.Objects::nonNull)
                 .map(this::toClaimView)
-                .toList();
+                .toList());
+        // [AIREVIEW-PLAN-040#1] Heal legacy topics whose DEFENSE support claims were accepted but never
+        // mounted: append every non-withdrawn same-subject claim that is not an original member,
+        // keeping the original membership order first. No migration is needed for existing stores.
+        for (Claim claim : claimsById.values()) {
+            if (topic.claimIds().contains(claim.claimId())
+                    || claim.status() == ClaimStatus.WITHDRAWN
+                    || !topic.subjectKey().trim().equalsIgnoreCase(claim.subjectKey().trim())) {
+                continue;
+            }
+            claims.add(toClaimView(claim));
+        }
         List<TurnView> turns = turnsByTopic.getOrDefault(topic.id(), List.of()).stream()
                 .sorted(Comparator.comparingInt(DebateTurn::round).thenComparing(turn -> turn.turnId().value()))
                 .map(this::toTurnView)

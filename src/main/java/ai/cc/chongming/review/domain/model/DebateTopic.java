@@ -18,7 +18,7 @@ public final class DebateTopic {
     private final TopicId id;
     private final ReviewId reviewId;
     private final String subjectKey;
-    private final List<ClaimId> claimIds;
+    private List<ClaimId> claimIds;
     private final List<DebateTurn> turns = new ArrayList<>();
     private DebateTopicStatus status;
     private int currentRound;
@@ -75,6 +75,21 @@ public final class DebateTopic {
 
     public List<ClaimId> claimIds() {
         return claimIds;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-040#1] Idempotently attaches a defence-side Claim to this topic without touching
+     * the turn state machine or round counters: an already-mounted id is a no-op, otherwise the id is
+     * appended after the original members.
+     */
+    public void attachClaim(ClaimId claimId) {
+        Objects.requireNonNull(claimId, "claimId must not be null");
+        if (claimIds.contains(claimId)) {
+            return;
+        }
+        List<ClaimId> appended = new ArrayList<>(claimIds);
+        appended.add(claimId);
+        claimIds = List.copyOf(appended);
     }
 
     public DebateTopicStatus status() {

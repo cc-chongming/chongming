@@ -19,6 +19,8 @@ import {
     partitionClaimsByPosition
 } from '../services/runtime-conversation-adapter';
 import { describeLiveRunState } from '../services/live-run-status';
+// [AIREVIEW-PLAN-038#2] 子代理启用决策行由事实事件投影（见 review-activation-presenter.js）。
+import { buildActivationRows } from '../services/review-activation-presenter';
 import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
 import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
@@ -142,6 +144,11 @@ function roleInitial(role) {
         CONTEXT_SCOUT: '侦', DIRECTOR: '协', PRODUCT: '产', PROJECT: '项', FRONTEND: '前', BACKEND: '后',
         ARCHITECTURE: '架', SECURITY: '安', TESTING: '测', PERFORMANCE: '能', JUDGE: '裁'
     }[role] ?? String(role ?? '审').slice(0, 1);
+}
+
+// [AIREVIEW-PLAN-038#2] 子代理启用状态徽章文案。
+function activationBadgeText(state) {
+    return { activated: '已启用', running: '初审中', completed: '初审完成' }[state] ?? '已启用';
 }
 
 function phaseForRole(role) {
@@ -318,12 +325,15 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
 // The /plans projection also carries scout/initial-review milestones; only plan events render as
 // plan cards, otherwise non-plan rows appear as empty "v—" cards.
 const planCards = computed(() => (store.state.plans ?? []).filter((plan) => plan.type === 'PLAN_CREATED' || plan.type === 'PLAN_REVISED'));
+// [AIREVIEW-PLAN-038#2] 子代理启用决策：由事实流（ROLE_ACTIVATED/ROLE_STARTED/ROLE_COMPLETED）投影各角色启用状态。
+const activationRows = computed(() => buildActivationRows(store.events.value));
 const streamEmpty = computed(() => {
     if (liveRunState.value.emptyState) return liveRunState.value.emptyState;
+    // [AIREVIEW-PLAN-038#2] Director 阶段空态聚焦编排通知；子代理启用决策由下方启用卡片呈现。
     if (activePhase.value === 'director') {
         return {
-            title: '协调者尚未广播运行时对话',
-            message: '评审计划以持久化事实发布（见下方计划卡的任务清单与修订原因）；协调者的运行时消息仅在编排层广播 AG-UI 事件时出现。'
+            title: '协调者编排通知将实时出现在这里',
+            message: '创建评审、决策启用哪些子代理、调用派发子代理的过程由编排层以协调者通知形式广播；评审计划与任务清单见下方计划卡。'
         };
     }
     if (activePhase.value === 'judge') {
@@ -547,6 +557,19 @@ onUnmounted(() => loadQueue.dispose());
                             <small>{{ phaseItems.length }} 条运行记录</small>
                         </header>
                         <LiveAgentConversation :items="phaseItems" :status="runtimeTrace.state.status" :empty-state="streamEmpty" />
+                    </section>
+
+                    <!-- [AIREVIEW-PLAN-038#2] 子代理启用决策：仅评审规划阶段展示，行由事实事件投影。 -->
+                    <section v-if="activePhase === 'director' && activationRows.length" class="flow-activation-section" aria-label="子代理启用决策">
+                        <header>
+                            <h2>子代理启用决策</h2>
+                            <small>{{ activationRows.length }} 个子代理</small>
+                        </header>
+                        <article v-for="row in activationRows" :key="row.role" class="flow-activation-row">
+                            <span class="flow-agent-avatar" :data-role="row.role">{{ roleInitial(row.role) }}</span>
+                            <div class="flow-activation-name"><strong>{{ roleTitle(row.role) }}</strong><time v-if="row.activatedAt">{{ formatChinaTime(row.activatedAt) }}</time></div>
+                            <span :class="['flow-activation-badge', row.state]">{{ activationBadgeText(row.state) }}</span>
+                        </article>
                     </section>
 
                     <ScoutConclusionPanel v-if="activePhase === 'scout'" :conclusion="scoutConclusion" />

@@ -5,15 +5,18 @@ import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewAssessment;
 import ai.cc.chongming.review.domain.model.ReviewTypes.AssessmentStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.repository.HumanGateDecisionStore;
 import ai.cc.chongming.review.domain.repository.ContextScoutConclusionStore;
@@ -183,6 +186,40 @@ class ReviewQueryServiceTests {
         assertThat(views.get(0).role()).isEqualTo("FRONTEND");
         assertThat(views.get(0).position()).isEqualTo("SUPPORT");
         assertThat(views.get(0).statement()).isEqualTo("前端已有 DiffViewer，增量数据展示无技术障碍。");
+    }
+
+    @Test
+    void debateViewAppendsUnmountedNonWithdrawnSameSubjectClaimsAfterOriginalMembers() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ClaimId memberId = new ClaimId(UUID.randomUUID());
+        ClaimId unmountedId = new ClaimId(UUID.randomUUID());
+        ClaimId withdrawnId = new ClaimId(UUID.randomUUID());
+        ClaimId otherSubjectId = new ClaimId(UUID.randomUUID());
+        Claim member = claim(memberId, reviewId, "authentication", ClaimStatus.SUBMITTED);
+        Claim unmounted = claim(unmountedId, reviewId, "Authentication", ClaimStatus.SUBMITTED);
+        Claim withdrawn = claim(withdrawnId, reviewId, "authentication", ClaimStatus.WITHDRAWN);
+        Claim otherSubject = claim(otherSubjectId, reviewId, "cache.read_your_writes", ClaimStatus.SUBMITTED);
+        TopicId topicId = new TopicId(UUID.randomUUID());
+        DebateTopic topic = new DebateTopic(topicId, reviewId, "authentication", List.of(memberId));
+        ReviewDebateStore debateStore = mock(ReviewDebateStore.class);
+        when(debateStore.findClaims(reviewId)).thenReturn(List.of(member, unmounted, withdrawn, otherSubject));
+        when(debateStore.findTopics(reviewId)).thenReturn(List.of(topic));
+        when(debateStore.findTurns(reviewId)).thenReturn(List.of());
+        when(debateStore.findJudgeDecisions(reviewId)).thenReturn(Map.of());
+        ReviewQueryService service = new ReviewQueryService(
+                mock(ReviewEventStore.class),
+                debateStore,
+                mock(EvidenceLedgerService.class),
+                mock(HumanGateDecisionStore.class),
+                mock(ReviewRegistry.class));
+
+        ReviewQueryService.DebateView view = service.findDebates(reviewId).get(0);
+
+        // [AIREVIEW-PLAN-040#1] Original members keep their order; the unmounted same-subject
+        // (case-insensitive) non-withdrawn claim is appended; WITHDRAWN and other-subject are excluded.
+        assertThat(view.claims())
+                .extracting(ReviewQueryService.ClaimView::claimId)
+                .containsExactly(memberId.value(), unmountedId.value());
     }
 
     @Test
@@ -372,6 +409,11 @@ class ReviewQueryServiceTests {
                 reasonSummary, List.of(),
                 ReviewAssessment.idempotencyKeyFor(reviewId, 1, roleType, checkpointKey),
                 Instant.parse("2026-08-10T09:00:00Z"));
+    }
+
+    private Claim claim(ClaimId claimId, ReviewId reviewId, String subjectKey, ClaimStatus status) {
+        return new Claim(claimId, reviewId, RoleType.FRONTEND, subjectKey, ClaimSeverity.P2,
+                ClaimPosition.SUPPORT, "statement", "reason", List.of()).withStatus(status);
     }
 
     private ReviewEvent event(

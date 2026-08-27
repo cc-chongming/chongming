@@ -22,6 +22,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -29,6 +30,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * [AIREVIEW-PLAN-010#1.5,#1.6,#1.7] Coordinates director planning and role activation while delegating all lifecycle limits to domain guards.
+ * [AIREVIEW-PLAN-038#1] Publishes server-authored runtime notices for orchestration decisions.
  *
  * @author wangli
  */
@@ -44,6 +46,7 @@ public class ReviewOrchestrationService {
     private final ReviewStateMachine stateMachine;
     private final ReviewOrchestrationProperties properties;
     private final ReviewEventPublisher eventPublisher;
+    private final RuntimeNoticeBroadcaster noticeBroadcaster;
     private final ConcurrentMap<String, List<ReviewPlan>> plansByRuntime = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, List<OrchestrationEvent>> eventsByRuntime = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AtomicLong> eventSequences = new ConcurrentHashMap<>();
@@ -54,7 +57,40 @@ public class ReviewOrchestrationService {
             RoleActivationService roleActivationService,
             ReviewStateMachine stateMachine,
             ReviewOrchestrationProperties properties) {
-        this(runtimeAdapter, workspaceLayout, roleActivationService, stateMachine, properties, ReviewEventPublisher.noop());
+        this(runtimeAdapter, workspaceLayout, roleActivationService, stateMachine, properties,
+                ReviewEventPublisher.noop(), RuntimeNoticeBroadcaster.noop());
+    }
+
+    public ReviewOrchestrationService(
+            AgentRuntimeAdapter runtimeAdapter,
+            ReviewWorkspaceLayout workspaceLayout,
+            RoleActivationService roleActivationService,
+            ReviewStateMachine stateMachine,
+            ReviewOrchestrationProperties properties,
+            ReviewEventPublisher eventPublisher) {
+        this(runtimeAdapter, workspaceLayout, roleActivationService, stateMachine, properties,
+                eventPublisher, RuntimeNoticeBroadcaster.noop());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-038#1] Direct 7-argument constructor; a null broadcaster falls back to noop
+     * so callers built before PLAN-038 keep working unchanged.
+     */
+    public ReviewOrchestrationService(
+            AgentRuntimeAdapter runtimeAdapter,
+            ReviewWorkspaceLayout workspaceLayout,
+            RoleActivationService roleActivationService,
+            ReviewStateMachine stateMachine,
+            ReviewOrchestrationProperties properties,
+            ReviewEventPublisher eventPublisher,
+            RuntimeNoticeBroadcaster noticeBroadcaster) {
+        this.runtimeAdapter = Objects.requireNonNull(runtimeAdapter, "runtimeAdapter must not be null");
+        this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
+        this.roleActivationService = Objects.requireNonNull(roleActivationService, "roleActivationService must not be null");
+        this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.noticeBroadcaster = noticeBroadcaster == null ? RuntimeNoticeBroadcaster.noop() : noticeBroadcaster;
     }
 
     @Autowired
@@ -64,13 +100,10 @@ public class ReviewOrchestrationService {
             RoleActivationService roleActivationService,
             ReviewStateMachine stateMachine,
             ReviewOrchestrationProperties properties,
-            ReviewEventPublisher eventPublisher) {
-        this.runtimeAdapter = Objects.requireNonNull(runtimeAdapter, "runtimeAdapter must not be null");
-        this.workspaceLayout = Objects.requireNonNull(workspaceLayout, "workspaceLayout must not be null");
-        this.roleActivationService = Objects.requireNonNull(roleActivationService, "roleActivationService must not be null");
-        this.stateMachine = Objects.requireNonNull(stateMachine, "stateMachine must not be null");
-        this.properties = Objects.requireNonNull(properties, "properties must not be null");
-        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+            ReviewEventPublisher eventPublisher,
+            ObjectProvider<RuntimeNoticeBroadcaster> noticeBroadcasterProvider) {
+        this(runtimeAdapter, workspaceLayout, roleActivationService, stateMachine, properties, eventPublisher,
+                noticeBroadcasterProvider == null ? null : noticeBroadcasterProvider.getIfAvailable());
     }
 
     /**
@@ -89,6 +122,10 @@ public class ReviewOrchestrationService {
         writePlan(workspace, initialPlan, context);
         emit(context, OrchestrationEventType.PLAN_CREATED, ReviewStage.PLANNING, "DIRECTOR", initialPlan.planVersion(),
                 planPayload(initialPlan));
+        publishNotice(context,
+                "review-created-v" + initialPlan.planVersion(),
+                "评审已创建：协调者发布评审计划 v" + initialPlan.planVersion()
+                        + "，按评审协议决策启用 " + (CORE_ROLES.size() + 1) + " 个子代理");
 
         AgentRuntimeStartRequest runtimeRequest = new AgentRuntimeStartRequest(
                 context.runtimeId(), context.userId(), context.directorSessionId(), request.initialMessage(), context);
@@ -149,6 +186,10 @@ public class ReviewOrchestrationService {
                     roleActivationService.apply(review, receipt);
                     emit(context, OrchestrationEventType.ROLE_ACTIVATED, review.stage(),
                             receipt.activation().roleType().name(), review.version());
+                    publishNotice(context,
+                            "role-activated-" + receipt.activation().roleType().name(),
+                            "决策启用子代理「" + chineseRoleName(receipt.activation().roleType().name()) + "」："
+                                    + chineseReason(receipt.reason()) + "，运行体已注册");
                     return receipt;
                 }));
     }
@@ -160,6 +201,9 @@ public class ReviewOrchestrationService {
      */
     private Mono<RoleActivationService.ActivationReceipt> runRoleRound(
             ReviewRuntimeContext context, RoleActivationService.ActivationReceipt receipt) {
+        publishNotice(context,
+                "role-dispatched-" + receipt.activation().roleType().name(),
+                "已调用子代理「" + chineseRoleName(receipt.activation().roleType().name()) + "」开始执行初审任务");
         return runtimeAdapter.send(
                 context.runtimeId(),
                 receipt.activation().agentLabel(),
@@ -336,6 +380,54 @@ public class ReviewOrchestrationService {
                 null,
                 1,
                 mergedPayload(referenceVersion, extraPayload)));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-038#1] Sends one server-authored runtime notice addressed to the director run,
+     * via the optional broadcaster; failures never affect orchestration.
+     */
+    private void publishNotice(ReviewRuntimeContext context, String discriminator, String text) {
+        noticeBroadcaster.publish(context, context.directorLabel(), discriminator, text);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-038#1] Chinese display name used on public notices; unknown role names are
+     * passed through verbatim.
+     */
+    private static String chineseRoleName(String roleName) {
+        if (roleName == null) {
+            return null;
+        }
+        return switch (roleName) {
+            case "FRONTEND" -> "前端工程师";
+            case "BACKEND" -> "后端工程师";
+            case "ARCHITECTURE" -> "架构师";
+            case "SECURITY" -> "安全工程师";
+            case "TESTING" -> "测试工程师";
+            case "PERFORMANCE" -> "性能工程师";
+            case "PROJECT" -> "项目经理";
+            case "PRODUCT" -> "产品经理";
+            case "JUDGE" -> "裁决者";
+            case "DIRECTOR" -> "协调者";
+            case "CONTEXT_SCOUT" -> "上下文侦察";
+            default -> roleName;
+        };
+    }
+
+    /**
+     * [AIREVIEW-PLAN-038#1] Chinese rendering of the known orchestration activation reasons;
+     * unrecognized reasons pass through verbatim.
+     */
+    private static String chineseReason(String reason) {
+        if (reason == null) {
+            return null;
+        }
+        return switch (reason) {
+            case "Core first-round review required by protocol" -> "协议要求的核心初审角色";
+            case "Judge is pre-registered and remains idle until all debate topics are terminal" ->
+                    "裁决者预注册，待辩论议题全部终态后裁决";
+            default -> reason;
+        };
     }
 
     private ai.cc.chongming.review.domain.event.ReviewEventType toBusinessEventType(OrchestrationEventType type) {

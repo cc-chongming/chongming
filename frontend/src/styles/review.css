@@ -281,6 +281,21 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-plan-card header, .flow-judgement-card header, .flow-gate-history article strong { display: flex; align-items: center; gap: .6rem; color: #eef1fb; font-size: .8rem; }.flow-plan-card header span, .flow-gate-history article span { margin-left: auto; color: var(--flow-dim); font-size: .66rem; }
 .flow-plan-tasks { margin: .6rem 0 0; padding-left: 1.25rem; color: #c4cce0; font-size: .78rem; line-height: 1.8; }
 .flow-plan-card p, .flow-judgement-card p, .flow-gate-card p, .flow-gate-history article p { margin: .45rem 0 0; color: #c4cce0; font-size: .76rem; line-height: 1.65; overflow-wrap: anywhere; }
+/* [AIREVIEW-PLAN-038#2] Director 阶段：子代理启用决策（DSH 浅色卡片，配色对齐平台面板体系）。 */
+.flow-activation-section { margin-top: 1rem; padding: .9rem 1rem; background: #fff; border: 1px solid #e7e5e4; border-radius: .6rem; }
+.flow-activation-section > header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .5rem; }
+.flow-activation-section > header h2 { margin: 0; color: #1c1917; font-size: .84rem; }
+.flow-activation-section > header small { color: #78716c; font-size: .72rem; }
+.flow-activation-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .7rem; padding: .6rem 0; border-top: 1px solid #f1f5f9; }
+.flow-activation-row:first-of-type { border-top: 0; }
+.flow-activation-row .flow-agent-avatar { width: 1.8rem; height: 1.8rem; font-size: .68rem; }
+.flow-activation-name { display: grid; gap: .1rem; min-width: 0; }
+.flow-activation-name strong { color: #1c1917; font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-activation-name time { color: #78716c; font-size: .66rem; }
+.flow-activation-badge { padding: .16rem .55rem; border-radius: 99px; font-size: .64rem; font-weight: 700; white-space: nowrap; }
+.flow-activation-badge.activated { color: #57534e; background: #e7e5e4; }
+.flow-activation-badge.running { color: #1d4ed8; background: #dbeafe; }
+.flow-activation-badge.completed { color: #047857; background: #d1fae5; }
 .flow-judgement-badge { padding: .14rem .5rem; color: #bdcaff; background: rgba(108, 140, 255, .17); border-radius: 99px; font-size: .62rem; font-weight: 800; }
 .flow-judgement-card small, .flow-gate-card small { display: block; margin-top: .45rem; color: var(--flow-dim); font-size: .66rem; }
 .flow-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }

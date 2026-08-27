@@ -107,6 +107,24 @@ class ClaimServiceTests {
                 .get()
                 .extracting(ReviewDispatchCommand::status)
                 .isEqualTo(DispatchCommandStatus.CONSUMED);
+        // [AIREVIEW-PLAN-040#1] The accepted DEFENSE claim is mounted onto the dispatch topic so the
+        // court's support side is no longer empty.
+        assertThat(defenseDebateStore.findTopic(review.id(), topicId).orElseThrow().claimIds())
+                .containsExactly(result.claim().claimId());
+    }
+
+    @Test
+    void initialReviewSubmissionNeverMountsClaimsOntoAnyTopic() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        ClaimService service = new ClaimService(new EvidenceLedgerService(), store, new ReviewProtocolGuard());
+        Review review = initialReview();
+        TopicId topicId = new TopicId(UUID.randomUUID());
+        store.saveTopic(new DebateTopic(topicId, review.id(), "authentication", List.of()));
+
+        service.submit(review, submission(review, new IdempotencyKey("initial-claim-no-mount"),
+                ClaimPosition.SUPPORT, "authentication"));
+
+        assertThat(store.findTopic(review.id(), topicId).orElseThrow().claimIds()).isEmpty();
     }
 
     @Test

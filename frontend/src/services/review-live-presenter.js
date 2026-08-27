@@ -26,12 +26,25 @@ export function completedReviewRoles(activations = [], events = [], currentAttem
     return reviewRoles([...completedActivations, ...completedEvents]);
 }
 
+// [AIREVIEW-PLAN-039#1] Claim category display: SUPPORT·P2/P3 reads as 支持, everything else follows severity.
+const CLAIM_CATEGORY_LABELS = { P0: '阻断', P1: '高风险', P2: '改进', P3: '提示' };
+
+export function claimCategoryLabel(claim) {
+    const severity = claim?.severity;
+    if (claim?.position === 'SUPPORT' && (severity === 'P2' || severity === 'P3')) return '支持';
+    return CLAIM_CATEGORY_LABELS[severity] ?? '提示';
+}
+
 export function claimOverview(claims = []) {
     if (!claims.length) return '';
-    const count = (severity) => claims.filter((claim) => claim?.severity === severity).length;
-    const hints = count('P3');
-    const overview = `发现 ${claims.length} 项：${count('P0')} 项阻断、${count('P1')} 项高风险、${count('P2')} 项改进建议`;
-    return hints ? `${overview}、${hints} 项提示` : overview;
+    const count = (predicate) => claims.filter(predicate).length;
+    const blockers = count((claim) => claim?.severity === 'P0');
+    const highRisk = count((claim) => claim?.severity === 'P1');
+    const improvements = count((claim) => claim?.severity === 'P2' && claim?.position !== 'SUPPORT');
+    const supports = count((claim) => claim?.position === 'SUPPORT' && (claim?.severity === 'P2' || claim?.severity === 'P3'));
+    const hints = count((claim) => claim?.severity === 'P3' && claim?.position !== 'SUPPORT');
+    const overview = `发现 ${claims.length} 项：${blockers} 项阻断、${highRisk} 项高风险、${improvements} 项改进建议、${supports} 项支持`;
+    return hints > 0 ? `${overview}、${hints} 项提示` : overview;
 }
 
 const ENUM_LABELS = {
