@@ -628,6 +628,10 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-content > .flow-stream-live { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .flow-content > .flow-stream-live .live-agent-conversation { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .flow-content > .flow-stream-live .live-agent-scroll { flex: 1 1 auto; max-height: none; min-height: 0; }
+/* [AIREVIEW-PLAN-043#1] 冲突检测 / 多轮辩论 / 裁决者裁决：议题区改为定高内滚（flex 拉伸 + 内部滚动），滚动条观感沿用页面既有体系。 */
+.flow-content > .flow-conflict-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.flow-content > .flow-debate-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .flow-plan-card header, .flow-judgement-card header, .flow-gate-history article strong { color: #1c1917; }
 .flow-plan-tasks, .flow-plan-card p, .flow-judgement-card p, .flow-gate-card p, .flow-gate-history article p { color: #44403c; }
 .flow-judgement-badge { color: #1d4ed8; background: #dbeafe; }

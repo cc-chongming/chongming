@@ -675,6 +675,8 @@ onUnmounted(() => loadQueue.dispose());
                             </button>
                         </div>
 
+                        <!-- [AIREVIEW-PLAN-043#1] 法庭/中立方/对话流收进 flow-debate-scroll（定高内滚），回合选项卡固定在滚动区上方。 -->
+                        <div class="flow-debate-scroll">
                         <div class="flow-debate-court">
                             <div class="flow-debate-side pro">
                                 <p class="flow-debate-label">🟢 支持方</p>
@@ -725,6 +727,7 @@ onUnmounted(() => loadQueue.dispose());
                             </ol>
                             <p v-else class="flow-debate-empty">该回合暂无公开的质询或答辩记录。</p>
                         </section>
+                        </div><!-- /flow-debate-scroll [AIREVIEW-PLAN-043#1] -->
                     </template>
                     <!-- [AIREVIEW-PLAN-034#5] 辩论时间线与法庭视图/对话流信息重复，先注释掉；如需恢复取消注释并把下方空态改回 v-else。
                     <DebateTimeline v-if="debateTopics.length" class="flow-debate-timeline" :debates="debateTopics" @open-evidence="store.selectEvidence" />
