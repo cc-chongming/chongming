@@ -17,6 +17,7 @@ import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolCallParam;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -315,11 +316,24 @@ public class ReviewRepositoryToolFactory {
         }
         List<ai.cc.chongming.review.infrastructure.repository.RepositorySearchIndex.FileMetadata> files =
                 repositoryTools.listFiles(toolContext, 40, runtimeContext.cancellation());
-        Set<String> moduleRoots = new LinkedHashSet<>();
-        for (var file : files) {
-            int separator = file.relativePath().indexOf('/');
-            moduleRoots.add(separator < 0 ? "." : file.relativePath().substring(0, separator));
+        // Module roots are aggregated over the full snapshot manifest instead of
+        // the first 40 entries, so one alphabetically-early junk directory cannot hijack the roots.
+        Map<String, Long> rootCounts = new LinkedHashMap<>();
+        for (String relativePath : snapshotFileList(runtimeContext, toolContext)) {
+            int separator = relativePath.indexOf('/');
+            rootCounts.merge(separator < 0 ? "." : relativePath.substring(0, separator), 1L, Long::sum);
         }
+        List<String> moduleRoots = rootCounts.isEmpty()
+                ? files.stream().map(file -> {
+                    int separator = file.relativePath().indexOf('/');
+                    return separator < 0 ? "." : file.relativePath().substring(0, separator);
+                }).distinct().toList()
+                : rootCounts.entrySet().stream()
+                        .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
+                                .thenComparing(Map.Entry.comparingByKey()))
+                        .map(Map.Entry::getKey)
+                        .limit(8)
+                        .toList();
         List<String> requirementSections = requirement.document().sections().stream()
                 .limit(16)
                 .map(section -> "- " + section.heading() + ": " + abbreviate(section.content(), 600))
@@ -330,7 +344,7 @@ public class ReviewRepositoryToolFactory {
                 snapshot.branch(),
                 snapshot.includedFileCount(),
                 requirementSections,
-                List.copyOf(moduleRoots),
+                moduleRoots,
                 files.stream().map(file -> file.relativePath()).toList());
     }
 

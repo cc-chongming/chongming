@@ -55,7 +55,13 @@ public class RepositorySnapshotService {
 
     private static final Logger log = LoggerFactory.getLogger(RepositorySnapshotService.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
-    private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(".git", "target", "node_modules", ".idea");
+    private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(
+            ".git", "target", "node_modules", ".idea",
+            // Local agent/build runtime state must never become reviewable content:
+            // it dominated snapshots when a repository reviewed its own worktree.
+            ".agentscope", ".qoder", ".claude", ".codex", ".learnings");
+    // Root-only artifacts: generic names that are noise at the repository root but may be legitimate deeper.
+    private static final Set<String> EXCLUDED_ROOT_DIRECTORIES = Set.of("output", "logs");
     private static final int BINARY_PROBE_SIZE = 8192;
 
     private final RepositoryBoundaryGuard boundaryGuard;
@@ -368,7 +374,11 @@ public class RepositorySnapshotService {
                 if (".git".equals(name)) {
                     throw new RepositoryAccessException(Code.REPOSITORY_PATH_UNSAFE, "Nested Git metadata is not allowed");
                 }
-                return EXCLUDED_DIRECTORIES.contains(name) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                if (EXCLUDED_DIRECTORIES.contains(name)
+                        || (relative.getNameCount() == 1 && EXCLUDED_ROOT_DIRECTORIES.contains(name))) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
             }
 
             @Override
@@ -693,10 +703,16 @@ public class RepositorySnapshotService {
     }
 
     private boolean isExcluded(Path relative) {
+        int segmentIndex = 0;
         for (Path segment : relative) {
-            if (EXCLUDED_DIRECTORIES.contains(segment.toString())) {
+            String name = segment.toString();
+            if (EXCLUDED_DIRECTORIES.contains(name)) {
                 return true;
             }
+            if (segmentIndex == 0 && EXCLUDED_ROOT_DIRECTORIES.contains(name)) {
+                return true;
+            }
+            segmentIndex += 1;
         }
         return false;
     }

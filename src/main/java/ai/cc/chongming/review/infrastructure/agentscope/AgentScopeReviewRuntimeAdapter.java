@@ -52,10 +52,12 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(AgentScopeReviewRuntimeAdapter.class);
 
+    // The enforced budget matches the Scout prompt and the persisted baseline
+    // contract exactly, so a compliant model never trips the hard stop and any trip is a true violation.
     private static final Map<String, Integer> SCOUT_INIT_TOOL_LIMITS = Map.of(
-            "glob_files", 3,
-            "grep_files", 6,
-            "read_file", 8);
+            "glob_files", 2,
+            "grep_files", 3,
+            "read_file", 4);
 
     private final ReviewDirectorHarnessFactory directorFactory;
     private final RoleSubagentFactory roleSubagentFactory;
@@ -248,12 +250,14 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         }
         // [AIREVIEW-PLAN-025] Scout degradation used to be silent; log the root cause so the
         // advisory fallback stays diagnosable in server logs.
+        String detail = failure instanceof ScoutLimitExceededException limitExceeded ? limitExceeded.detail() : null;
         log.warn(
-                "context_scout_degraded reviewId={} attemptNo={} failureType={} message={}",
+                "context_scout_degraded reviewId={} attemptNo={} failureType={} message={} detail={}",
                 state.context().reviewId(),
                 state.context().attemptNo(),
                 failure.getClass().getName(),
-                failure.getMessage());
+                failure.getMessage(),
+                detail);
         degraded.set(true);
         recordScoutDegradation(state, failure);
         return Mono.empty();
@@ -786,14 +790,24 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     private static final class ScoutLimitExceededException extends RuntimeException {
 
         private final String reasonCode;
+        private final String detail;
 
         private ScoutLimitExceededException(String reasonCode) {
+            this(reasonCode, null);
+        }
+
+        private ScoutLimitExceededException(String reasonCode, String detail) {
             super(reasonCode);
             this.reasonCode = reasonCode;
+            this.detail = detail;
         }
 
         private String reasonCode() {
             return reasonCode;
+        }
+
+        private String detail() {
+            return detail;
         }
     }
 
@@ -811,14 +825,17 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         private synchronized void consume(String toolName) {
             Integer perToolLimit = SCOUT_INIT_TOOL_LIMITS.get(toolName);
             if (perToolLimit == null) {
-                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED");
+                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED",
+                        "violatingTool=" + toolName + " reason=not-in-init-retrieval-contract");
             }
             int nextToolCalls = callsByTool.getOrDefault(toolName, 0) + 1;
             if (nextToolCalls > perToolLimit) {
-                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED");
+                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED",
+                        "violatingTool=" + toolName + " calls=" + nextToolCalls + " perToolLimit=" + perToolLimit);
             }
             if (++totalCalls > totalLimit) {
-                throw new ScoutLimitExceededException("CONTEXT_SCOUT_TOOL_BUDGET_EXCEEDED");
+                throw new ScoutLimitExceededException("CONTEXT_SCOUT_TOOL_BUDGET_EXCEEDED",
+                        "violatingTool=" + toolName + " totalCalls=" + totalCalls + " totalLimit=" + totalLimit);
             }
             callsByTool.put(toolName, nextToolCalls);
         }
