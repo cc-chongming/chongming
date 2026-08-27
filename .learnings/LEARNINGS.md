@@ -1009,3 +1009,26 @@ Context Scout 在阶段机进入 PLANNING 后仍持续流式输出（Scout 运�
 - Tags: review-ui, phase-landing, context-scout, live-view
 
 ---
+
+## [LRN-20260827-002] 用户批注类任务必须走“计划 + 后台子代理异步派发”，不得在会话内直接动手
+
+**Logged**: 2026-08-27T00:00:00+08:00
+**Priority**: high
+**Status**: open
+**Area**: process, delegation
+
+### Summary
+
+本会话两次连续任务（PLAN-037 段 1/段 2）都是在会话内直接实现，跳过了既定流程，被用户当场提醒。既定原则：收到用户编号批注 → 逐条以“Annotation N: …”确认 → 先出/更新 AIREVIEW-PLAN 计划文档 → 用 subagent（run_in_background: true）异步派发实现任务，多个批注可并行派发 → 子代理运行期间继续做基线回归/计划文档等独立工作 → 子代理交付后做独立审查 → 全量回归 → 提交推送。
+
+### Suggested Action
+
+接到用户新批注时，第一动作是写计划与派发后台子代理，而不是自己编辑代码；只有收尾性动作（验证已部署产物、提交推送）才在会话内直接做。判断依据：实现工作量超过“读两处代码 + 几行改动”就必须派发。
+
+### Metadata
+
+- Source: user process reminder during PLAN-037 session
+- Related Files: .codex/rules/plan-driven-development.md, docs/AIREVIEW-PLAN-037-初次进入停留上下文侦察阶段.md
+- Tags: process, delegation, subagent, async-dispatch
+
+---
