@@ -46,13 +46,14 @@ describe('review live presenter', () => {
         ])).toBe('发现 3 项：1 项阻断、1 项高风险、1 项改进建议、0 项支持');
     });
 
-    it('groups SUPPORT·P2 claims as 支持 instead of 改进建议', () => {
+    it('counts every SUPPORT claim as 支持 regardless of severity', () => {
+        // [AIREVIEW-PLAN-039#1][2026-08-27 口径修订] 一切支持都显示“支持”。
         expect(claimOverview([
             { severity: 'P2', position: 'SUPPORT' },
             { severity: 'P2', position: 'SUPPORT' },
             { severity: 'P1', position: 'OPPOSE' },
             { severity: 'P1', position: 'SUPPORT' }
-        ])).toBe('发现 4 项：0 项阻断、2 项高风险、0 项改进建议、2 项支持');
+        ])).toBe('发现 4 项：0 项阻断、1 项高风险、0 项改进建议、3 项支持');
     });
 
     it('appends 提示 segment only when non-support P3 claims exist', () => {
@@ -64,13 +65,15 @@ describe('review live presenter', () => {
     it('labels claim categories by position and severity', () => {
         expect(claimCategoryLabel({ severity: 'P2', position: 'SUPPORT' })).toBe('支持');
         expect(claimCategoryLabel({ severity: 'P3', position: 'SUPPORT' })).toBe('支持');
-        expect(claimCategoryLabel({ severity: 'P1', position: 'SUPPORT' })).toBe('高风险');
+        expect(claimCategoryLabel({ severity: 'P1', position: 'SUPPORT' })).toBe('支持');
+        expect(claimCategoryLabel({ severity: 'P0', position: 'SUPPORT' })).toBe('支持');
         expect(claimCategoryLabel({ severity: 'P0', position: 'OPPOSE' })).toBe('阻断');
         expect(claimCategoryLabel({ severity: 'P2', position: 'OPPOSE' })).toBe('改进');
         expect(claimCategoryLabel({ severity: 'P2' })).toBe('改进');
         expect(claimCategoryLabel(null)).toBe('提示');
         expect(claimCategoryLabel({})).toBe('提示');
-        expect(claimCategoryLabel({ severity: 'P9', position: 'SUPPORT' })).toBe('提示');
+        expect(claimCategoryLabel({ severity: 'P9', position: 'SUPPORT' })).toBe('支持');
+        expect(claimCategoryLabel({ severity: 'P9', position: 'OPPOSE' })).toBe('提示');
     });
 
     it('localizes gate enums', () => {
