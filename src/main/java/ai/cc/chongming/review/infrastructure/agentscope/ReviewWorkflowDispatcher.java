@@ -6,17 +6,27 @@ import ai.cc.chongming.review.application.ReviewEventListener;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.domain.model.Claim;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimStatus;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurnType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewCommandMetadata;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,6 +53,19 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
 
     /** How long the server-generated rebuttal envelope stays consumable after a challenge. */
     private static final Duration REBUTTAL_DISPATCH_TTL = Duration.ofMinutes(10);
+
+    /**
+     * [AIREVIEW-PLAN-046#1] How long a server-generated CHALLENGE envelope stays consumable after a
+     * topic opens with both sides or a defence SUPPORT claim lands. 20 minutes deliberately exceeds
+     * the rebuttal TTL so objectors have room to interrogate before the server reclaims the envelope.
+     */
+    private static final Duration CHALLENGE_DISPATCH_TTL = Duration.ofMinutes(20);
+
+    /** [AIREVIEW-PLAN-046#1] Server challenge against a SUPPORT claim mounted before the topic opened. */
+    private static final String SERVER_CHALLENGE_AFTER_OPPOSITION = "SERVER_CHALLENGE_AFTER_OPPOSITION";
+
+    /** [AIREVIEW-PLAN-046#1] Server challenge after a defence SUPPORT claim completed both sides. */
+    private static final String SERVER_CHALLENGE_AFTER_DEFENSE = "SERVER_CHALLENGE_AFTER_DEFENSE";
 
     private final ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider;
     private final ReviewRegistry reviewRegistry;
@@ -91,7 +114,14 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             // batch-register every chosen subject in one command, or skip when none remains.
             send(runtimeId(event), directorLabel(event), "All core initial reviews are complete. First call list_persisted_claims, then list_conflict_candidates. If at least one conflict candidate remains, register ALL chosen candidates in one register_topics batch command; only when no conflict candidate remains call skip_debate_when_no_conflicts. A single GAP or UNKNOWN assessment alone is never a debate topic. Do not search the workspace for Claim files or create facts in text.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_OPENED) {
-            wakeDirector(event, "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command.");
+            // [AIREVIEW-PLAN-046#1] Opening a two-sided topic is the first server-side challenge
+            // trigger; the Director wake below states that challenges are server-issued.
+            issueChallengeDispatches(event, event.topicId(), SERVER_CHALLENGE_AFTER_OPPOSITION);
+            wakeDirector(event, "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command. challenges are server-issued; do not dispatch CHALLENGE yourself.");
+        } else if (event.type() == ReviewEventType.CLAIM_SUBMITTED) {
+            // [AIREVIEW-PLAN-046#1] A SUPPORT claim committed during a debate round can complete the
+            // defence side of an objector-only topic; the server then issues the CHALLENGE envelopes.
+            issueChallengeAfterDefenseClaim(event);
         } else if (event.type() == ReviewEventType.DEBATE_ROUND_2_STARTED) {
             wakeDirector(event, "Debate round two is active. Issue dispatch_debate_action commands for every still-required round-two action with the matching targets, or converge with close_debate_topic/begin_judging when no further action is necessary. Do not run an empty round.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {
@@ -195,6 +225,172 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             LOGGER.warn("REBUTTAL_DISPATCH_ISSUE_FAILED reviewId={} turnId={}",
                     event.reviewId().value(), event.turnId().value(), exception);
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-046#1] CLAIM_SUBMITTED trigger of the unified server-side challenge dispatch:
+     * only a SUPPORT claim committed during a debate round that completes the support side of an
+     * objector-only topic (its claim is mounted on exactly one topic that had no SUPPORT before)
+     * hands over to the shared {@link #issueChallengeDispatches} rule.
+     */
+    private void issueChallengeAfterDefenseClaim(ReviewEvent event) {
+        if (dispatchService == null || reviewRegistry == null || debateStore == null || event.claimId() == null) {
+            return;
+        }
+        if (event.stage() != ReviewStage.DEBATE_ROUND_1 && event.stage() != ReviewStage.DEBATE_ROUND_2) {
+            return;
+        }
+        Claim submitted = debateStore.findClaim(event.reviewId(), event.claimId()).orElse(null);
+        if (submitted == null || submitted.position() != ClaimPosition.SUPPORT) {
+            return;
+        }
+        TopicId topicId = debateStore.findTopics(event.reviewId()).stream()
+                .filter(topic -> topic.claimIds().contains(event.claimId()))
+                .map(DebateTopic::id)
+                .findFirst()
+                .orElse(null);
+        if (topicId == null) {
+            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} claimId={} reason=TOPIC_WITH_CLAIM_NOT_FOUND",
+                    event.reviewId().value(), event.claimId().value());
+            return;
+        }
+        DebateTopic topic = debateStore.findTopic(event.reviewId(), topicId).orElse(null);
+        if (topic == null) {
+            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=TOPIC_NOT_FOUND",
+                    event.reviewId().value(), topicId.value());
+            return;
+        }
+        // Only the claim that first completes the support side triggers the server dispatch; a later
+        // defence claim on an already two-sided topic must not re-arm envelopes.
+        boolean mountedSupportBefore = topic.claimIds().stream()
+                .filter(claimId -> !claimId.equals(event.claimId()))
+                .map(claimId -> debateStore.findClaim(event.reviewId(), claimId).orElse(null))
+                .filter(Objects::nonNull)
+                .anyMatch(claim -> claim.position() == ClaimPosition.SUPPORT
+                        && claim.status() != ClaimStatus.WITHDRAWN);
+        if (mountedSupportBefore) {
+            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} claimId={} reason=SUPPORT_ALREADY_PRESENT",
+                    event.reviewId().value(), topicId.value(), event.claimId().value());
+            return;
+        }
+        issueChallengeDispatches(event, topicId, SERVER_CHALLENGE_AFTER_DEFENSE);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-046#1] Unified server-side challenge dispatch. When a debate-round topic holds
+     * at least one SUPPORT and one OPPOSE claim and no CHALLENGE turn has ever been committed, the
+     * server issues one CHALLENGE envelope per distinct OPPOSE role (never to the target SUPPORT's
+     * own role), targeting the topic's highest-severity SUPPORT claim (P0 most severe; ties resolved
+     * by mount order). One idempotency key per (topic, recipient role) keeps both triggers and any
+     * coordinator re-dispatch from stacking envelopes, and a single failing recipient is only logged.
+     */
+    private void issueChallengeDispatches(ReviewEvent event, TopicId topicId, String reason) {
+        if (dispatchService == null || reviewRegistry == null || debateStore == null || topicId == null) {
+            return;
+        }
+        Review review = reviewRegistry.find(event.reviewId())
+                .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                .orElse(null);
+        if (review == null) {
+            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=REVIEW_NOT_FOUND",
+                    event.reviewId().value(), topicId.value());
+            return;
+        }
+        int round = debateRoundOf(review.stage());
+        if (round == 0) {
+            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=STAGE_NOT_DEBATE stage={}",
+                    event.reviewId().value(), topicId.value(), review.stage());
+            return;
+        }
+        DebateTopic topic = debateStore.findTopic(review.id(), topicId).orElse(null);
+        if (topic == null) {
+            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=TOPIC_NOT_FOUND",
+                    event.reviewId().value(), topicId.value());
+            return;
+        }
+        if (topic.status().isTerminal()) {
+            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=TOPIC_TERMINAL status={}",
+                    event.reviewId().value(), topicId.value(), topic.status());
+            return;
+        }
+        // A topic the coordinator already drove into a challenge round (manual dispatch or legacy
+        // flow) must never be re-armed: the next envelope is the rebuttal, not another challenge.
+        boolean alreadyChallenged = debateStore.findTurns(review.id(), topicId).stream()
+                .anyMatch(turn -> turn.turnType() == DebateTurnType.CHALLENGE);
+        if (alreadyChallenged) {
+            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=CHALLENGE_TURN_EXISTS",
+                    event.reviewId().value(), topicId.value());
+            return;
+        }
+        Claim target = highestSeveritySupportClaim(review.id(), topic);
+        if (target == null) {
+            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=NO_SUPPORT_CLAIM",
+                    event.reviewId().value(), topicId.value());
+            return;
+        }
+        List<RoleType> recipients = topic.claimIds().stream()
+                .map(claimId -> debateStore.findClaim(review.id(), claimId).orElse(null))
+                .filter(claim -> claim != null && claim.position() == ClaimPosition.OPPOSE
+                        && claim.status() != ClaimStatus.WITHDRAWN)
+                .map(Claim::roleType)
+                .distinct()
+                .filter(role -> role != target.roleType())
+                .toList();
+        if (recipients.isEmpty()) {
+            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=NO_OPPOSE_ROLE",
+                    event.reviewId().value(), topicId.value());
+            return;
+        }
+        synchronized (review) {
+            for (RoleType recipient : recipients) {
+                try {
+                    dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(
+                            new ReviewCommandMetadata(review.id(), review.version(),
+                                    new IdempotencyKey("dispatch:challenge:" + topicId.value() + ":" + recipient)),
+                            recipient,
+                            DispatchedAction.CHALLENGE,
+                            round,
+                            topicId,
+                            target.claimId(),
+                            null,
+                            Instant.now().plus(CHALLENGE_DISPATCH_TTL),
+                            RoleType.DIRECTOR,
+                            reason));
+                } catch (RuntimeException exception) {
+                    // A failed server challenge must not abort the remaining recipients or the event
+                    // delivery; the log names the reason and the Director wake keeps the debate moving.
+                    LOGGER.warn("CHALLENGE_DISPATCH_ISSUE_FAILED reviewId={} topicId={} recipient={} targetClaimId={}",
+                            review.id().value(), topicId.value(), recipient, target.claimId().value(), exception);
+                }
+            }
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-046#1] Highest-severity SUPPORT claim of the topic (P0 most severe); iterating
+     * the topic's claimIds in mount order keeps the first occurrence when severities tie.
+     */
+    private Claim highestSeveritySupportClaim(ReviewId reviewId, DebateTopic topic) {
+        Claim best = null;
+        for (ClaimId claimId : topic.claimIds()) {
+            Claim candidate = debateStore.findClaim(reviewId, claimId).orElse(null);
+            if (candidate == null || candidate.position() != ClaimPosition.SUPPORT
+                    || candidate.status() == ClaimStatus.WITHDRAWN) {
+                continue;
+            }
+            if (best == null || candidate.severity().ordinal() < best.severity().ordinal()) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private static int debateRoundOf(ReviewStage stage) {
+        return switch (stage) {
+            case DEBATE_ROUND_1 -> 1;
+            case DEBATE_ROUND_2 -> 2;
+            default -> 0;
+        };
     }
 
     /** Injects the persisted envelope into exactly the recipient role's context. */

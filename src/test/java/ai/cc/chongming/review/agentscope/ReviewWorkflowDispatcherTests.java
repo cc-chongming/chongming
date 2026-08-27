@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
+import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.DebateTopic;
@@ -29,6 +30,7 @@ import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStor
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -213,6 +215,203 @@ class ReviewWorkflowDispatcherTests {
 
         verify(adapter, timeout(3000)).send(eq(runtimeId), eq(runtimeId + "-director"),
                 contains("Reissue a valid dispatch_debate_action command"));
+    }
+
+    // --- [AIREVIEW-PLAN-046#1] server-side challenge dispatch -------------------------------
+
+    @Test
+    void openedTopicWithBothSidesDispatchesOneChallengePerOpposeRoleAgainstHighestSeveritySupport() {
+        Review opposing = freshReview(
+                RoleType.PRODUCT, RoleType.ARCHITECTURE, RoleType.BACKEND, RoleType.FRONTEND);
+        Claim supportLower = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P2, ClaimPosition.SUPPORT);
+        Claim supportHighest = claim(opposing, RoleType.ARCHITECTURE, ClaimSeverity.P0, ClaimPosition.SUPPORT);
+        Claim opposeBackend = claim(opposing, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim opposeFrontend = claim(opposing, RoleType.FRONTEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic bothSides = new DebateTopic(new TopicId(UUID.randomUUID()), opposing.id(), "api.contract",
+                List.of(supportLower.claimId(), supportHighest.claimId(),
+                        opposeBackend.claimId(), opposeFrontend.claimId()));
+        debateStore.saveTopic(bothSides);
+
+        dispatcher.onCommitted(openedEvent(opposing, bothSides));
+
+        List<ReviewDispatchCommand> commands =
+                dispatchStore.findByReview(opposing.id(), opposing.attemptNo());
+        assertThat(commands).hasSize(2);
+        assertThat(commands).allSatisfy(command -> {
+            assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+            assertThat(command.round()).isEqualTo(1);
+            assertThat(command.topicId()).isEqualTo(bothSides.id());
+            // Highest severity wins over mount order: the P0 SUPPORT is targeted, not the earlier P2.
+            assertThat(command.targetClaimId()).isEqualTo(supportHighest.claimId());
+            assertThat(command.idempotencyKey().value())
+                    .startsWith("dispatch:challenge:" + bothSides.id().value() + ":");
+        });
+        assertThat(commands).extracting(ReviewDispatchCommand::recipientRole)
+                .containsExactlyInAnyOrder(RoleType.BACKEND, RoleType.FRONTEND);
+
+        // Each objector receives exactly its own envelope; the support side is never challenged.
+        String opposingRuntimeId = ReviewRuntimeContext.runtimeIdFor(opposing.id(), opposing.attemptNo());
+        verify(adapter, timeout(3000)).deliverDispatchCommand(
+                eq(opposingRuntimeId), eq(opposingRuntimeId + "-backend"),
+                contains("allowedAction=CHALLENGE"), any());
+        verify(adapter, timeout(3000)).deliverDispatchCommand(
+                eq(opposingRuntimeId), eq(opposingRuntimeId + "-frontend"),
+                contains("allowedAction=CHALLENGE"), any());
+        verify(adapter, never()).deliverDispatchCommand(
+                eq(opposingRuntimeId), eq(opposingRuntimeId + "-product"), anyString(), any());
+        verify(adapter, never()).deliverDispatchCommand(
+                eq(opposingRuntimeId), eq(opposingRuntimeId + "-architecture"), anyString(), any());
+    }
+
+    @Test
+    void repeatedOpenTriggerDoesNotStackChallengeEnvelopes() {
+        Review opposing = freshReview(RoleType.PRODUCT, RoleType.BACKEND);
+        Claim support = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(opposing, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic bothSides = new DebateTopic(new TopicId(UUID.randomUUID()), opposing.id(), "api.contract",
+                List.of(support.claimId(), oppose.claimId()));
+        debateStore.saveTopic(bothSides);
+        ReviewEvent opened = openedEvent(opposing, bothSides);
+
+        dispatcher.onCommitted(opened);
+        dispatcher.onCommitted(opened);
+
+        // The idempotency key dispatch:challenge:{topicId}:{recipientRole} lets only one envelope stand.
+        List<ReviewDispatchCommand> commands =
+                dispatchStore.findByReview(opposing.id(), opposing.attemptNo());
+        assertThat(commands).hasSize(1);
+        assertThat(commands.getFirst().recipientRole()).isEqualTo(RoleType.BACKEND);
+    }
+
+    @Test
+    void oppositionOnlyTopicOpensWithoutDispatchThenDefenseSupportClaimDispatchesChallenges() {
+        Review defending = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
+        Claim opposeBackend = claim(defending, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim opposeFrontend = claim(defending, RoleType.FRONTEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic objectorOnly = new DebateTopic(new TopicId(UUID.randomUUID()), defending.id(), "api.contract",
+                List.of(opposeBackend.claimId(), opposeFrontend.claimId()));
+        debateStore.saveTopic(objectorOnly);
+
+        // 异议答辩议题开题（仅 OPPOSE）: opening alone must not dispatch anything.
+        dispatcher.onCommitted(openedEvent(defending, objectorOnly));
+        assertThat(dispatchStore.findByReview(defending.id(), defending.attemptNo())).isEmpty();
+
+        // The defender's SUPPORT claim lands on the topic and completes both sides.
+        Claim defense = claim(defending, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        objectorOnly.attachClaim(defense.claimId());
+        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE_ROUND_1, defense.claimId()));
+
+        List<ReviewDispatchCommand> commands =
+                dispatchStore.findByReview(defending.id(), defending.attemptNo());
+        assertThat(commands).hasSize(2);
+        assertThat(commands).allSatisfy(command -> {
+            assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+            assertThat(command.targetClaimId()).isEqualTo(defense.claimId());
+            assertThat(command.round()).isEqualTo(1);
+        });
+        assertThat(commands).extracting(ReviewDispatchCommand::recipientRole)
+                .containsExactlyInAnyOrder(RoleType.BACKEND, RoleType.FRONTEND);
+        assertThat(published)
+                .filteredOn(draft -> draft.type() == ReviewEventType.DISPATCH_COMMAND_ISSUED)
+                .extracting(ReviewEventDraft::payload)
+                .allSatisfy(payload -> assertThat(payload.get("reason"))
+                        .isEqualTo("SERVER_CHALLENGE_AFTER_DEFENSE"));
+    }
+
+    @Test
+    void topicAlreadyHavingAChallengeTurnIsSkipped() {
+        Review manual = freshReview(RoleType.PRODUCT, RoleType.BACKEND);
+        Claim support = claim(manual, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(manual, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), manual.id(), "api.contract",
+                List.of(support.claimId(), oppose.claimId()));
+        debateStore.saveTopic(topic);
+        DebateTurn committedChallenge = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), 1,
+                RoleType.BACKEND, RoleType.PRODUCT, DebateTurnType.CHALLENGE, support.claimId(), null,
+                "协调者手动派发的质询", List.of(), null, null, Instant.now());
+        // Compatible with a coordinator-driven flow: a committed CHALLENGE turn means the server must
+        // not re-arm automatic envelopes (the next server envelope is the rebuttal).
+        debateStore.saveTurn(manual.id(), committedChallenge);
+
+        dispatcher.onCommitted(openedEvent(manual, topic));
+
+        assertThat(dispatchStore.findByReview(manual.id(), manual.attemptNo())).isEmpty();
+    }
+
+    @Test
+    void challengeDispatchIsSkippedOutsideDebateRounds() {
+        Review judging = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.JUDGING, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                Map.of());
+        registry.register(judging);
+        Claim support = claim(judging, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(judging, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), judging.id(), "api.contract",
+                List.of(support.claimId(), oppose.claimId()));
+        debateStore.saveTopic(topic);
+
+        dispatcher.onCommitted(openedEvent(judging, topic));
+
+        assertThat(dispatchStore.findByReview(judging.id(), judging.attemptNo())).isEmpty();
+    }
+
+    @Test
+    void secondSupportClaimDoesNotReArmServerChallenges() {
+        Review defending = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
+        Claim opposeBackend = claim(defending, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim opposeFrontend = claim(defending, RoleType.FRONTEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim support = claim(defending, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), defending.id(), "api.contract",
+                List.of(opposeBackend.claimId(), opposeFrontend.claimId()));
+        debateStore.saveTopic(topic);
+        topic.attachClaim(support.claimId());
+
+        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE_ROUND_1, support.claimId()));
+        List<ReviewDispatchCommand> first =
+                dispatchStore.findByReview(defending.id(), defending.attemptNo());
+        assertThat(first).hasSize(2);
+
+        // A later SUPPORT claim on an already two-sided topic must not stack (nor re-arm) envelopes.
+        Claim laterSupport = claim(defending, RoleType.PRODUCT, ClaimSeverity.P2, ClaimPosition.SUPPORT);
+        topic.attachClaim(laterSupport.claimId());
+        dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE_ROUND_1, laterSupport.claimId()));
+
+        assertThat(dispatchStore.findByReview(defending.id(), defending.attemptNo())).hasSize(2);
+    }
+
+    // --- helpers -------------------------------------------------------------
+
+    private Review freshReview(RoleType... roles) {
+        Review fresh = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE_ROUND_1, 1, 0,
+                Arrays.stream(roles)
+                        .map(role -> new RoleActivation(
+                                role, role.name().toLowerCase(java.util.Locale.ROOT), true))
+                        .toList(),
+                Map.of());
+        registry.register(fresh);
+        return fresh;
+    }
+
+    private Claim claim(Review owner, RoleType role, ClaimSeverity severity, ClaimPosition position) {
+        Claim created = new Claim(new ClaimId(UUID.randomUUID()), owner.id(), role,
+                "api.contract", severity, position, "命题-" + role, "理由-" + role, List.of());
+        debateStore.saveClaim(created);
+        return created;
+    }
+
+    private ReviewEvent openedEvent(Review review, DebateTopic topic) {
+        return new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(),
+                ReviewEventType.DEBATE_TOPIC_OPENED, ReviewEventType.DEBATE_TOPIC_OPENED.category(),
+                review.stage(), null, null, topic.id(), null, null, null, null,
+                Instant.now(), 1, Map.of());
+    }
+
+    private ReviewEvent claimEvent(Review review, ReviewStage stage, ClaimId claimId) {
+        return new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(),
+                ReviewEventType.CLAIM_SUBMITTED, ReviewEventType.CLAIM_SUBMITTED.category(),
+                stage, null, null, null, claimId, null, null, 40,
+                Instant.now(), 1, Map.of("subjectKey", "api.contract", "severity", "P1"));
     }
 
     private boolean roleLabel(String label) {
