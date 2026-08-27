@@ -662,9 +662,11 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 /* [AIREVIEW-PLAN-043#4] 辩论页两块独立定高内滚：对抗看板（法庭+中立方）与对话流上下分栏，
    各自 flex 填充 + 内部滚动；块间距由容器 gap 承担，子块原有外边距归零。 */
 .flow-content > .flow-debate-split { display: flex; flex: 1 1 auto; flex-direction: column; gap: .8rem; min-height: 0; }
-.flow-debate-board { display: grid; flex: 2 1 0; gap: .8rem; min-height: 0; overflow-y: auto; }
+/* [AIREVIEW-PLAN-050#2] 两块高度改内容自适应：看板按自然高度撑开（封顶 60%，超出内滚），
+   对话流占据剩余空间——替代固定 4:6 权重（内容量错配时一侧被挤压、另一侧空转）。 */
+.flow-debate-board { display: grid; flex: 0 1 auto; gap: .8rem; max-height: 60%; min-height: 0; overflow-y: auto; }
 .flow-debate-board > .flow-neutral-claims { margin-top: 0; }
-.flow-debate-split > .flow-debate-dialogue { flex: 3 1 0; min-height: 0; margin-top: 0; }
+.flow-debate-split > .flow-debate-dialogue { flex: 1 1 auto; min-height: 0; margin-top: 0; }
 .flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* [AIREVIEW-PLAN-043#3] 上下文侦察：收集结论卡同样定高内滚，运行流面板与结论卡分享剩余高度。 */
 .flow-content > .scout-conclusion-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
