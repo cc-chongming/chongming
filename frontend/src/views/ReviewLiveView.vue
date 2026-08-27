@@ -21,6 +21,8 @@ import {
 import { describeLiveRunState } from '../services/live-run-status';
 // [AIREVIEW-PLAN-038#2] 子代理启用决策行由事实事件投影（见 review-activation-presenter.js）。
 import { buildActivationRows } from '../services/review-activation-presenter';
+// [AIREVIEW-PLAN-042#1] 异议答辩议题的答辩 Claim（SUPPORT）由事实事件投影为对话流 REBUTTAL 回合（见 review-debate-presenter.js）。
+import { buildDefenseTurns } from '../services/review-debate-presenter';
 import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
 import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
@@ -269,8 +271,12 @@ const consensusStroke = computed(() => {
     if (consensusPercent.value > 70) return 'var(--flow-green)';
     return consensusPercent.value > 40 ? 'var(--flow-yellow)' : 'var(--flow-red)';
 });
+// [AIREVIEW-PLAN-042#1] 答辩 Claim 合成回合：既有 turns 映射结果与 defenseTurns 合并后按 selectedRound 过滤，
+// 使异议答辩议题的答辩 Claim 也能出现在“辩论对话流”中（合成条目无 stance 字段，立场行自然不渲染）。
+const defenseTurns = computed(() => buildDefenseTurns(store.state.debates ?? [], store.events.value));
 const roundTurns = computed(() => debateTopics.value
     .flatMap((topic) => (topic.turns ?? []).map((turn) => ({ ...turn, subject: topic.subjectKey })))
+    .concat(defenseTurns.value)
     .filter((turn) => (turn.round ?? 1) === selectedRound.value));
 const judgements = computed(() => debateTopics.value.filter((topic) => topic.judgement));
 // Topics that already escalated to the judging layer but carry no judgement yet; showing them in
