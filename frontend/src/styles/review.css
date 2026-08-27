@@ -651,6 +651,8 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-content > .flow-conflict-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .flow-content > .flow-debate-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* [AIREVIEW-PLAN-043#3] 上下文侦察：收集结论卡同样定高内滚，运行流面板与结论卡分享剩余高度。 */
+.flow-content > .scout-conclusion-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* [AIREVIEW-PLAN-037#3] 视口框定收口：行轨道禁止被内容撑高，观察抽屉改为弹性列，
    对话/事实/调试各自内部滚动——页面在浏览器 100% 缩放下无外层滚动条。
    ≤1120px 抽屉变为底部区块，沿用原 max-height 口径，不在本规则内。 */
