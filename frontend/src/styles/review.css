@@ -321,6 +321,15 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-conflict-director { margin-top: .25rem; }.flow-conflict-director-body { padding: .85rem 1rem; }.flow-conflict-director-body p { margin: 0; color: #d7dced; font-size: .78rem; line-height: 1.65; }.flow-conflict-director-latest { margin-top: .45rem !important; color: var(--flow-dim) !important; font-size: .7rem !important; }
 .flow-round-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; }
 .flow-round-tab { padding: .4rem .9rem; color: var(--flow-dim); background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .4rem; font-size: .72rem; font-weight: 700; cursor: pointer; }.flow-round-tab span { margin-left: .3rem; font-size: .62rem; opacity: .8; }.flow-round-tab:hover { color: var(--flow-text); border-color: var(--flow-accent); }.flow-round-tab.active { color: #fff; background: var(--flow-accent); border-color: var(--flow-accent); }
+/* [AIREVIEW-PLAN-045#1] 议题 Tab 栏（辩论分支顶部）：flex + 横向滚动；卡片式比回合 Tab 更强调（编号 + 标题 + 状态小字）。 */
+.flow-topic-tabs { display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem; overflow-x: auto; }
+.flow-topic-tab { display: inline-flex; align-items: center; gap: .4rem; flex: 0 0 auto; max-width: 19rem; padding: .45rem .85rem; color: var(--flow-text); background: var(--flow-surface-2); border: 1px solid var(--flow-border); border-radius: .5rem; font-size: .74rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.flow-topic-tab strong { flex: 0 0 auto; }
+.flow-topic-tab:hover { color: var(--flow-accent); border-color: var(--flow-accent); }
+.flow-topic-tab.active { color: #fff; background: var(--flow-accent); border-color: var(--flow-accent); box-shadow: 0 2px 10px rgba(108, 140, 255, .35); }
+.flow-topic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.flow-topic-status { flex: 0 0 auto; padding: .12rem .42rem; border-radius: 99px; font-size: .6rem; font-weight: 800; white-space: nowrap; color: #79e6b6; background: rgba(52, 211, 153, .16); }
+.flow-topic-status.adjudicated { color: #b9c3db; background: var(--flow-surface-3); }
 .flow-debate-court { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr); min-height: 20rem; overflow: hidden; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
 .flow-debate-side { padding: .95rem; overflow: auto; }.flow-debate-side.pro { border-right: 1px solid var(--flow-border); }.flow-debate-side.con { border-left: 1px solid var(--flow-border); }
 .flow-debate-label { margin: 0 0 .7rem; padding-bottom: .5rem; border-bottom: 1px solid var(--flow-border); font-size: .7rem; font-weight: 800; letter-spacing: .08em; }.flow-debate-side.pro .flow-debate-label { color: var(--flow-green); }.flow-debate-side.con .flow-debate-label { color: var(--flow-red); }
@@ -659,6 +668,12 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-debate-claim > p { margin: 0; color: #292524; font-size: .74rem; line-height: 1.55; }.flow-debate-claim > small { display: block; margin-top: .3rem; color: #a8a29e; font-size: .63rem; }
 .flow-neutral-claims { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .55rem; margin-top: .75rem; padding: .8rem; background: #fff; border: 1px solid #d6d3d1; border-radius: .55rem; }.flow-neutral-claims > .flow-debate-label { grid-column: 1 / -1; color: #57534e; }
 .flow-debate-center { background: #fafaf9; }.flow-round-tab { color: #57534e; background: #fff; }.flow-round-tab.active { color: #fff; }.flow-turn-type { color: #047857; }
+/* [AIREVIEW-PLAN-045#1] 浅色主题：议题 Tab 以蓝系强调（区别于灰色回合 Tab），状态小字区分进行中/已裁决。 */
+.flow-topic-tab { color: #1c1917; background: #fff; box-shadow: 0 1px 2px rgba(28, 25, 23, .04); }
+.flow-topic-tab:hover { color: #1d4ed8; background: #eff6ff; border-color: #93c5fd; }
+.flow-topic-tab.active { color: #fff; background: #2563eb; border-color: #2563eb; box-shadow: 0 2px 10px rgba(37, 99, 235, .28); }
+.flow-topic-status { color: #047857; background: #d1fae5; }
+.flow-topic-status.adjudicated { color: #57534e; background: #e7e5e4; }
 .flow-verdict-text { color: #44403c; }.flow-verdict-badge { color: #9a3412; background: #ffedd5; }
 .flow-lifecycle { margin: 0 0 12px; }
 .flow-debate-timeline { margin-top: 12px; }

@@ -51,6 +51,8 @@ const store = createReviewStore();
 const runtimeTrace = createRuntimeTraceStore();
 const selectedPhase = ref(null);
 const selectedRound = ref(1);
+// [AIREVIEW-PLAN-045#1] 辩论议题 Tab：记录当前聚焦议题；议题列表变化（新增/重放）时按 topicId 稳定选择，选中项消失自动回落第一个。
+const selectedTopicId = ref(null);
 const expandedRole = ref(null);
 const drawerOpen = ref(true);
 const latestReviewReady = ref(false);
@@ -189,6 +191,9 @@ const activePhase = computed(() => selectedPhase.value ?? phases[activePhaseInde
 const activePhaseDefinition = computed(() => phases.find((phase) => phase.id === activePhase.value) ?? phases[activePhaseIndex.value]);
 
 const debateTopics = computed(() => store.state.debates ?? []);
+// [AIREVIEW-PLAN-045#1] 当前聚焦议题：按 selectedTopicId 匹配，匹配不到（选中项消失/重放/换评审）自动回落第一个议题。
+const selectedTopic = computed(() => debateTopics.value.find((topic) => topic.topicId === selectedTopicId.value)
+    ?? debateTopics.value[0] ?? null);
 const allClaims = computed(() => debateTopics.value.flatMap((topic) => topic.claims ?? []));
 const roleClaims = computed(() => {
     const byId = new Map();
@@ -222,6 +227,12 @@ const maxDebateRound = computed(() => Math.max(1,
     store.state.summary?.stage === 'DEBATE_ROUND_2' ? 2 : 1,
     ...debateTopics.value.map((topic) => topic.currentRound ?? 1),
     ...debateTopics.value.flatMap((topic) => (topic.turns ?? []).map((turn) => turn.round ?? 1))));
+// [AIREVIEW-PLAN-045#1] 当前聚焦议题的最大辩论回合：回合选项卡与轮次上限随议题联动（至少 1 轮）。
+const topicMaxRound = computed(() => {
+    const topic = selectedTopic.value;
+    const topicTurns = topic?.turns ?? [];
+    return Math.max(1, topic?.currentRound ?? 1, ...topicTurns.map((turn) => turn.round ?? 1));
+});
 const conflicts = computed(() => debateTopics.value.flatMap((topic, index) => {
     const claims = topic.claims ?? [];
     const supports = claims.filter((claim) => claim.position === 'SUPPORT');
@@ -258,9 +269,14 @@ const phaseList = computed(() => phases.map((phase) => {
 }));
 
 const claimPartitions = computed(() => partitionClaimsByPosition(allClaims.value));
-const proClaims = computed(() => claimPartitions.value.support);
-const conClaims = computed(() => claimPartitions.value.oppose);
-const neutralClaims = computed(() => claimPartitions.value.neutral);
+// [AIREVIEW-PLAN-045#1] 法庭改为按当前聚焦议题聚类：议题级分区驱动支持/质疑/中立方与共识度渲染；
+// allClaims/claimPartitions 保留为全局视图（角色汇总等）使用，不受议题切换影响。
+const topicClaims = computed(() => selectedTopic.value?.claims ?? []);
+const topicClaimPartitions = computed(() => partitionClaimsByPosition(topicClaims.value));
+const proClaims = computed(() => topicClaimPartitions.value.support);
+const conClaims = computed(() => topicClaimPartitions.value.oppose);
+const neutralClaims = computed(() => topicClaimPartitions.value.neutral);
+// [AIREVIEW-PLAN-045#1] 共识度基于议题级 support/oppose 分区计算。
 const consensusPercent = computed(() => {
     const directionalClaims = proClaims.value.length + conClaims.value.length;
     if (!directionalClaims) return 0;
@@ -274,10 +290,15 @@ const consensusStroke = computed(() => {
 // [AIREVIEW-PLAN-042#1] 答辩 Claim 合成回合：既有 turns 映射结果与 defenseTurns 合并后按 selectedRound 过滤，
 // 使异议答辩议题的答辩 Claim 也能出现在“辩论对话流”中（合成条目无 stance 字段，立场行自然不渲染）。
 const defenseTurns = computed(() => buildDefenseTurns(store.state.debates ?? [], store.events.value));
-const roundTurns = computed(() => debateTopics.value
-    .flatMap((topic) => (topic.turns ?? []).map((turn) => ({ ...turn, subject: topic.subjectKey })))
-    .concat(defenseTurns.value)
-    .filter((turn) => (turn.round ?? 1) === selectedRound.value));
+// [AIREVIEW-PLAN-045#1] 对话流聚焦当前议题：仅聚合该议题的 turns 与该议题的合成答辩回合，再按 selectedRound 过滤。
+const roundTurns = computed(() => {
+    const topic = selectedTopic.value;
+    if (!topic) return [];
+    return [
+        ...(topic.turns ?? []).map((turn) => ({ ...turn, subject: topic.subjectKey })),
+        ...defenseTurns.value.filter((turn) => turn.subject === topic.subjectKey)
+    ].filter((turn) => (turn.round ?? 1) === selectedRound.value);
+});
 const judgements = computed(() => debateTopics.value.filter((topic) => topic.judgement));
 // Topics that already escalated to the judging layer but carry no judgement yet; showing them in
 // the conclusion chain keeps the human-decision view honest while the stage machine lags behind.
@@ -291,7 +312,11 @@ const stageLabel = {
     JUDGING: '裁决中', WAITING_HUMAN: '待人工决策', NOTIFYING: '通知中',
     COMPLETED: '已完成', CANCELLED: '已取消', FAILED: '已失败'
 };
-const debateSubject = computed(() => debateTopics.value[0]?.subjectKey ?? null);
+// [AIREVIEW-PLAN-045#1] 页头标题跟随聚焦议题（title 为 PLAN-044 在途可选字段，缺失时自然回退 subjectKey）。
+const debateSubject = computed(() => {
+    if (!selectedTopic.value) return null;
+    return selectedTopic.value.title ?? selectedTopic.value.subjectKey;
+});
 // [AIREVIEW-PLAN-023#6.3] Summary.gate becomes the human result after finalization, so recover
 // the earlier AI draft from the replayed GATE_DRAFTED fact when needed.
 const gateDraft = computed(() => resolveAiGateDraft(
@@ -424,6 +449,18 @@ function switchRound(round) {
     selectedRound.value = round;
 }
 
+function isTopicAdjudicated(topic) {
+    return ['RESOLVED', 'ESCALATED', 'SETTLED'].includes(topic?.status ?? '');
+}
+
+// [AIREVIEW-PLAN-045#1] 切换聚焦议题：仅当所选回合超出该议题最大回合时回落（不强行重置回合）。
+function switchTopic(topic) {
+    selectedTopicId.value = topic?.topicId ?? null;
+    const topicTurns = topic?.turns ?? [];
+    const topicMax = Math.max(1, topic?.currentRound ?? 1, ...topicTurns.map((turn) => turn.round ?? 1));
+    if (selectedRound.value > topicMax) selectedRound.value = topicMax;
+}
+
 function turnTypeLabel(type) {
     return { CHALLENGE: '⚔️ 质询', REBUTTAL: '🛡️ 答辩', EVIDENCE: '📎 补充证据', POSITION_SHIFT: '🤝 立场调整' }[type] ?? type ?? '发言';
 }
@@ -501,6 +538,7 @@ function format(value) {
 async function load(reviewId) {
     selectedPhase.value = null;
     selectedRound.value = 1;
+    selectedTopicId.value = null; // [AIREVIEW-PLAN-045#1] 切换评审时重置聚焦议题，回落第一个。
     expandedRole.value = null;
     await loadQueue.run(
         reviewId,
@@ -669,9 +707,15 @@ onUnmounted(() => loadQueue.dispose());
                 <!-- ── 多轮辩论 ── -->
                 <template v-else-if="activePhase === 'debate'">
                     <template v-if="debateTopics.length">
+                        <!-- [AIREVIEW-PLAN-045#1] 议题 Tab 栏：聚焦议题切换（法庭、轮次上限与对话流均随议题联动），位于回合选项卡上方。 -->
+                        <div class="flow-topic-tabs" role="tablist" aria-label="辩论议题">
+                            <button v-for="(topic, index) in debateTopics" :key="topic.topicId" type="button" role="tab" :aria-selected="selectedTopic?.topicId === topic.topicId" :class="['flow-topic-tab', { active: selectedTopic?.topicId === topic.topicId }]" @click="switchTopic(topic)">
+                                <strong>议题 {{ index + 1 }}</strong><span class="flow-topic-title">{{ topic.title ?? topic.subjectKey }}</span><small :class="['flow-topic-status', isTopicAdjudicated(topic) ? 'adjudicated' : 'ongoing']">{{ isTopicAdjudicated(topic) ? '已裁决' : '进行中' }}</small>
+                            </button>
+                        </div>
                         <div class="flow-round-tabs" role="tablist" aria-label="辩论回合">
-                            <button v-for="round in maxDebateRound" :key="round" type="button" role="tab" :aria-selected="selectedRound === round" :class="['flow-round-tab', { active: selectedRound === round }]" @click="switchRound(round)">
-                                R{{ round }} <span>{{ round === maxDebateRound && !isTopicTerminal(debateTopics[0]) ? '进行中' : '已完成' }}</span>
+                            <button v-for="round in topicMaxRound" :key="round" type="button" role="tab" :aria-selected="selectedRound === round" :class="['flow-round-tab', { active: selectedRound === round }]" @click="switchRound(round)">
+                                R{{ round }} <span>{{ round === topicMaxRound && !isTopicTerminal(selectedTopic) ? '进行中' : '已完成' }}</span>
                             </button>
                         </div>
 
@@ -696,7 +740,7 @@ onUnmounted(() => loadQueue.dispose());
                                 </div>
                                 <small>共识度（支持 Claim 占比）</small>
                                 <p v-if="!proClaims.length && conClaims.length" class="flow-debate-empty">议题当前仅含反对方论点，暂无支持方。</p>
-                                <p class="flow-round-display"><strong>R{{ selectedRound }}</strong> / {{ maxDebateRound }}</p>
+                                <p class="flow-round-display"><strong>R{{ selectedRound }}</strong> / {{ topicMaxRound }}</p>
                             </div>
                             <div class="flow-debate-side con">
                                 <p class="flow-debate-label">🔴 质疑方</p>
