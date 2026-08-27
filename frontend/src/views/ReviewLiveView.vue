@@ -687,8 +687,10 @@ onUnmounted(() => loadQueue.dispose());
                             <p v-else class="flow-debate-empty">该回合暂无公开的质询或答辩记录。</p>
                         </section>
                     </template>
+                    <!-- [AIREVIEW-PLAN-034#5] 辩论时间线与法庭视图/对话流信息重复，先注释掉；如需恢复取消注释并把下方空态改回 v-else。
                     <DebateTimeline v-if="debateTopics.length" class="flow-debate-timeline" :debates="debateTopics" @open-evidence="store.selectEvidence" />
-                    <div v-else class="flow-empty"><strong>尚未开启辩论议题</strong><p>冲突检测完成后，协调者会将冲突组合并为辩论议题并在此展示回合对阵。</p></div>
+                    -->
+                    <div v-if="!debateTopics.length" class="flow-empty"><strong>尚未开启辩论议题</strong><p>冲突检测完成后，协调者会将冲突组合并为辩论议题并在此展示回合对阵。</p></div>
                 </template>
 
                 <!-- ── 人工决策 ── -->
