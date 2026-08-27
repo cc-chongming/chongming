@@ -74,7 +74,8 @@ onUnmounted(() => {
             <button id="drawer-tab-facts" type="button" role="tab" aria-controls="drawer-panel-facts" :tabindex="activeTab === 'facts' ? 0 : -1" :aria-selected="activeTab === 'facts'" :class="{ active: activeTab === 'facts' }" @click="activeTab = 'facts'">评审事实</button>
             <button id="drawer-tab-debug" type="button" role="tab" aria-controls="drawer-panel-debug" :tabindex="activeTab === 'debug' ? 0 : -1" :aria-selected="activeTab === 'debug'" :class="{ active: activeTab === 'debug' }" @click="activeTab = 'debug'">运行调试</button>
         </div>
-        <div v-if="activeTab === 'conversation'" id="drawer-panel-conversation" role="tabpanel" aria-labelledby="drawer-tab-conversation">
+        <!-- [AIREVIEW-PLAN-037#3] flow-drawer-panel：桌面端作为弹性填充容器，对话流在抽屉内部滚动，不撑破视口。 -->
+        <div v-if="activeTab === 'conversation'" id="drawer-panel-conversation" class="flow-drawer-panel" role="tabpanel" aria-labelledby="drawer-tab-conversation">
             <label class="flow-role-filter">角色筛选<select v-model="roleFilter"><option value="ALL">全部角色</option><option v-for="role in roles" :key="role" :value="role">{{ roleTitle(role) }}</option></select></label>
             <LiveAgentConversation compact :items="filteredItems" />
         </div>
