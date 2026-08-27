@@ -13,7 +13,10 @@ import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchCommand
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStore;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -77,29 +80,63 @@ class ReviewDispatchServiceTests {
     }
 
     @Test
-    void replayingTheSameDispatchIntentWithADifferentKeyReturnsThePendingCommandAndRefreshesExpiry() {
+    void replayingTheSameDispatchIntentWithADifferentKeyReturnsTheSameCommandAndRefreshesExpiry() {
         Fixture fixture = openChallengeFixture();
+        // Controllable clock: the first envelope is issued at t0 and the Director re-dispatches the
+        // same intent at t0+5s. An injected clock keeps the expiry arithmetic deterministic instead
+        // of racing on Instant.now() resolution (which made this test flaky).
+        final Instant[] now = { Instant.now() };
+        Clock clock = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now[0];
+            }
+        };
+        ReviewDispatchService clocked =
+                new ReviewDispatchService(dispatchStore, debateStore, published::add, clock);
+
+        Instant t0 = now[0];
         IdempotencyKey firstKey = key("director-call-intent-1");
         IdempotencyKey secondKey = key("director-call-intent-2");
 
         ReviewDispatchService.DispatchIssueResult first =
-                service.issue(fixture.review(), challengeProposal(fixture, firstKey));
-        ReviewDispatchService.DispatchProposal restated = challengeProposal(fixture, secondKey);
+                clocked.issue(fixture.review(), challengeProposal(fixture, firstKey, t0.plusSeconds(600)));
+        now[0] = t0.plusSeconds(5);
         ReviewDispatchService.DispatchIssueResult duplicate =
-                service.issue(fixture.review(), restated);
+                clocked.issue(fixture.review(), challengeProposal(fixture, secondKey, t0.plusSeconds(600)));
 
         assertThat(first.replayed()).isFalse();
         assertThat(duplicate.replayed()).isTrue();
+        // [TTL 刷新] Content-level dedup returns the very same envelope...
         assertThat(duplicate.command().commandId()).isEqualTo(first.command().commandId());
-        // [AIREVIEW-PLAN-033#5] A re-dispatch restates live Director intent: the pending command's
-        // expiry is refreshed to the restated proposal's expiry instead of silently counting down.
-        assertThat(duplicate.command().expiresAt()).isEqualTo(restated.expiresAt());
+        // ...and re-arms it with a fresh original-TTL window starting at the re-dispatch instant:
+        // original expiry t0+600s, refreshed expiry (t0+5s)+600s = t0+605s, strictly after.
+        assertThat(first.command().expiresAt()).isEqualTo(t0.plusSeconds(600));
+        assertThat(duplicate.command().expiresAt()).isEqualTo(t0.plusSeconds(605));
         assertThat(dispatchStore.findByReview(fixture.review().id(), fixture.review().attemptNo()))
                 .singleElement()
                 .satisfies(stored -> {
                     assertThat(stored.commandId()).isEqualTo(first.command().commandId());
-                    assertThat(stored.expiresAt()).isEqualTo(restated.expiresAt());
+                    assertThat(stored.expiresAt()).isEqualTo(duplicate.command().expiresAt());
                 });
+
+        // The refresh only extends a PENDING command: rejectAllPending still reclaims it on stage
+        // switches, so a stopped dispatch never leaves a zombie command behind.
+        clocked.rejectAllPending(fixture.review(), "JUDGING_STARTED");
+        assertThat(dispatchStore.findById(fixture.review().id(), first.command().commandId()))
+                .get()
+                .extracting(ReviewDispatchCommand::status)
+                .isEqualTo(DispatchCommandStatus.REJECTED);
     }
 
     @Test
@@ -376,11 +413,16 @@ class ReviewDispatchServiceTests {
     }
 
     private ReviewDispatchService.DispatchProposal challengeProposal(Fixture fixture, IdempotencyKey key) {
+        return challengeProposal(fixture, key, later());
+    }
+
+    private ReviewDispatchService.DispatchProposal challengeProposal(
+            Fixture fixture, IdempotencyKey key, Instant expiresAt) {
         return new ReviewDispatchService.DispatchProposal(
                 new ReviewCommandMetadata(fixture.review().id(), fixture.review().version(), key),
                 RoleType.PRODUCT, DispatchedAction.CHALLENGE, 1,
                 fixture.topic().id(), fixture.claim().claimId(), null,
-                later(), RoleType.DIRECTOR, "DIRECTOR");
+                expiresAt, RoleType.DIRECTOR, "DIRECTOR");
     }
 
     private static IdempotencyKey key(String suffix) {

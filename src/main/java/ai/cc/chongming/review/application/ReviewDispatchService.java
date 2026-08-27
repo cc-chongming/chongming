@@ -12,6 +12,8 @@ import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchCommand
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewDispatchStore;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -52,16 +54,17 @@ public class ReviewDispatchService {
     private final ReviewDebateStore debateStore;
     private final ReviewEventPublisher eventPublisher;
     private final ObjectProvider<ReviewEventPublisher> publisherProvider;
+    private final Clock clock;
 
     public ReviewDispatchService(ReviewDispatchStore dispatchStore, ReviewDebateStore debateStore) {
-        this(dispatchStore, debateStore, ReviewEventPublisher.noop(), null);
+        this(dispatchStore, debateStore, ReviewEventPublisher.noop(), null, Clock.systemUTC());
     }
 
     public ReviewDispatchService(
             ReviewDispatchStore dispatchStore,
             ReviewDebateStore debateStore,
             ReviewEventPublisher eventPublisher) {
-        this(dispatchStore, debateStore, eventPublisher, null);
+        this(dispatchStore, debateStore, eventPublisher, null, Clock.systemUTC());
     }
 
     @Autowired
@@ -70,18 +73,30 @@ public class ReviewDispatchService {
             ReviewDebateStore debateStore,
             ObjectProvider<ReviewEventPublisher> publisherProvider) {
         this(dispatchStore, debateStore, null,
-                Objects.requireNonNull(publisherProvider, "publisherProvider must not be null"));
+                Objects.requireNonNull(publisherProvider, "publisherProvider must not be null"),
+                Clock.systemUTC());
+    }
+
+    /** Test seam: inject a controllable clock for deterministic expiry arithmetic. */
+    ReviewDispatchService(
+            ReviewDispatchStore dispatchStore,
+            ReviewDebateStore debateStore,
+            ReviewEventPublisher eventPublisher,
+            Clock clock) {
+        this(dispatchStore, debateStore, eventPublisher, null, clock);
     }
 
     private ReviewDispatchService(
             ReviewDispatchStore dispatchStore,
             ReviewDebateStore debateStore,
             ReviewEventPublisher eventPublisher,
-            ObjectProvider<ReviewEventPublisher> publisherProvider) {
+            ObjectProvider<ReviewEventPublisher> publisherProvider,
+            Clock clock) {
         this.dispatchStore = Objects.requireNonNull(dispatchStore, "dispatchStore must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.eventPublisher = eventPublisher;
         this.publisherProvider = publisherProvider;
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
         if (eventPublisher == null && publisherProvider == null) {
             throw new IllegalArgumentException("either eventPublisher or publisherProvider is required");
         }
@@ -118,11 +133,12 @@ public class ReviewDispatchService {
             }
             ReviewDispatchCommand deduplicated = findPendingDuplicate(review, proposal);
             if (deduplicated != null) {
-                // [AIREVIEW-PLAN-033#5] A re-dispatch restates live Director intent: refresh the
-                // pending command's expiry so a still-wanted envelope does not silently time out
-                // while queued. Once the Director stops re-dispatching, the command expires normally.
-                ReviewDispatchCommand refreshed = deduplicated.withExpiresAt(proposal.expiresAt());
-                dispatchStore.updateExpiry(refreshed);
+                // [AIREVIEW-PLAN-033#5] Content-level dedup hit means the Director restates live
+                // intent: re-arm the pending command with a full original-TTL window starting now
+                // so a still-wanted envelope does not silently time out while queued. Once the
+                // Director stops re-dispatching, the command keeps its normal expiry and is
+                // reclaimed; rejectAllPending on stage switches is untouched (status stays PENDING).
+                ReviewDispatchCommand refreshed = refreshExpiryOnRedispatch(deduplicated);
                 return new DispatchIssueResult(refreshed, true);
             }
             validateProposal(review, proposal);
@@ -140,7 +156,7 @@ public class ReviewDispatchService {
                     proposal.expiresAt(),
                     DispatchCommandStatus.PENDING,
                     proposal.metadata().idempotencyKey(),
-                    Instant.now());
+                    clock.instant());
             dispatchStore.save(command);
             issued = command;
             replayed = false;
@@ -404,6 +420,35 @@ public class ReviewDispatchService {
             }
         }
         return null;
+    }
+
+    /**
+     * [TTL 刷新] Re-arms one deduplicated PENDING command with a fresh original-TTL window
+     * starting now. {@code ReviewDispatchCommand} is immutable, so the new expiry is applied by
+     * replacing the stored instance through {@link ReviewDispatchStore#updateExpiry}; the status
+     * stays PENDING, extending only the expiry. If the Director stops re-dispatching, the command
+     * simply expires at the re-armed deadline (no zombie command), and rejectAllPending on stage
+     * switches still reclaims it like any other pending envelope.
+     */
+    private ReviewDispatchCommand refreshExpiryOnRedispatch(ReviewDispatchCommand existing) {
+        Instant refreshedExpiry = clock.instant().plus(ttlOf(existing));
+        if (existing.expiresAt().equals(refreshedExpiry)) {
+            return existing;
+        }
+        ReviewDispatchCommand refreshed = existing.withExpiresAt(refreshedExpiry);
+        dispatchStore.updateExpiry(refreshed);
+        LOGGER.info("DISPATCH_COMMAND_TTL_REFRESHED reviewId={} attemptNo={} commandId={} "
+                        + "ttlSeconds={} oldExpiresAt={} newExpiresAt={}",
+                existing.reviewId().value(), existing.attemptNo(), existing.commandId().value(),
+                ttlOf(existing).toSeconds(), existing.expiresAt(), refreshed.expiresAt());
+        return refreshed;
+    }
+
+    /**
+     * The original TTL window of a dispatch command: from its creation instant to its expiry.
+     */
+    private static Duration ttlOf(ReviewDispatchCommand command) {
+        return Duration.between(command.createdAt(), command.expiresAt());
     }
 
     private Claim requireClaimInTopic(ReviewId reviewId, DebateTopic topic, ClaimId claimId) {
