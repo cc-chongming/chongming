@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
     compareGateDecision,
+    GATE_CONCLUSION_HINTS,
+    humanizeGateReason,
     latestGateDecision,
     presentDebateJudgement,
     resolveAiGateDraft
@@ -130,5 +132,54 @@ describe('review conclusion presenter [AIREVIEW-PLAN-023#6.3]', () => {
             [],
             []
         )).toMatchObject({ result: 'PASS', reasonSummary: '风险可控。', source: 'summary' });
+    });
+});
+
+describe('humanizeGateReason [AIREVIEW-PLAN-023#6.3]', () => {
+    it('把覆盖统计与已知触发原因合并翻译成中文', () => {
+        expect(humanizeGateReason(
+            'required=29, confirmed=9, partial=18, gap=3, unknown=3, notApplicable=0; P0/P1 claim lacks verified evidence'
+        )).toBe('29 项必填检查点：9 项确认、18 项部分确认、3 项缺口、3 项未知；P0/P1 级主张缺少已验证证据');
+    });
+
+    it('为零项的覆盖统计不列出', () => {
+        expect(humanizeGateReason(
+            'required=10, confirmed=10, partial=0, gap=0, unknown=0, notApplicable=2; required checkpoints fully covered with no blocking item'
+        )).toBe('10 项必填检查点：10 项确认、2 项不适用；必填检查点全部覆盖且无阻断项');
+    });
+
+    it('覆盖统计全部为零、无触发原因时给出简明措辞', () => {
+        expect(humanizeGateReason('required=12, confirmed=0, partial=0, gap=0, unknown=0, notApplicable=0'))
+            .toBe('12 项必填检查点均已覆盖');
+    });
+
+    it('只有英文触发原因时也翻译', () => {
+        expect(humanizeGateReason('P0/P1 GAP lacks tracked disposition or evidence'))
+            .toBe('P0/P1 级缺口缺少可追踪的处置或证据');
+    });
+
+    it('未命中的触发原因原样保留', () => {
+        expect(humanizeGateReason('required=3, confirmed=1, gap=2; some brand new reason'))
+            .toBe('3 项必填检查点：1 项确认、2 项缺口；some brand new reason');
+    });
+
+    it('带参数前缀的触发原因只翻译前缀并保留参数', () => {
+        expect(humanizeGateReason('required=5, confirmed=1, gap=4; required checkpoint coverage incomplete: uncovered=DEV:launch-readiness'))
+            .toBe('5 项必填检查点：1 项确认、4 项缺口；必填检查点覆盖不完整，未覆盖：DEV:launch-readiness');
+    });
+
+    it('无法解析的输入原样返回，空输入返回空串', () => {
+        expect(humanizeGateReason('完全看不懂的内容')).toBe('完全看不懂的内容');
+        expect(humanizeGateReason('')).toBe('');
+        expect(humanizeGateReason(null)).toBe('');
+        expect(humanizeGateReason(undefined)).toBe('');
+    });
+
+    it('结论含义说明覆盖五个提交值且文案齐全', () => {
+        expect(GATE_CONCLUSION_HINTS.map((hint) => hint.result)).toEqual(['PASS', 'CONDITIONAL', 'BLOCK', 'RETURN', 'OVERRIDE']);
+        for (const hint of GATE_CONCLUSION_HINTS) {
+            expect(hint.label).toBeTruthy();
+            expect(hint.description).toBeTruthy();
+        }
     });
 });

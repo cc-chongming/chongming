@@ -5,6 +5,9 @@ import { gateLabel } from '../services/review-live-presenter';
 import { formatChinaTime } from '../services/china-time';
 import {
     compareGateDecision,
+    conclusionLabel,
+    GATE_CONCLUSION_HINTS,
+    humanizeGateReason,
     latestGateDecision,
     presentDebateJudgement
 } from '../services/review-conclusion-presenter';
@@ -28,6 +31,27 @@ const judgeSummaries = computed(() => props.debates
     .filter(Boolean));
 const latestHumanGate = computed(() => latestGateDecision(props.gateVersions));
 const gateComparison = computed(() => compareGateDecision(props.gateDraft, latestHumanGate.value));
+// [AIREVIEW-PLAN-023#6.3] 决策引导：把 Judge 裁决按结论分组合并成一句话（只列非零项）。
+const judgeTallyText = computed(() => {
+    const counts = new Map();
+    for (const judge of judgeSummaries.value) {
+        const result = judge.result || 'OTHER';
+        counts.set(result, (counts.get(result) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+        .filter(([, count]) => count > 0)
+        .map(([result, count]) => count + ' ' + conclusionLabel(result))
+        .join('、');
+});
+// [AIREVIEW-PLAN-023#6.3] AI 草案理由的中文人话版；解析失败时回退为机器原文。
+const draftHumanizedReason = computed(() => humanizeGateReason(props.gateDraft?.reasonSummary));
+// 仅当草案结论需要人工决策时，在引导里补充触发原因。
+const draftTriggerReason = computed(() => {
+    if (!props.gateDraft || gateComparison.value.draftLabel !== '需要人工决策') {
+        return '';
+    }
+    return draftHumanizedReason.value || gateComparison.value.draftReason;
+});
 
 function idList(value) {
     return value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
@@ -73,6 +97,16 @@ async function finalizeDecision() {
         <p class="muted">提交后版本只读；再次提交会创建新的 Gate 版本。</p>
         <p v-if="message" class="inline-message" role="status">{{ message }}</p>
 
+        <section class="decision-guidance" aria-labelledby="decision-guidance-title">
+            <div class="decision-guidance-heading"><div><p class="eyebrow">需要你做什么</p><h3 id="decision-guidance-title">本次决策：确认 AI 草案，或给出最终放行结论</h3></div></div>
+            <p>AI 只负责产出「Gate 草案」，不会自行放行；正式结论必须由你从下方五个选项中选一个提交，这是本次评审的最终关口。</p>
+            <p v-if="judgeSummaries.length"><strong>AI 已裁决 {{ judgeSummaries.length }} 个议题</strong><template v-if="judgeTallyText">：{{ judgeTallyText }}</template>。</p>
+            <p v-else class="muted"><strong>议题裁决：</strong>尚未就绪，Judge 尚未给出公开裁决。</p>
+            <p v-if="gateDraft"><strong>AI 草案结论：</strong>「{{ gateComparison.draftLabel }}」<template v-if="draftTriggerReason">；触发原因：{{ draftTriggerReason }}</template>。</p>
+            <p v-else class="muted"><strong>AI 草案：</strong>尚未就绪，暂无草案可参考。</p>
+            <p class="guidance-action">请基于上述依据，在下方选择本次评审的最终放行结论。</p>
+        </section>
+
         <section class="decision-basis" aria-labelledby="decision-basis-title">
             <div class="decision-basis-heading">
                 <div><p class="eyebrow">决策依据</p><h3 id="decision-basis-title">Judge → AI Gate 草案 → 人工最终 Gate</h3></div>
@@ -93,7 +127,13 @@ async function finalizeDecision() {
 
             <article class="decision-stage">
                 <header><span class="decision-step">2</span><div><small>确定性 AI Gate 草案</small><strong>{{ gateComparison.draftLabel }}</strong></div></header>
-                <p v-if="gateDraft">{{ gateComparison.draftReason }}</p>
+                <div v-if="gateDraft" class="draft-reason">
+                    <p>{{ draftHumanizedReason || gateComparison.draftReason }}</p>
+                    <details v-if="draftHumanizedReason && draftHumanizedReason !== gateComparison.draftReason" class="draft-reason-original">
+                        <summary>查看机器原文</summary>
+                        <code>{{ gateComparison.draftReason }}</code>
+                    </details>
+                </div>
                 <p v-else class="muted">尚未形成 AI Gate 草案，或正在从公开事件恢复草案事实。</p>
             </article>
 
@@ -112,7 +152,10 @@ async function finalizeDecision() {
             <h3>最终 Gate</h3>
             <p class="muted">当前评审版本：{{ reviewVersion ?? '加载中' }}。最终决定会触发报告与通知状态更新。</p>
             <form class="review-form compact" @submit.prevent="finalizeDecision">
-                <label>结论<select v-model="decision.result" required><option value="" disabled>请选择</option><option value="PASS">通过</option><option value="CONDITIONAL">有条件通过</option><option value="BLOCK">驳回</option><option value="RETURN">退回修改</option><option value="OVERRIDE">人工覆盖</option></select></label>
+                <label>结论<select v-model="decision.result" required><option value="" disabled>请选择</option><option value="PASS">通过</option><option value="CONDITIONAL">有条件通过</option><option value="BLOCK">驳回</option><option value="RETURN">退回修改</option><option value="OVERRIDE">人工覆盖</option></select>
+                    <ul v-if="GATE_CONCLUSION_HINTS.length" class="gate-option-hints" aria-label="五个结论的含义">
+                        <li v-for="hint in GATE_CONCLUSION_HINTS" :key="hint.result"><strong>{{ hint.label }}</strong>：{{ hint.description }}</li>
+                    </ul></label>
                 <label class="full">理由<textarea v-model="decision.reason" required></textarea></label>
                 <label v-if="decision.result === 'CONDITIONAL'" class="full">条件（逗号或换行分隔）<textarea v-model="decision.conditionsText" required></textarea></label>
                 <label v-if="decision.result === 'OVERRIDE'" class="full">Override 理由<textarea v-model="decision.overrideReason" required></textarea></label>
@@ -124,6 +167,17 @@ async function finalizeDecision() {
 </template>
 
 <style scoped>
+.decision-guidance { margin: 14px 0 18px; padding: 14px 16px; border: 1px solid #e7e5e4; border-left: 3px solid #a8a29e; border-radius: 10px; background: #f5f5f4; }
+.decision-guidance-heading h3 { margin: 2px 0 10px; font-size: 15px; }
+.decision-guidance p { margin: 6px 0 0; color: #44403c; font-size: 13px; line-height: 1.65; }
+.decision-guidance .muted { color: #78716c; font-size: 13px; }
+.decision-guidance .guidance-action { margin-top: 10px; padding-top: 9px; border-top: 1px dashed #d6d3d1; color: #292524; font-weight: 700; }
+.draft-reason p { margin: 10px 0 0; line-height: 1.65; }
+.draft-reason-original { margin-top: 8px; }
+.draft-reason-original summary { cursor: pointer; color: #78716c; font-size: 12px; }
+.draft-reason-original code { display: block; margin-top: 6px; padding: 8px 10px; border: 1px solid #e7e5e4; border-radius: 7px; color: #57534e; background: #fafaf9; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gate-option-hints { display: grid; gap: 4px; margin: 4px 0 0; padding: 0; list-style: none; color: #78716c; font-size: 12px; line-height: 1.55; }
+.gate-option-hints strong { color: #57534e; }
 .decision-basis { display: grid; gap: 12px; margin: 18px 0; padding: 16px; border: 1px solid #d6d3d1; border-radius: 12px; background: #fafaf9; }
 .decision-basis-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .decision-basis-heading h3 { margin: 2px 0 0; font-size: 16px; }
