@@ -649,7 +649,12 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-content > .flow-stream-live .live-agent-scroll { flex: 1 1 auto; max-height: none; min-height: 0; }
 /* [AIREVIEW-PLAN-043#1] 冲突检测 / 多轮辩论 / 裁决者裁决：议题区改为定高内滚（flex 拉伸 + 内部滚动），滚动条观感沿用页面既有体系。 */
 .flow-content > .flow-conflict-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.flow-content > .flow-debate-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* [AIREVIEW-PLAN-043#4] 辩论页两块独立定高内滚：对抗看板（法庭+中立方）与对话流上下分栏，
+   各自 flex 填充 + 内部滚动；块间距由容器 gap 承担，子块原有外边距归零。 */
+.flow-content > .flow-debate-split { display: flex; flex: 1 1 auto; flex-direction: column; gap: .8rem; min-height: 0; }
+.flow-debate-board { display: grid; flex: 1 1 auto; gap: .8rem; min-height: 0; overflow-y: auto; }
+.flow-debate-board > .flow-neutral-claims { margin-top: 0; }
+.flow-debate-split > .flow-debate-dialogue { flex: 1 1 auto; min-height: 0; margin-top: 0; overflow-y: auto; }
 .flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* [AIREVIEW-PLAN-043#3] 上下文侦察：收集结论卡同样定高内滚，运行流面板与结论卡分享剩余高度。 */
 .flow-content > .scout-conclusion-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
