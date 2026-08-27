@@ -77,6 +77,32 @@ class ReviewDispatchServiceTests {
     }
 
     @Test
+    void replayingTheSameDispatchIntentWithADifferentKeyReturnsThePendingCommandAndRefreshesExpiry() {
+        Fixture fixture = openChallengeFixture();
+        IdempotencyKey firstKey = key("director-call-intent-1");
+        IdempotencyKey secondKey = key("director-call-intent-2");
+
+        ReviewDispatchService.DispatchIssueResult first =
+                service.issue(fixture.review(), challengeProposal(fixture, firstKey));
+        ReviewDispatchService.DispatchProposal restated = challengeProposal(fixture, secondKey);
+        ReviewDispatchService.DispatchIssueResult duplicate =
+                service.issue(fixture.review(), restated);
+
+        assertThat(first.replayed()).isFalse();
+        assertThat(duplicate.replayed()).isTrue();
+        assertThat(duplicate.command().commandId()).isEqualTo(first.command().commandId());
+        // [AIREVIEW-PLAN-033#5] A re-dispatch restates live Director intent: the pending command's
+        // expiry is refreshed to the restated proposal's expiry instead of silently counting down.
+        assertThat(duplicate.command().expiresAt()).isEqualTo(restated.expiresAt());
+        assertThat(dispatchStore.findByReview(fixture.review().id(), fixture.review().attemptNo()))
+                .singleElement()
+                .satisfies(stored -> {
+                    assertThat(stored.commandId()).isEqualTo(first.command().commandId());
+                    assertThat(stored.expiresAt()).isEqualTo(restated.expiresAt());
+                });
+    }
+
+    @Test
     void rejectsDispatchTargetingDirectorOrUnactivatedRoles() {
         Fixture fixture = openChallengeFixture();
 
@@ -141,7 +167,7 @@ class ReviewDispatchServiceTests {
                 .satisfies(exception -> {
                     assertThat(((ReviewDomainException) exception).errorCode())
                             .isEqualTo(ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
-                    assertThat(exception.getMessage()).contains("applicable actions: CHALLENGE, POSITION_CHANGE, EVIDENCE_REQUEST");
+                    assertThat(exception.getMessage()).contains("applicable actions: CHALLENGE, DEFENSE, POSITION_CHANGE, EVIDENCE_REQUEST");
                 });
     }
 
@@ -298,8 +324,13 @@ class ReviewDispatchServiceTests {
         Fixture fixture = openChallengeFixture();
         ReviewDispatchCommand pending = service.issue(fixture.review(),
                 challengeProposal(fixture, key("pending-one"))).command();
+        // A different recipient so the content-level dedup keeps two distinct envelopes; both stay
+        // addressed to activated roles on the same topic.
         ReviewDispatchCommand consumed = service.issue(fixture.review(),
-                challengeProposal(fixture, key("consumed-one"))).command();
+                new ReviewDispatchService.DispatchProposal(
+                        metadata(fixture.review()), RoleType.BACKEND, DispatchedAction.CHALLENGE, 1,
+                        fixture.topic().id(), fixture.claim().claimId(), null,
+                        later(), RoleType.DIRECTOR, "DIRECTOR")).command();
         service.consume(fixture.review(), consumed);
 
         service.rejectAllPending(fixture.review(), "JUDGING_STARTED");

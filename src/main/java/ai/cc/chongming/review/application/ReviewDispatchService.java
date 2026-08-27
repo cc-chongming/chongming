@@ -116,6 +116,15 @@ public class ReviewDispatchService {
             if (existing != null) {
                 return new DispatchIssueResult(existing, true);
             }
+            ReviewDispatchCommand deduplicated = findPendingDuplicate(review, proposal);
+            if (deduplicated != null) {
+                // [AIREVIEW-PLAN-033#5] A re-dispatch restates live Director intent: refresh the
+                // pending command's expiry so a still-wanted envelope does not silently time out
+                // while queued. Once the Director stops re-dispatching, the command expires normally.
+                ReviewDispatchCommand refreshed = deduplicated.withExpiresAt(proposal.expiresAt());
+                dispatchStore.updateExpiry(refreshed);
+                return new DispatchIssueResult(refreshed, true);
+            }
             validateProposal(review, proposal);
             ReviewDispatchCommand command = new ReviewDispatchCommand(
                     new CommandId(UUID.randomUUID()),
@@ -270,6 +279,10 @@ public class ReviewDispatchService {
         text.append("You may perform exactly this one write action by passing this commandId to the matching tool. ");
         text.append("Read tools may list public context, but no write action outside this envelope is authorized. ");
         text.append("First call list_persisted_debate_topics if you need the persisted topic facts.");
+        if (command.allowedAction() == DispatchedAction.DEFENSE) {
+            text.append(" 该命令授权你作为需求答辩人提交 SUPPORT 主张：调用 submit_claim 并传入此 commandId，"
+                    + "subjectKey 必须与该议题一致，否则服务端拒绝。");
+        }
         return text.toString();
     }
 
@@ -349,7 +362,48 @@ public class ReviewDispatchService {
                 }
                 requireClaimInTopic(review.id(), topic, proposal.targetClaimId());
             }
+            case DEFENSE -> {
+                // The requirement defender submits a SUPPORT claim on the topic's subjectKey; the
+                // command targets the topic itself, never a claim or turn.
+                if (proposal.targetClaimId() != null || proposal.targetTurnId() != null) {
+                    throw new ReviewDomainException(ReviewErrorCode.TARGET_CLAIM_REQUIRED,
+                            "a defense dispatch targets the topic only, not a claim or turn");
+                }
+                if (topic.status() != DebateTopicStatus.OPEN) {
+                    throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                            "defense is not applicable while topic " + topic.id().value() + " is "
+                                    + topic.status() + "; applicable actions: "
+                                    + applicableActions(topic));
+                }
+            }
         }
+    }
+
+    /**
+     * [内容级幂等] Returns an already-issued PENDING, unexpired command of this review attempt
+     * whose (topicId, allowedAction, recipientRole, targetClaimId) four-tuple matches the
+     * proposal, so the Director replaying the same dispatch intent never stacks duplicate
+     * envelopes.
+     */
+    private ReviewDispatchCommand findPendingDuplicate(Review review, DispatchProposal proposal) {
+        for (ReviewDispatchCommand pending : dispatchStore.findPending(review.id(), review.attemptNo())) {
+            if (pending.isExpiredAt(Instant.now())) {
+                continue;
+            }
+            if (Objects.equals(pending.topicId(), proposal.topicId())
+                    && pending.allowedAction() == proposal.allowedAction()
+                    && pending.recipientRole() == proposal.recipientRole()
+                    && Objects.equals(pending.targetClaimId(), proposal.targetClaimId())) {
+                LOGGER.info("DISPATCH_COMMAND_DEDUPED reviewId={} attemptNo={} commandId={} "
+                                + "topicId={} allowedAction={} recipientRole={} targetClaimId={}",
+                        review.id().value(), review.attemptNo(), pending.commandId().value(),
+                        pending.topicId() == null ? "-" : pending.topicId().value(),
+                        pending.allowedAction(), pending.recipientRole(),
+                        pending.targetClaimId() == null ? "-" : pending.targetClaimId().value());
+                return pending;
+            }
+        }
+        return null;
     }
 
     private Claim requireClaimInTopic(ReviewId reviewId, DebateTopic topic, ClaimId claimId) {
@@ -391,7 +445,7 @@ public class ReviewDispatchService {
 
     private static String applicableActions(DebateTopic topic) {
         return switch (topic.status()) {
-            case OPEN -> "CHALLENGE, POSITION_CHANGE, EVIDENCE_REQUEST";
+            case OPEN -> "CHALLENGE, DEFENSE, POSITION_CHANGE, EVIDENCE_REQUEST";
             case CHALLENGED -> "REBUTTAL, POSITION_CHANGE, EVIDENCE_REQUEST";
             case REBUTTED -> "CHALLENGE, POSITION_CHANGE, EVIDENCE_REQUEST";
             default -> "none";

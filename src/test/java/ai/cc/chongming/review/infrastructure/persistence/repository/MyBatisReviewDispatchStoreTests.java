@@ -63,6 +63,26 @@ class MyBatisReviewDispatchStoreTests {
     }
 
     @Test
+    void roundTripsDefenseDispatchAction() {
+        MyBatisReviewDispatchStore store = newStore();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        TopicId topicId = new TopicId(UUID.randomUUID());
+        ReviewDispatchCommand command = new ReviewDispatchCommand(
+                new CommandId(UUID.randomUUID()), reviewId, 1, ReviewStage.DEBATE_ROUND_1, 1,
+                RoleType.PRODUCT, DispatchedAction.DEFENSE, topicId, null, null,
+                NOW.plusSeconds(600), DispatchCommandStatus.PENDING,
+                new IdempotencyKey("dispatch:defense:t-1"), NOW);
+
+        store.save(command);
+
+        ReviewDispatchCommand reloaded = store.findById(reviewId, command.commandId()).orElseThrow();
+        assertThat(reloaded.allowedAction()).isEqualTo(DispatchedAction.DEFENSE);
+        assertThat(reloaded.topicId()).isEqualTo(topicId);
+        assertThat(reloaded.targetClaimId()).isNull();
+        assertThat(reloaded.targetTurnId()).isNull();
+    }
+
+    @Test
     void repeatedIssuanceWithTheSameIdempotencyKeyKeepsTheFirstCommand() {
         MyBatisReviewDispatchStore store = newStore();
         ReviewId reviewId = new ReviewId(UUID.randomUUID());
@@ -153,6 +173,29 @@ class MyBatisReviewDispatchStoreTests {
                 .isEqualTo("dispatch:attempt-2");
     }
 
+    @Test
+    void updateExpiryRefreshesStoredExpiryAndRejectsUnknownOrNonPendingCommands() {
+        MyBatisReviewDispatchStore store = newStore();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ReviewDispatchCommand command = command(reviewId, 1, RoleType.PRODUCT, DispatchedAction.DEFENSE,
+                null, "dispatch:defense:expiry", NOW);
+        store.save(command);
+
+        store.updateExpiry(command.withExpiresAt(NOW.plusSeconds(1800)));
+
+        assertThat(store.findById(reviewId, command.commandId()).orElseThrow().expiresAt())
+                .isEqualTo(NOW.plusSeconds(1800));
+        ReviewDispatchCommand unknown = command(reviewId, 1, RoleType.FRONTEND, DispatchedAction.REBUTTAL,
+                null, "dispatch:unknown-expiry", NOW);
+        assertThatThrownBy(() -> store.updateExpiry(unknown.withExpiresAt(NOW.plusSeconds(1800))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("does not exist");
+        ReviewDispatchCommand consumed = command.withStatus(DispatchCommandStatus.CONSUMED);
+        assertThatThrownBy(() -> store.updateExpiry(consumed))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only PENDING");
+    }
+
     private MyBatisReviewDispatchStore newStore() {
         return new MyBatisReviewDispatchStore(new FakeDispatchPersistenceMapper());
     }
@@ -196,6 +239,23 @@ class MyBatisReviewDispatchStoreTests {
                     existing.attemptNo(), existing.stage(), existing.round(), existing.recipientRole(),
                     existing.allowedAction(), existing.topicId(), existing.targetClaimId(),
                     existing.targetTurnId(), existing.expiresAt(), row.status(),
+                    existing.idempotencyKey(), existing.createdAt());
+            rowsById.put(row.commandId(), updated);
+            rowsByIdempotencyKey.put(existing.idempotencyKey(), updated);
+            return 1;
+        }
+
+        @Override
+        public int updateExpiry(DispatchCommandRow row) {
+            DispatchCommandRow existing = rowsById.get(row.commandId());
+            if (existing == null || !existing.reviewId().equals(row.reviewId())
+                    || !"PENDING".equals(existing.status())) {
+                return 0;
+            }
+            DispatchCommandRow updated = new DispatchCommandRow(existing.commandId(), existing.reviewId(),
+                    existing.attemptNo(), existing.stage(), existing.round(), existing.recipientRole(),
+                    existing.allowedAction(), existing.topicId(), existing.targetClaimId(),
+                    existing.targetTurnId(), row.expiresAt(), existing.status(),
                     existing.idempotencyKey(), existing.createdAt());
             rowsById.put(row.commandId(), updated);
             rowsByIdempotencyKey.put(existing.idempotencyKey(), updated);

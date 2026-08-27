@@ -422,12 +422,13 @@ public class ReviewDebateToolFactory {
         private DispatchDebateActionTool(ReviewRuntimeContext context) { super(context, RoleType.DIRECTOR); }
         @Override public String getName() { return "dispatch_debate_action"; }
         @Override public String getDescription() { return "Issue one directed dispatch command authorizing exactly one write action "
-                + "(CHALLENGE, REBUTTAL, POSITION_CHANGE or EVIDENCE_REQUEST) for one recipient role on one topic. "
+                + "(CHALLENGE, REBUTTAL, POSITION_CHANGE, EVIDENCE_REQUEST or DEFENSE) for one recipient role on one topic. "
+                + "DEFENSE authorizes the requirement defender to submit a SUPPORT claim on the topic's subjectKey. "
                 + "The server validates the recipient, targets, topic status and round, then delivers the envelope only to the recipient; "
                 + "never instruct roles with free text instead."; }
         @Override public Map<String, Object> getParameters() { return objectSchema(Map.of(
                 "recipientRole", enumSchema(RoleType.PRODUCT.name(), RoleType.PROJECT.name(), RoleType.FRONTEND.name(), RoleType.BACKEND.name()),
-                "allowedAction", enumSchema("CHALLENGE", "REBUTTAL", "POSITION_CHANGE", "EVIDENCE_REQUEST"),
+                "allowedAction", enumSchema("CHALLENGE", "REBUTTAL", "POSITION_CHANGE", "EVIDENCE_REQUEST", "DEFENSE"),
                 "topicId", stringSchema("Debate topic UUID"),
                 "targetClaimId", stringSchema("Target Claim UUID; required for CHALLENGE, POSITION_CHANGE and EVIDENCE_REQUEST"),
                 "targetTurnId", stringSchema("Target Turn UUID; required for REBUTTAL"),

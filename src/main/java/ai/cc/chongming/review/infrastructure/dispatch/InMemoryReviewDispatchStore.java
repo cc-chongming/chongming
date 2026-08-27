@@ -70,6 +70,19 @@ public class InMemoryReviewDispatchStore implements ReviewDispatchStore {
     }
 
     @Override
+    public synchronized void updateExpiry(ReviewDispatchCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        if (command.status() != DispatchCommandStatus.PENDING) {
+            throw new IllegalArgumentException("only PENDING dispatch commands may have their expiry refreshed");
+        }
+        Map<CommandId, ReviewDispatchCommand> stored = commandsByReview.get(command.reviewId());
+        if (stored == null || !stored.containsKey(command.commandId())) {
+            throw new IllegalStateException("dispatch command does not exist: " + command.commandId().value());
+        }
+        stored.put(command.commandId(), command);
+    }
+
+    @Override
     public Optional<ReviewDispatchCommand> findById(ReviewId reviewId, CommandId commandId) {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
         Objects.requireNonNull(commandId, "commandId must not be null");

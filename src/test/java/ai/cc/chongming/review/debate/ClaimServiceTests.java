@@ -2,11 +2,19 @@ package ai.cc.chongming.review.debate;
 
 import ai.cc.chongming.review.application.ClaimService;
 import ai.cc.chongming.review.application.EvidenceLedgerService;
+import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchCommandStatus;
 import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
 import ai.cc.chongming.review.domain.protocol.ReviewStateMachine;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
+import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStore;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -16,7 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Verifies evidence ownership, high-severity normalization and idempotent Claim submission.
+ * Verifies evidence ownership, high-severity normalization and idempotent Claim submission, plus
+ * the debate-round DEFENSE dispatch gate (command required, subjectKey matched, command consumed).
  *
  * @author wangli
  */
@@ -60,6 +69,94 @@ class ClaimServiceTests {
                 .isEqualTo(ai.cc.chongming.review.domain.exception.ReviewErrorCode.INVALID_EVIDENCE);
     }
 
+    @Test
+    void initialReviewStillAcceptsClaimWithoutADispatchCommand() {
+        ClaimService service = service();
+        Review review = initialReview();
+        ClaimService.ClaimSubmission submission = submission(
+                review, new IdempotencyKey("claim-product-003"), ClaimPosition.SUPPORT, "authentication");
+
+        ClaimService.ClaimSubmissionResult accepted = service.submit(review, submission);
+
+        assertThat(accepted.replayed()).isFalse();
+        assertThat(accepted.claim().position()).isEqualTo(ClaimPosition.SUPPORT);
+        assertThat(accepted.claim().subjectKey()).isEqualTo("authentication");
+    }
+
+    // --- debate-round DEFENSE gate -------------------------------------------
+
+    @Test
+    void submitsSupportClaimInDebateRoundWithValidDefenseDispatchAndConsumesTheCommand() {
+        ReviewDispatchService dispatchService =
+                new ReviewDispatchService(defenseDispatchStore, defenseDebateStore, ignored -> { });
+        ClaimService service = new ClaimService(
+                new EvidenceLedgerService(), defenseDebateStore, new ReviewProtocolGuard(),
+                ai.cc.chongming.review.application.ReviewEventPublisher.noop(), dispatchService);
+        Review review = debateRoundOne();
+        TopicId topicId = defenseTopic(review.id());
+        ReviewDispatchCommand command = issueDefense(review, topicId, "defense-valid");
+
+        ClaimService.ClaimSubmissionResult result = service.submit(review, defenseSubmission(
+                review, new IdempotencyKey("defense-claim-001"), ClaimPosition.SUPPORT,
+                "authentication", command.commandId()));
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.claim().position()).isEqualTo(ClaimPosition.SUPPORT);
+        assertThat(result.claim().subjectKey()).isEqualTo("authentication");
+        assertThat(defenseDispatchStore.findById(review.id(), command.commandId()))
+                .get()
+                .extracting(ReviewDispatchCommand::status)
+                .isEqualTo(DispatchCommandStatus.CONSUMED);
+    }
+
+    @Test
+    void rejectsDebateRoundClaimWithoutADispatchCommand() {
+        ReviewDispatchService dispatchService =
+                new ReviewDispatchService(defenseDispatchStore, defenseDebateStore, ignored -> { });
+        ClaimService service = new ClaimService(
+                new EvidenceLedgerService(), defenseDebateStore, new ReviewProtocolGuard(),
+                ai.cc.chongming.review.application.ReviewEventPublisher.noop(), dispatchService);
+        Review review = debateRoundOne();
+        defenseTopic(review.id());
+
+        assertThatThrownBy(() -> service.submit(review, defenseSubmission(
+                review, new IdempotencyKey("defense-claim-missing"), ClaimPosition.SUPPORT,
+                "authentication", null)))
+                .isInstanceOf(ReviewDomainException.class)
+                .extracting(exception -> ((ReviewDomainException) exception).errorCode())
+                .isEqualTo(ai.cc.chongming.review.domain.exception.ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
+        assertThat(defenseDispatchStore.findPending(review.id(), review.attemptNo())).isEmpty();
+    }
+
+    @Test
+    void rejectsDefenseClaimWhoseSubjectKeyDoesNotMatchTheDispatchTopic() {
+        ReviewDispatchService dispatchService =
+                new ReviewDispatchService(defenseDispatchStore, defenseDebateStore, ignored -> { });
+        ClaimService service = new ClaimService(
+                new EvidenceLedgerService(), defenseDebateStore, new ReviewProtocolGuard(),
+                ai.cc.chongming.review.application.ReviewEventPublisher.noop(), dispatchService);
+        Review review = debateRoundOne();
+        TopicId topicId = defenseTopic(review.id());
+        ReviewDispatchCommand command = issueDefense(review, topicId, "defense-mismatch");
+
+        assertThatThrownBy(() -> service.submit(review, defenseSubmission(
+                review, new IdempotencyKey("defense-claim-mismatch"), ClaimPosition.SUPPORT,
+                "another.subject", command.commandId())))
+                .isInstanceOf(ReviewDomainException.class)
+                .extracting(exception -> ((ReviewDomainException) exception).errorCode())
+                .isEqualTo(ai.cc.chongming.review.domain.exception.ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
+        // The rejected attempt must not consume the envelope.
+        assertThat(defenseDispatchStore.findById(review.id(), command.commandId()))
+                .get()
+                .extracting(ReviewDispatchCommand::status)
+                .isEqualTo(DispatchCommandStatus.PENDING);
+    }
+
+    // --- helpers ---------------------------------------------------------------
+
+    private final InMemoryReviewDispatchStore defenseDispatchStore = new InMemoryReviewDispatchStore();
+    private final InMemoryReviewDebateStore defenseDebateStore = new InMemoryReviewDebateStore();
+
     private ClaimService service() {
         return new ClaimService(new EvidenceLedgerService(), new InMemoryReviewDebateStore(), new ReviewProtocolGuard());
     }
@@ -74,15 +171,65 @@ class ClaimServiceTests {
         return review;
     }
 
+    private Review debateRoundOne() {
+        ReviewStateMachine stateMachine = new ReviewStateMachine();
+        Review review = initialReview();
+        review.transitionTo(stateMachine, ReviewStage.CONFLICT_DETECTION);
+        review.transitionTo(stateMachine, ReviewStage.DEBATE_ROUND_1);
+        return review;
+    }
+
+    private TopicId defenseTopic(ReviewId reviewId) {
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), reviewId,
+                "authentication", List.of());
+        defenseDebateStore.saveTopic(topic);
+        return topic.id();
+    }
+
+    private ReviewDispatchCommand issueDefense(Review review, TopicId topicId, String key) {
+        ReviewDispatchService.DispatchIssueResult issued = new ReviewDispatchService(
+                defenseDispatchStore, defenseDebateStore, ignored -> { })
+                .issue(review, new ReviewDispatchService.DispatchProposal(
+                        new ReviewCommandMetadata(review.id(), review.version(), new IdempotencyKey(key)),
+                        RoleType.PRODUCT, DispatchedAction.DEFENSE, 1, topicId, null, null,
+                        Instant.now().plusSeconds(600), RoleType.DIRECTOR, "DIRECTOR"));
+        return issued.command();
+    }
+
     private ClaimService.ClaimSubmission submission(Review review, IdempotencyKey key, List<EvidenceId> evidenceIds) {
+        return submission(review, key, ClaimPosition.OPPOSE, "authentication", evidenceIds, null);
+    }
+
+    private ClaimService.ClaimSubmission submission(
+            Review review, IdempotencyKey key, ClaimPosition position, String subjectKey) {
+        return submission(review, key, position, subjectKey, List.of(), null);
+    }
+
+    private ClaimService.ClaimSubmission defenseSubmission(
+            Review review, IdempotencyKey key, ClaimPosition position, String subjectKey, CommandId commandId) {
+        return submission(review, key, position, subjectKey, List.of(), commandId);
+    }
+
+    private ClaimService.ClaimSubmission submission(
+            Review review,
+            IdempotencyKey key,
+            ClaimPosition position,
+            String subjectKey,
+            List<EvidenceId> evidenceIds,
+            CommandId commandId) {
         return new ClaimService.ClaimSubmission(
                 new ReviewCommandMetadata(review.id(), review.version(), key),
                 RoleType.PRODUCT,
-                "authentication",
+                subjectKey,
                 ClaimSeverity.P0,
-                ClaimPosition.OPPOSE,
-                "Authentication flow lacks an explicit token refresh policy.",
-                "The requirement does not define refresh behavior.",
-                evidenceIds);
+                position,
+                position == ClaimPosition.SUPPORT
+                        ? "Authentication flow is covered by an explicit refresh policy."
+                        : "Authentication flow lacks an explicit token refresh policy.",
+                position == ClaimPosition.SUPPORT
+                        ? "The requirement defines refresh behavior."
+                        : "The requirement does not define refresh behavior.",
+                evidenceIds,
+                commandId);
     }
 }

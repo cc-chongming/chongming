@@ -93,3 +93,4 @@ Director 兜底开题后议题没有支持方（防守方为 0），辩论无法
 ## 变更记录
 
 - 2026-08-26：实施完成（提交 b2b805f）；按 .codex/rules/plan-driven-development.md 补齐规定结构（头部元信息、文件清单、实施顺序、风险与变更记录）。
+- 2026-08-27：**方向修正 + 机制落地**（用户指出原实现方向反了：变成"产品经理质询各位"）。修正后拓扑：① Director 派 DEFENSE 给 PRODUCT 立防守位（以 SUPPORT 主张落库）→ ② 各反对者 CHALLENGE 该 SUPPORT 主张（质询需求立场，信服者可 change_claim_position 收回）→ ③ 服务端自动向答辩人派发反驳信封。落地内容：DispatchedAction 新增 DEFENSE（枚举/校验/工具 schema/信封措辞/口语化词汇表全覆盖）；ClaimService 放开辩论阶段主张闸门（须携带有效 DEFENSE 命令 commandId，subjectKey 强制对齐议题，落库后消费命令）；派发幂等去重（四元组命中既有 PENDING 未过期命令即返回既有 commandId，DISPATCH_COMMAND_DEDUPED 日志）；去重命中时刷新命令过期时间（重派=意图存活，防止仍被需要的命令静默过期；协调者停派则照常回收）。Director 提示词与 product voice 同步修正。新增测试 9 个，全量 736 绿。

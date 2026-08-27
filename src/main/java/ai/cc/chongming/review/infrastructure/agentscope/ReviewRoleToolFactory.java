@@ -3,9 +3,13 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 import ai.cc.chongming.review.application.AssessmentService;
 import ai.cc.chongming.review.application.ClaimService;
 import ai.cc.chongming.review.application.InitialReviewProgressService;
+import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import io.agentscope.core.message.ToolResultBlock;
@@ -36,6 +40,7 @@ public class ReviewRoleToolFactory {
     private final InitialReviewProgressService progressService;
     private final AssessmentService assessmentService;
     private final ReviewDebateStore debateStore;
+    private final ReviewDispatchService dispatchService;
 
     public ReviewRoleToolFactory(
             ReviewRegistry reviewRegistry,
@@ -43,11 +48,23 @@ public class ReviewRoleToolFactory {
             InitialReviewProgressService progressService,
             AssessmentService assessmentService,
             ReviewDebateStore debateStore) {
+        this(reviewRegistry, claimService, progressService, assessmentService, debateStore, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewRoleToolFactory(
+            ReviewRegistry reviewRegistry,
+            ClaimService claimService,
+            InitialReviewProgressService progressService,
+            AssessmentService assessmentService,
+            ReviewDebateStore debateStore,
+            ReviewDispatchService dispatchService) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.claimService = Objects.requireNonNull(claimService, "claimService must not be null");
         this.progressService = Objects.requireNonNull(progressService, "progressService must not be null");
         this.assessmentService = Objects.requireNonNull(assessmentService, "assessmentService must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
+        this.dispatchService = dispatchService;
     }
 
     public List<AgentTool> initialReviewTools(ReviewRuntimeContext context, RoleType roleType) {
@@ -148,15 +165,21 @@ public class ReviewRoleToolFactory {
 
         @Override
         public Map<String, Object> getParameters() {
+            java.util.LinkedHashMap<String, Object> properties = new java.util.LinkedHashMap<>();
+            properties.put("subjectKey", stringSchema("Stable public subject key"));
+            properties.put("severity", enumSchema("P0", "P1", "P2", "P3"));
+            properties.put("position", enumSchema("SUPPORT", "OPPOSE", "NEUTRAL"));
+            properties.put("statement", stringSchema("Public claim statement"));
+            properties.put("reasonSummary", stringSchema("Public evidence-based rationale"));
+            properties.put("evidenceIds", Map.of("type", "array", "items", Map.of("type", "string")));
+            if (dispatchService != null) {
+                properties.put("commandId", stringSchema(
+                        "Dispatch command UUID authorizing this claim submission; required during debate rounds "
+                                + "when the command is a DEFENSE envelope addressed to this role"));
+            }
             return Map.of(
                     "type", "object",
-                    "properties", Map.of(
-                            "subjectKey", stringSchema("Stable public subject key"),
-                            "severity", enumSchema("P0", "P1", "P2", "P3"),
-                            "position", enumSchema("SUPPORT", "OPPOSE", "NEUTRAL"),
-                            "statement", stringSchema("Public claim statement"),
-                            "reasonSummary", stringSchema("Public evidence-based rationale"),
-                            "evidenceIds", Map.of("type", "array", "items", Map.of("type", "string"))),
+                    "properties", Map.copyOf(properties),
                     "required", List.of("subjectKey", "severity", "position", "statement", "reasonSummary"),
                     "additionalProperties", false);
         }
@@ -172,15 +195,51 @@ public class ReviewRoleToolFactory {
                 Review review = requireReview(context);
                 synchronized (review) {
                     Map<String, Object> input = param.getInput();
+                    // [DEFENSE] During debate rounds the claim must reference a valid DEFENSE
+                    // dispatch command; the server re-validates it inside ClaimService (PENDING,
+                    // unexpired, recipient, action, round, subjectKey), so this resolution only
+                    // fails fast and yields the command to consume after the claim commits.
+                    ReviewDispatchCommand defenseCommand =
+                            resolveDefenseCommand(review, roleType, input);
                     ClaimService.ClaimSubmission submission = new ClaimService.ClaimSubmission(
                             metadata(review, roleType, param), roleType,
                             requiredText(input, "subjectKey"), ClaimSeverity.valueOf(requiredText(input, "severity")),
                             ClaimPosition.valueOf(requiredText(input, "position")), requiredText(input, "statement"),
-                            requiredText(input, "reasonSummary"), evidenceIds(input.get("evidenceIds")));
+                            requiredText(input, "reasonSummary"), evidenceIds(input.get("evidenceIds")),
+                            defenseCommand == null ? null : defenseCommand.commandId());
                     ClaimService.ClaimSubmissionResult result = claimService.submit(review, submission);
+                    consumeDefenseCommand(review, defenseCommand);
                     return ToolResultBlock.text("claimId=" + result.claim().claimId().value() + "; replayed=" + result.replayed());
                 }
-            }).onErrorResume(exception -> Mono.just(ToolResultBlock.error("claim submission rejected")));
+            }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
+                    "claim submission rejected: " + rejectionReason(exception))));
+        }
+    }
+
+    /**
+     * [DEFENSE] Resolves the DEFENSE dispatch command referenced by a debate-round
+     * {@code submit_claim}. Returns null when no dispatch service is wired (initial-review-only
+     * legacy path) or when the review is still in INITIAL_REVIEW and no commandId was supplied.
+     */
+    private ReviewDispatchCommand resolveDefenseCommand(
+            Review review, RoleType actorRole, Map<String, Object> input) {
+        if (dispatchService == null) {
+            return null;
+        }
+        Object value = input.get("commandId");
+        if (review.stage() == ReviewStage.INITIAL_REVIEW) {
+            return null;
+        }
+        if (value == null || value.toString().isBlank()) {
+            return null;
+        }
+        return dispatchService.resolveForWrite(
+                review, actorRole, new CommandId(UUID.fromString(value.toString())), DispatchedAction.DEFENSE);
+    }
+
+    private void consumeDefenseCommand(Review review, ReviewDispatchCommand command) {
+        if (dispatchService != null && command != null) {
+            dispatchService.consume(review, command);
         }
     }
 

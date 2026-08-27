@@ -30,6 +30,11 @@ public interface ReviewDispatchStore {
      */
     void update(ReviewDispatchCommand command);
 
+    /**
+     * Refreshes the expiry of an existing PENDING command; the command must already exist.
+     */
+    void updateExpiry(ReviewDispatchCommand command);
+
     Optional<ReviewDispatchCommand> findById(ReviewId reviewId, CommandId commandId);
 
     Optional<ReviewDispatchCommand> findByIdempotencyKey(ReviewId reviewId, IdempotencyKey idempotencyKey);

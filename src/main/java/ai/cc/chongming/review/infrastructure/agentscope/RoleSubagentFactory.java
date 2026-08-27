@@ -299,7 +299,7 @@ public class RoleSubagentFactory {
                 + "协议标识属于系统元信息，禁止出现在公开正文：claimId、subjectKey、commandId、topicId、checkpointKey、"
                 + "角色代号（PRODUCT/PROJECT/BACKEND 等）一律不使用；需要引用时改用中文描述（如“上一条主张”“某个验收项”）。"
                 + "协议动作必须口语化：OPPOSE→反对、SUPPORT→支持、CHALLENGE→质询、REBUTTAL→答辩、"
-                + "EVIDENCE_REQUEST→证据请求、Claim→主张、Assessment→评估、Judge→裁决、Gate→门禁。"
+                + "EVIDENCE_REQUEST→证据请求、DEFENSE→需求答辩、Claim→主张、Assessment→评估、Judge→裁决、Gate→门禁。"
                 + "每条结论须是他人可验证的陈述：指出对象、证据来源与影响，而不是复述流程。 ";
     }
 

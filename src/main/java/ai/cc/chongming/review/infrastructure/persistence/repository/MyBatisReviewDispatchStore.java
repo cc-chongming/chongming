@@ -75,6 +75,19 @@ public class MyBatisReviewDispatchStore implements ReviewDispatchStore {
     }
 
     @Override
+    @Transactional
+    public void updateExpiry(ReviewDispatchCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        if (command.status() != DispatchCommandStatus.PENDING) {
+            throw new IllegalArgumentException("only PENDING dispatch commands may have their expiry refreshed");
+        }
+        int updated = mapper.updateExpiry(toRow(command));
+        if (updated != 1) {
+            throw new IllegalStateException("pending dispatch command does not exist: " + command.commandId().value());
+        }
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Optional<ReviewDispatchCommand> findById(ReviewId reviewId, CommandId commandId) {
         Objects.requireNonNull(reviewId, "reviewId must not be null");

@@ -35,6 +35,7 @@ class RoleVoicePromptTests {
                 .contains("CHALLENGE→质询")
                 .contains("REBUTTAL→答辩")
                 .contains("EVIDENCE_REQUEST→证据请求")
+                .contains("DEFENSE→需求答辩")
                 .contains("Claim→主张")
                 .contains("Gate→门禁");
     }

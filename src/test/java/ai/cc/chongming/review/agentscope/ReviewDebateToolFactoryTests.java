@@ -47,6 +47,28 @@ class ReviewDebateToolFactoryTests {
                 .containsExactly("list_persisted_debate_topics", "submit_judgement", "draft_gate");
     }
 
+    /**
+     * [DEFENSE] The Director's dispatch tool must advertise the DEFENSE action in its schema and
+     * description so the model-facing gateway never rejects the action at parse time.
+     */
+    @Test
+    void dispatchDebateActionSchemaAllowsTheDefenseAction() {
+        ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
+                mock(ReviewRegistry.class), mock(DebateTools.class), mock(DebateService.class),
+                mock(ReviewDebateStore.class));
+        io.agentscope.core.tool.AgentTool dispatchTool = factory.directorTools(new ReviewRuntimeContext(
+                new ReviewId(UUID.randomUUID()), 1, "test-user", "test-trace", IntakeCancellation.neverCancelled()))
+                .stream()
+                .filter(tool -> tool.getName().equals("dispatch_debate_action"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(String.valueOf(dispatchTool.getParameters()))
+                .as("dispatch_debate_action allowedAction schema must include DEFENSE")
+                .contains("DEFENSE");
+        assertThat(dispatchTool.getDescription()).contains("DEFENSE");
+    }
+
     /** [AIREVIEW-PLAN-024#方案3] With the dispatch service wired, every role write tool demands a commandId. */
     @Test
     void roleWriteToolsRequireAnAuthorizingDispatchCommandIdWhenDispatchServiceIsWired() {

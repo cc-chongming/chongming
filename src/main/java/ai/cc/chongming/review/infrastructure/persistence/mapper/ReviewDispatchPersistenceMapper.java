@@ -36,6 +36,13 @@ public interface ReviewDispatchPersistenceMapper {
             """)
     int updateStatus(@Param("row") DispatchCommandRow row);
 
+    @Update("""
+            UPDATE review_dispatch_command
+            SET expires_at = #{row.expiresAt}
+            WHERE review_id = #{row.reviewId} AND command_id = #{row.commandId} AND status = 'PENDING'
+            """)
+    int updateExpiry(@Param("row") DispatchCommandRow row);
+
     @Select("""
             SELECT command_id AS commandId, review_id AS reviewId, attempt_no AS attemptNo, stage,
                    round_no AS round, recipient_role AS recipientRole, allowed_action AS allowedAction,

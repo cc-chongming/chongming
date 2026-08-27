@@ -74,6 +74,22 @@ public record ReviewDispatchCommand(
                 idempotencyKey, createdAt);
     }
 
+    /**
+     * Returns a copy of this command with a refreshed expiry. The source command must be PENDING.
+     * A re-dispatch restates live Director intent, so a still-wanted envelope must not silently
+     * time out while queued.
+     */
+    public ReviewDispatchCommand withExpiresAt(Instant newExpiresAt) {
+        Objects.requireNonNull(newExpiresAt, "newExpiresAt must not be null");
+        if (status != DispatchCommandStatus.PENDING) {
+            throw new IllegalStateException(
+                    "dispatch command " + commandId.value() + " is already " + status);
+        }
+        return new ReviewDispatchCommand(commandId, reviewId, attemptNo, stage, round, recipientRole,
+                allowedAction, topicId, targetClaimId, targetTurnId, newExpiresAt, status,
+                idempotencyKey, createdAt);
+    }
+
     public boolean isExpiredAt(Instant now) {
         return !expiresAt.isAfter(Objects.requireNonNull(now, "now must not be null"));
     }
@@ -98,7 +114,12 @@ public record ReviewDispatchCommand(
         CHALLENGE,
         REBUTTAL,
         POSITION_CHANGE,
-        EVIDENCE_REQUEST
+        EVIDENCE_REQUEST,
+        /**
+         * Authorizes the requirement defender (需求答辩人) to submit a SUPPORT claim on the
+         * topic's subjectKey via {@code submit_claim} during a debate round.
+         */
+        DEFENSE
     }
 
     /**

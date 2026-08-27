@@ -3,8 +3,12 @@ package ai.cc.chongming.review.application;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.exception.ReviewErrorCode;
 import ai.cc.chongming.review.domain.model.Claim;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.EvidenceBlock;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import java.util.LinkedHashSet;
@@ -29,12 +33,21 @@ public class ClaimService {
     private final ReviewDebateStore debateStore;
     private final ReviewProtocolGuard protocolGuard;
     private final ReviewEventPublisher eventPublisher;
+    private final ReviewDispatchService dispatchService;
 
     public ClaimService(
             EvidenceLedgerService evidenceLedgerService,
             ReviewDebateStore debateStore,
             ReviewProtocolGuard protocolGuard) {
-        this(evidenceLedgerService, debateStore, protocolGuard, ReviewEventPublisher.noop());
+        this(evidenceLedgerService, debateStore, protocolGuard, ReviewEventPublisher.noop(), null);
+    }
+
+    public ClaimService(
+            EvidenceLedgerService evidenceLedgerService,
+            ReviewDebateStore debateStore,
+            ReviewProtocolGuard protocolGuard,
+            ReviewEventPublisher eventPublisher) {
+        this(evidenceLedgerService, debateStore, protocolGuard, eventPublisher, null);
     }
 
     @Autowired
@@ -42,11 +55,13 @@ public class ClaimService {
             EvidenceLedgerService evidenceLedgerService,
             ReviewDebateStore debateStore,
             ReviewProtocolGuard protocolGuard,
-            ReviewEventPublisher eventPublisher) {
+            ReviewEventPublisher eventPublisher,
+            ReviewDispatchService dispatchService) {
         this.evidenceLedgerService = Objects.requireNonNull(evidenceLedgerService, "evidenceLedgerService must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.protocolGuard = Objects.requireNonNull(protocolGuard, "protocolGuard must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.dispatchService = dispatchService;
     }
 
     /**
@@ -68,7 +83,7 @@ public class ClaimService {
                     .orElseThrow(() -> new IllegalStateException("claim idempotency reference cannot be resolved"));
             return new ClaimSubmissionResult(existing, true);
         }
-        validateReviewAndRole(review, submission.actorRole());
+        ReviewDispatchCommand defenseCommand = validateReviewAndRole(review, submission.actorRole(), submission);
         requireExpectedVersion(review, submission.metadata());
         List<EvidenceReference> references = resolveEvidenceReferences(review.id(), submission.evidenceIds());
         Claim claim = protocolGuard.normalizeClaim(new Claim(
@@ -83,6 +98,7 @@ public class ClaimService {
                 references));
         debateStore.saveClaim(claim);
         review.recordCommand(submission.metadata(), claim.claimId().value().toString());
+        consumeDefenseCommand(review, defenseCommand);
         eventPublisher.publish(ReviewEventDrafts.completedCommand(
                 review,
                 ai.cc.chongming.review.domain.event.ReviewEventType.CLAIM_SUBMITTED,
@@ -122,16 +138,70 @@ public class ClaimService {
         }
     }
 
-    private void validateReviewAndRole(Review review, RoleType actorRole) {
-        if (review.stage() != ReviewStage.INITIAL_REVIEW) {
-            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
-                    "claims may be submitted only during initial review");
+    /**
+     * Gates claim submission by review stage. INITIAL_REVIEW keeps the legacy behaviour (no
+     * dispatch command needed). During a debate round the claim must carry a valid PENDING
+     * DEFENSE dispatch command addressed to the submitting role, and its subjectKey must match
+     * the subjectKey of the topic the command points at. Returns the validated command so the
+     * caller can consume it after the claim committed.
+     */
+    private ReviewDispatchCommand validateReviewAndRole(
+            Review review, RoleType actorRole, ClaimSubmission submission) {
+        requireActiveClaimRole(review, actorRole);
+        if (review.stage() == ReviewStage.INITIAL_REVIEW) {
+            return null;
         }
+        if (review.stage() == ReviewStage.DEBATE_ROUND_1 || review.stage() == ReviewStage.DEBATE_ROUND_2) {
+            return requireDefenseDispatch(review, actorRole, submission);
+        }
+        throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                "claims may be submitted only during initial review or an active debate round");
+    }
+
+    private void requireActiveClaimRole(Review review, RoleType actorRole) {
         boolean activeRole = review.roleActivations().stream()
                 .anyMatch(activation -> activation.roleType() == actorRole);
         if (!activeRole || actorRole == RoleType.DIRECTOR || actorRole == RoleType.JUDGE) {
             throw new ReviewDomainException(ReviewErrorCode.UNAUTHORIZED_ROLE,
                     "only an activated review role may submit a claim");
+        }
+    }
+
+    private ReviewDispatchCommand requireDefenseDispatch(
+            Review review, RoleType actorRole, ClaimSubmission submission) {
+        if (dispatchService == null) {
+            throw new IllegalStateException("DEFENSE claim submission requires a wired ReviewDispatchService");
+        }
+        if (submission.dispatchCommandId() == null) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "claims may be submitted during a debate round only with a valid DEFENSE dispatch command");
+        }
+        // Reuses the dispatch envelope validation: command exists, PENDING, unexpired, addressed
+        // to the submitting role, allows exactly DEFENSE and matches the current debate round.
+        ReviewDispatchCommand command = dispatchService.resolveForWrite(
+                review, actorRole, submission.dispatchCommandId(), DispatchedAction.DEFENSE);
+        requireDefenseSubjectKey(review, submission, command);
+        return command;
+    }
+
+    private void requireDefenseSubjectKey(
+            Review review, ClaimSubmission submission, ReviewDispatchCommand command) {
+        if (command.topicId() == null) {
+            throw new ReviewDomainException(ReviewErrorCode.TARGET_CLAIM_REQUIRED,
+                    "a DEFENSE dispatch command requires topicId");
+        }
+        DebateTopic topic = debateStore.findTopic(review.id(), command.topicId())
+                .orElseThrow(() -> new ReviewDomainException(ReviewErrorCode.REVIEW_ID_MISMATCH,
+                        "DEFENSE dispatch topic does not belong to this review"));
+        if (!topic.subjectKey().trim().equalsIgnoreCase(submission.subjectKey().trim())) {
+            throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "DEFENSE claim subjectKey must match the dispatch topic subjectKey");
+        }
+    }
+
+    private void consumeDefenseCommand(Review review, ReviewDispatchCommand command) {
+        if (command != null && dispatchService != null) {
+            dispatchService.consume(review, command);
         }
     }
 
@@ -173,7 +243,8 @@ public class ClaimService {
             ClaimPosition position,
             String statement,
             String reasonSummary,
-            List<EvidenceId> evidenceIds) {
+            List<EvidenceId> evidenceIds,
+            CommandId dispatchCommandId) {
 
         public ClaimSubmission {
             Objects.requireNonNull(metadata, "metadata must not be null");
@@ -184,6 +255,20 @@ public class ClaimService {
             requireText(statement, "statement");
             requireText(reasonSummary, "reasonSummary");
             evidenceIds = evidenceIds == null ? List.of() : List.copyOf(evidenceIds);
+        }
+
+        /** Initial-review submission without a dispatch command. */
+        public ClaimSubmission(
+                ReviewCommandMetadata metadata,
+                RoleType actorRole,
+                String subjectKey,
+                ClaimSeverity severity,
+                ClaimPosition position,
+                String statement,
+                String reasonSummary,
+                List<EvidenceId> evidenceIds) {
+            this(metadata, actorRole, subjectKey, severity, position, statement, reasonSummary,
+                    evidenceIds, null);
         }
     }
 
