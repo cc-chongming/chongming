@@ -290,9 +290,11 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
         role,
         label: roleTitle(role),
         initials: roleInitial(role),
+        // [AIREVIEW-PLAN-034#5] 有运行记录（含两次动作间短暂"已完成"）即视为进行中；
+        // "等待分配"仅在角色从未产生任何运行记录时兜底显示。
         badge: completed ? '✅ 初审完成' : running ? '⏳ 进行中'
-            : stance === 'oppose' ? '❌ 反对' : stance === 'support' ? '✅ 支持' : '等待分配',
-        tone: completed || stance === 'support' ? 'done' : running ? 'running' : stance === 'oppose' ? 'opposed' : 'pending',
+            : stance === 'oppose' ? '❌ 反对' : stance === 'support' ? '✅ 支持' : items.length > 0 ? '⏳ 进行中' : '等待分配',
+        tone: completed || stance === 'support' ? 'done' : running || items.length > 0 ? 'running' : stance === 'oppose' ? 'opposed' : 'pending',
         summary: claims.length
             ? claimOverview(claims)
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'
@@ -351,6 +353,9 @@ function phaseState(index) {
         // SNAPSHOTTING.
         return scoutComplete.value ? 'done' : 'running';
     }
+    // [AIREVIEW-PLAN-034#5] The Director only starts after Context Scout finishes or degrades;
+    // show it as pending instead of a second "running" phase while scout is still in flight.
+    if (index === 1 && activePhaseIndex.value === 1 && !scoutComplete.value) return 'pending';
     if (index === activePhaseIndex.value && stage.value === 'FAILED') return 'failed';
     if (index < activePhaseIndex.value) return 'done';
     if (index === activePhaseIndex.value) return 'running';
