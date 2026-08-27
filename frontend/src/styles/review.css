@@ -249,6 +249,13 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .review-flow-main { width: 100%; min-height: 100vh; padding: 0; color: #e4e6f0; background: #0b0d13; }
 .review-flow-page { --flow-bg: #0b0d13; --flow-surface: #13161f; --flow-surface-2: #1a1e2b; --flow-surface-3: #222738; --flow-border: #2a2f44; --flow-text: #e4e6f0; --flow-dim: #8a90a6; --flow-accent: #6c8cff; --flow-green: #34d399; --flow-red: #f87171; --flow-yellow: #fbbf24; min-height: 100vh; color: var(--flow-text); background: var(--flow-bg); }
 .review-flow-page * { box-sizing: border-box; }
+/* [AIREVIEW-PLAN-043#2] 细滚动条：轨道透明、滑块石灰圆角、悬停加深；Firefox 走 thin。 */
+.review-flow-page * { scrollbar-width: thin; scrollbar-color: #d6d3d1 transparent; }
+.review-flow-page *::-webkit-scrollbar { width: 8px; height: 8px; }
+.review-flow-page *::-webkit-scrollbar-track { background: transparent; }
+.review-flow-page *::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 99px; }
+.review-flow-page *::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+.review-flow-page *::-webkit-scrollbar-corner { background: transparent; }
 .review-flow-page button:focus-visible, .review-flow-page a:focus-visible { outline-color: #a8b8ff; }
 .review-flow-header { display: flex; align-items: center; min-height: 3.8rem; gap: 1rem; padding: .65rem 1.25rem; background: var(--flow-surface); border-bottom: 1px solid var(--flow-border); }
 .review-flow-brand { color: var(--flow-accent); font-size: 1.1rem; font-weight: 900; letter-spacing: .08em; text-decoration: none; }
