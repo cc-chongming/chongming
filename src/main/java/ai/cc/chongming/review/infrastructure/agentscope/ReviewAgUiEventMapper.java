@@ -267,6 +267,24 @@ public class ReviewAgUiEventMapper {
         return List.copyOf(terminal);
     }
 
+    /**
+     * Builds a server-authored assistant text notice for the public AG-UI runtime stream, for
+     * example the Director plan revision announcement. The message id derives from the supplied
+     * discriminator so replayed/runtime-persisted events stay idempotent, and the run id embeds
+     * the actor label (DIRECTOR) exactly like mapped agent events.
+     */
+    public List<AguiEvent> publicNotice(
+            ReviewRuntimeContext context, String agentId, String discriminator, String text) {
+        String threadId = "review:" + context.reviewId().value();
+        String runId = context.runtimeId() + ":" + agentId;
+        String messageId = runId + ":notice:" + safePart(discriminator, "public");
+        String publicText = text == null ? "" : text;
+        return List.of(
+                new AguiEvent.TextMessageStart(threadId, runId, messageId, "assistant"),
+                new AguiEvent.TextMessageContent(threadId, runId, messageId, publicText),
+                new AguiEvent.TextMessageEnd(threadId, runId, messageId));
+    }
+
     private AguiEvent.Custom identityEvent(
             String threadId, String runId, RoleType role, String agentId, AgentEvent event) {
         String eventType = event.getType() == null ? "UNKNOWN" : event.getType().getValue();

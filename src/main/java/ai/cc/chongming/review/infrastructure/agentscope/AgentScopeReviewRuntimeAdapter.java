@@ -1,10 +1,12 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
-import ai.cc.chongming.review.application.ReviewCancellationToken;
+import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
 import ai.cc.chongming.review.application.InitialReviewProgressService;
+import ai.cc.chongming.review.application.ReviewCancellationToken;
 import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewEventDrafts;
 import ai.cc.chongming.review.application.ReviewEventPublisher;
+import ai.cc.chongming.review.application.ReviewOrchestrationService;
 import ai.cc.chongming.review.application.ReviewRuntimeTraceRegistry;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
 import ai.cc.chongming.review.config.AgentScopeProperties;
@@ -21,6 +23,8 @@ import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.message.ToolResultState;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.time.Duration;
 import java.util.Map;
@@ -37,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -71,6 +76,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
     private final ContextScoutHarnessFactory contextScoutHarnessFactory;
     private final ReviewEventPublisher eventPublisher;
     private final AgentScopeProperties agentScopeProperties;
+    private final ObjectProvider<ReviewOrchestrationService> orchestrationServiceProvider;
+    private volatile DirectorPlanRevisionPromoter planRevisionPromoter;
     private final ConcurrentMap<String, RuntimeState> runtimes = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> activeRuntimeByReview = new ConcurrentHashMap<>();
     private final Set<String> cancelledRuntimeIds = ConcurrentHashMap.newKeySet();
@@ -83,7 +90,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             RoleSubagentFactory roleSubagentFactory,
             AgentEventAdapter eventAdapter) {
         this(directorFactory, roleSubagentFactory, eventAdapter, null, null, null, null, null,
-                ReviewEventPublisher.noop(), defaultAgentScopeProperties());
+                ReviewEventPublisher.noop(), defaultAgentScopeProperties(), null);
     }
 
     public AgentScopeReviewRuntimeAdapter(
@@ -93,7 +100,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ReviewRegistry reviewRegistry,
             InitialReviewProgressService initialReviewProgressService) {
         this(directorFactory, roleSubagentFactory, eventAdapter, reviewRegistry, initialReviewProgressService,
-                null, null, null, ReviewEventPublisher.noop(), defaultAgentScopeProperties());
+                null, null, null, ReviewEventPublisher.noop(), defaultAgentScopeProperties(), null);
     }
 
     public AgentScopeReviewRuntimeAdapter(
@@ -108,7 +115,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ReviewEventPublisher eventPublisher) {
         this(directorFactory, roleSubagentFactory, eventAdapter, reviewRegistry, initialReviewProgressService,
                 runtimeTraceRegistry, agUiEventMapper, contextScoutHarnessFactory, eventPublisher,
-                defaultAgentScopeProperties());
+                defaultAgentScopeProperties(), null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -122,7 +129,8 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             ReviewAgUiEventMapper agUiEventMapper,
             ContextScoutHarnessFactory contextScoutHarnessFactory,
             ReviewEventPublisher eventPublisher,
-            AgentScopeProperties agentScopeProperties) {
+            AgentScopeProperties agentScopeProperties,
+            ObjectProvider<ReviewOrchestrationService> orchestrationServiceProvider) {
         this.directorFactory = Objects.requireNonNull(directorFactory, "directorFactory must not be null");
         this.roleSubagentFactory = Objects.requireNonNull(roleSubagentFactory, "roleSubagentFactory must not be null");
         this.eventAdapter = Objects.requireNonNull(eventAdapter, "eventAdapter must not be null");
@@ -133,6 +141,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         this.contextScoutHarnessFactory = contextScoutHarnessFactory;
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.agentScopeProperties = Objects.requireNonNull(agentScopeProperties, "agentScopeProperties must not be null");
+        this.orchestrationServiceProvider = orchestrationServiceProvider;
     }
 
     /**
@@ -541,6 +550,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         return agent.streamEvents(message, agentContext(state.context(), sessionId))
                 .doOnNext(event -> {
                     emitRawObservation(state, event, roleType, agentId, sessionId, stage, toolTraceCollector);
+                    promoteDirectorPlanDocumentOnWrite(state, roleType, event);
                 })
                 .doOnError(exception -> {
                     // A cooperative interrupt (review left the debate stages, or the runtime was
@@ -558,6 +568,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                         state, roleType, agentId, sessionId)))
                 .then(Mono.<Void>fromRunnable(() -> verifyInitialReviewCompletion(state, roleType)))
                 .then(Mono.<Void>fromRunnable(() -> draftJudgeGateFallbackIfNeeded(state, roleType)))
+                .then(Mono.<Void>fromRunnable(() -> promoteDirectorPlanRevisions(state, roleType)))
                 .doOnSuccess(ignored -> state.emit(AgentRuntimeEventType.MESSAGE_SENT, agentId, "completed"));
     }
 
@@ -764,6 +775,82 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         publishLifecycle(state, RoleType.DIRECTOR, state.context().directorLabel(), lifecycle);
         state.roles().values().forEach(role ->
                 publishLifecycle(state, role.roleType(), role.label(), lifecycle));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-036#闭环] Triggers an immediate plan-document scan when the Director's
+     * plan_write tool completed successfully, so the plan card updates as soon as the model
+     * actually rewrites plans/PLAN.md rather than waiting for the whole wake round to end.
+     */
+    private void promoteDirectorPlanDocumentOnWrite(
+            RuntimeState state, RoleType roleType, AgentEvent event) {
+        if (roleType != RoleType.DIRECTOR || state.cancelled()) {
+            return;
+        }
+        if (event instanceof ToolResultEndEvent toolEnd
+                && "plan_write".equals(toolEnd.getToolCallName())
+                && toolEnd.getState() != ToolResultState.ERROR
+                && toolEnd.getState() != ToolResultState.DENIED) {
+            promoteDirectorPlanRevisions(state, roleType);
+        }
+    }
+
+    /**
+     * Scans the Director's plan document at a safe observation point (plan_write completion or
+     * round end) and promotes a new/changed document into a public PLAN_REVISED revision. The
+     * promoter is digest-idempotent, so both hooks promote a given document at most once.
+     */
+    private void promoteDirectorPlanRevisions(RuntimeState state, RoleType roleType) {
+        if (roleType != RoleType.DIRECTOR || state.cancelled() || planRevisionPromoter() == null) {
+            return;
+        }
+        try {
+            planRevisionPromoter().promoteIfChanged(state.context(), state.director().workspace())
+                    .ifPresent(revision -> publishPlanRevisionNotice(state, revision));
+        } catch (RuntimeException exception) {
+            LOGGER.warn("director_plan_revision_promotion_failed runtimeId={} error={}",
+                    state.context().runtimeId(), exception.getMessage());
+        }
+    }
+
+    /**
+     * Lazily resolves the shared promoter. The ObjectProvider defers
+     * {@link ReviewOrchestrationService} construction so this adapter and the orchestration
+     * service never create a constructor cycle.
+     */
+    private DirectorPlanRevisionPromoter planRevisionPromoter() {
+        DirectorPlanRevisionPromoter resolved = planRevisionPromoter;
+        if (resolved != null) {
+            return resolved;
+        }
+        if (orchestrationServiceProvider == null) {
+            return null;
+        }
+        ReviewOrchestrationService orchestrationService = orchestrationServiceProvider.getIfAvailable();
+        if (orchestrationService == null) {
+            return null;
+        }
+        DirectorPlanRevisionPromoter created = new DirectorPlanRevisionPromoter(orchestrationService);
+        planRevisionPromoter = created;
+        return created;
+    }
+
+    /**
+     * Publishes "协调者修订评审计划至 vN" into the public AG-UI runtime stream under the Director
+     * run and records the revision on the runtime event stream. The PLAN_REVISED domain event
+     * (emitted by {@link ReviewOrchestrationService#revisePlan}) refreshes the plan cards; this
+     * notice makes the revision visible in the run flow while it happens.
+     */
+    private void publishPlanRevisionNotice(
+            RuntimeState state, ReviewOrchestrationService.PlanRevision revision) {
+        String label = state.context().directorLabel();
+        String version = Integer.toString(revision.plan().planVersion());
+        String text = "协调者修订评审计划至 v" + version;
+        if (runtimeTraceRegistry != null && agUiEventMapper != null) {
+            agUiEventMapper.publicNotice(state.context(), label, "plan-revised-v" + version, text)
+                    .forEach(event -> runtimeTraceRegistry.publish(state.context().runtimeId(), event));
+        }
+        state.emit(AgentRuntimeEventType.RAW_EVENT, label, "plan-revised-v" + version);
     }
 
     private RuntimeState state(String runtimeId) {
