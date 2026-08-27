@@ -33,7 +33,7 @@ class ReviewPropertiesTests {
                     assertThat(agentScopeProperties.persistSession()).isTrue();
                     assertThat(agentScopeProperties.directorMaxIterations()).isEqualTo(48);
                     assertThat(agentScopeProperties.scoutMaxIterations()).isEqualTo(12);
-        assertThat(agentScopeProperties.scoutMaxToolCalls()).isEqualTo(16);
+        assertThat(agentScopeProperties.scoutMaxToolCalls()).isEqualTo(20);
                     assertThat(agentScopeProperties.scoutTimeout()).isEqualTo(java.time.Duration.ofSeconds(150));
                     assertThat(agentScopeProperties.debateMaxDirectorWakes()).isEqualTo(24);
                     assertThat(agentScopeProperties.debateConvergenceTimeout()).isEqualTo(java.time.Duration.ofMinutes(20));

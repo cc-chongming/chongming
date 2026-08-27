@@ -20,7 +20,7 @@ public record AgentScopeProperties(
         @NotBlank String stateHome,
         @DefaultValue("48") @Min(1) int directorMaxIterations,
         @DefaultValue("12") @Min(1) int scoutMaxIterations,
-        @DefaultValue("16") @Min(1) int scoutMaxToolCalls,
+        @DefaultValue("20") @Min(1) int scoutMaxToolCalls,
         @DefaultValue("PT150S") Duration scoutTimeout,
         @DefaultValue("24") @Min(1) int debateMaxDirectorWakes,
         @DefaultValue("PT20M") Duration debateConvergenceTimeout,

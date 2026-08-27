@@ -388,9 +388,12 @@ class AgentScopeReviewRuntimeAdapterTests {
         Mockito.when(scoutFactory.createRuntime(Mockito.any(), Mockito.any()))
                 .thenReturn(new ContextScoutHarnessFactory.ScoutRuntime(
                         scout, new ScoutToolTraceCollector()));
+        // 新语义：10 次 glob_files（未超过 totalLimit=20，单工具超建议额度仅告警）不再降级，
+        // 因此这里改用不在白名单里的 list_files，只有契约违规才会抛出
+        // CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED 并触发降级。
         Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
                 .thenReturn(Flux.range(1, 10)
-                        .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "glob_files")));
+                        .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "list_files")));
         AtomicInteger directorModelCalls = new AtomicInteger();
         AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
 
@@ -401,6 +404,37 @@ class AgentScopeReviewRuntimeAdapterTests {
                 .containsExactly(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
         assertThat(events.getFirst().payload())
                 .containsEntry("reasonCode", "CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED");
+    }
+
+    @Test
+    void perToolOverrunIsAdvisorySoScoutCanPivotToOtherTools() {
+        // 新语义：单工具调用数超过建议额度（glob_files 超过建议值 3）只返回告警、不抛异常，
+        // 只要总调用数未超过 totalLimit 且工具都在白名单内，Scout 可以转向其他工具继续检索，不降级。
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.PLANNING, context.attemptNo(), 0,
+                List.of(), Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        HarnessAgent scout = Mockito.mock(HarnessAgent.class);
+        ContextScoutHarnessFactory scoutFactory = Mockito.mock(ContextScoutHarnessFactory.class);
+        Mockito.when(scoutFactory.createRuntime(Mockito.any(), Mockito.any()))
+                .thenReturn(new ContextScoutHarnessFactory.ScoutRuntime(
+                        scout, new ScoutToolTraceCollector()));
+        Mockito.when(scout.streamEvents(Mockito.anyString(), Mockito.any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Flux.concat(
+                        Flux.range(1, 5)
+                                .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "glob_files")),
+                        Flux.range(6, 2)
+                                .map(index -> new ToolCallStartEvent("reply-" + index, "call-" + index, "grep_files"))));
+        AtomicInteger directorModelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapter(registry, scoutFactory, events, directorModelCalls);
+
+        adapter.start(startRequest(context)).block();
+
+        assertThat(directorModelCalls).hasValue(0);
+        assertThat(events).extracting(ReviewEventDraft::type)
+                .doesNotContain(ReviewEventType.CONTEXT_SCOUT_DEGRADED);
     }
 
     @Test

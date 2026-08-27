@@ -52,12 +52,14 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(AgentScopeReviewRuntimeAdapter.class);
 
-    // [AIREVIEW-PLAN-035#3.1] The enforced budget matches the Scout prompt and the persisted baseline
-    // contract exactly, so a compliant model never trips the hard stop and any trip is a true violation.
+    // [AIREVIEW-PLAN-035#3.1] Per-tool limits are ADVISORY: exceeding one only logs, never aborts,
+    // so the Scout can pivot to tools with remaining quota (a grep-heavy requirement must not be
+    // killed while read_file budget sits unused). The hard wall is the total budget
+    // (scoutMaxToolCalls) plus the ban on tools outside this contract.
     private static final Map<String, Integer> SCOUT_INIT_TOOL_LIMITS = Map.of(
-            "glob_files", 2,
-            "grep_files", 3,
-            "read_file", 4);
+            "glob_files", 3,
+            "grep_files", 6,
+            "read_file", 6);
 
     private final ReviewDirectorHarnessFactory directorFactory;
     private final RoleSubagentFactory roleSubagentFactory;
@@ -207,7 +209,11 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
                                 agentContext(context, context.runtimeId() + ":context-scout"))
                         .doOnNext(event -> {
                             if (event instanceof ToolCallStartEvent toolCallStart) {
-                                nativeToolBudget.consume(toolCallStart.getToolCallName());
+                                String overQuota = nativeToolBudget.consume(toolCallStart.getToolCallName());
+                                if (overQuota != null) {
+                                    log.warn("context_scout_tool_over_quota reviewId={} attemptNo={} {}",
+                                            state.context().reviewId(), state.context().attemptNo(), overQuota);
+                                }
                             }
                             if (event instanceof AgentResultEvent result && result.getResult() != null) {
                                 String visibleResult = result.getResult().getTextContent();
@@ -824,22 +830,26 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             this.totalLimit = totalLimit;
         }
 
-        private synchronized void consume(String toolName) {
+        /**
+         * Returns advisory over-quota detail when a per-tool limit is exceeded so the caller can log
+         * it; throws only for banned tools or a depleted total budget. Over-quota calls still run,
+         * because the model may pivot to other tools with remaining budget.
+         */
+        private synchronized String consume(String toolName) {
             Integer perToolLimit = SCOUT_INIT_TOOL_LIMITS.get(toolName);
             if (perToolLimit == null) {
                 throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED",
                         "violatingTool=" + toolName + " reason=not-in-init-retrieval-contract");
             }
-            int nextToolCalls = callsByTool.getOrDefault(toolName, 0) + 1;
-            if (nextToolCalls > perToolLimit) {
-                throw new ScoutLimitExceededException("CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED",
-                        "violatingTool=" + toolName + " calls=" + nextToolCalls + " perToolLimit=" + perToolLimit);
-            }
             if (++totalCalls > totalLimit) {
                 throw new ScoutLimitExceededException("CONTEXT_SCOUT_TOOL_BUDGET_EXCEEDED",
                         "violatingTool=" + toolName + " totalCalls=" + totalCalls + " totalLimit=" + totalLimit);
             }
+            int nextToolCalls = callsByTool.getOrDefault(toolName, 0) + 1;
             callsByTool.put(toolName, nextToolCalls);
+            return nextToolCalls > perToolLimit
+                    ? "tool=" + toolName + " calls=" + nextToolCalls + " perToolLimit=" + perToolLimit
+                    : null;
         }
     }
 

@@ -77,7 +77,7 @@ review:
     director-max-iterations: ${REVIEW_AGENTSCOPE_DIRECTOR_MAX_ITERATIONS:48}
     # Context Scout is advisory. Exhausting either limit records a degradation and immediately starts Director.
     scout-max-iterations: ${REVIEW_AGENTSCOPE_SCOUT_MAX_ITERATIONS:12}
-    scout-max-tool-calls: ${REVIEW_AGENTSCOPE_SCOUT_MAX_TOOL_CALLS:16}
+    scout-max-tool-calls: ${REVIEW_AGENTSCOPE_SCOUT_MAX_TOOL_CALLS:20}
     scout-timeout: ${REVIEW_AGENTSCOPE_SCOUT_TIMEOUT:PT150S}
     # Debate convergence fallback: force-escalate open topics and begin judging when the Director
     # wakes too often or the debate exceeds the wall-clock budget.

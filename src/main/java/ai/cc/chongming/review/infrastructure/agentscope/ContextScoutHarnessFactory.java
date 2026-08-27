@@ -160,9 +160,9 @@ public class ContextScoutHarnessFactory {
                     "schemaVersion", 1,
                     "command", "context-scout-init",
                     "retrievalContract", java.util.Map.of(
-                            "globFilesMaxCalls", 2,
-                            "grepFilesMaxCalls", 3,
-                            "readFileMaxCalls", 4,
+                            "globFilesMaxCalls", 3,
+                            "grepFilesMaxCalls", 6,
+                            "readFileMaxCalls", 6,
                             "rootListing", "server-generated"),
                     "repositoryId", overview.repositoryId(),
                     "headCommit", overview.headCommit(),
@@ -192,8 +192,10 @@ public class ContextScoutHarnessFactory {
                 + "你执行的是受限的 context-scout-init 命令，而不是开放式项目探索。"
                 + "服务器已经完成根目录、文件清单、模块根目录和需求摘要的初始化，并将其作为下方 INIT 清单提供；"
                 + "不得调用 list_files，也不得重新枚举根目录。"
-                + "只能使用 AS2 原生 glob_files、grep_files、read_file：glob_files 最多 2 次，grep_files 最多 3 次，"
-                + "read_file 最多 4 次；每次必须服务于新的需求关联问题，禁止重复读取或全仓扫描。"
+                + "只能使用 AS2 原生 glob_files、grep_files、read_file：glob_files 最多 3 次，grep_files 最多 6 次，"
+                + "read_file 最多 6 次；每次必须服务于新的需求关联问题，禁止重复读取或全仓扫描。"
+                + "每次调用前先评估剩余配额：优先用 read_file 验证高相关文件来形成结论，避免反复尝试投机性的检索模式；"
+                + "剩余配额不足以继续验证时，立即以现有证据输出结论并将不足的信息标记为 unknown，不得用尽配额。"
                 + "按“初始化清单 -> 需求关键词检索 -> 高相关文件验证 -> 立即输出”的固定顺序执行；"
                 + "清单已经足以回答的信息不得再次检索。"
                 + "识别与需求有关的模块、入口文件、构建方式与风险边界。"

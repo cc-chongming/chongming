@@ -63,3 +63,18 @@
 ## 变更记录
 
 - 2026-08-26：实施完成（提交 f222e6d）；按 .codex/rules/plan-driven-development.md 补齐本计划文档。
+- 2026-08-27：**偏差记录（#3.1）**——评审 0e88379a 中快照/模块根修复生效（grep 命中真实代码），
+  但需求横跨 FR-1~FR-9，grep 第 4 次调用撞统一后的 2/3/4 硬预算降级，且 read_file 配额完全未用。
+  结论：提示词配额是"期望值"，硬预算应是"执行包络"。硬预算恢复为 glob 3 / grep 6 / read 8，
+  提示词与基线保持 2/3/4 严格口径；同时给 Scout 提示词补充配额意识（优先 read_file 验证、
+  配额不足以支撑验证时立即收敛并标 unknown，不得用尽配额）。
+- 2026-08-27：**偏差记录（#3.1 重设计）**——评审 0e88379a 暴露：Scout 在 grep_files 第 4 次调用
+  撞"单工具硬上限"被整体降级，而 read_file 配额完全未用——单工具额度用尽就终止整个运行是错误的惩罚。
+  重设计（经用户确认）：
+  1. 单工具额度转为**建议性**（glob 3 / grep 6 / read 6）：超额仅记录 context_scout_tool_over_quota
+     WARN，不终止运行，模型可转向仍有额度的其他工具；
+  2. 硬性边界收敛为两条：总预算 scoutMaxToolCalls（默认 16 → 20，application.yml 与
+     AgentScopeProperties 同步）与白名单外工具（仍按 CONTEXT_SCOUT_INIT_CONTRACT_VIOLATED 降级）；
+  3. 提示词与基线 retrievalContract 从 2/3/4 提升为 3/6/6，与新的建议额度一致；
+  4. ScoutInitToolBudget.consume 语义变更：返回超额告警详情（供 WARN 输出），仅在禁用工具/总额
+     耗尽时抛异常。
