@@ -311,7 +311,11 @@ public class ReviewDebateToolFactory {
                 "topics", Map.of("type", "array", "description", "Every candidate subject to register",
                         "items", objectSchema(Map.of(
                                 "subjectKey", stringSchema("Conflict candidate subject key"),
-                                "claimIds", idArraySchema("Persisted Claim UUIDs of the subject")), List.of("subjectKey")))),
+                                "claimIds", idArraySchema("Persisted Claim UUIDs of the subject"),
+                                // [AIREVIEW-PLAN-044#1] Display-only Chinese public title; the tool
+                                // boundary truncates overlong titles before they reach the store.
+                                "publicTitle", stringSchema("该议题的简明中文标题，概括争议点，供工作台展示，建议不超过 20 字")),
+                                List.of("subjectKey")))),
                 List.of("topics")); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
             Object value = input.get("topics");
@@ -329,7 +333,8 @@ public class ReviewDebateToolFactory {
                         if (subject == null || subject.toString().isBlank()) {
                             throw new IllegalArgumentException("subjectKey is required");
                         }
-                        return new DebateToolCommands.TopicProposal(subject.toString(), claimIds(topic.get("claimIds")));
+                        return new DebateToolCommands.TopicProposal(subject.toString(), claimIds(topic.get("claimIds")),
+                                publicTitle(topic.get("publicTitle")));
                     })
                     .toList();
             DebateService.RegisterTopicsResult result = debateTools.registerDebateTopics(review,
@@ -656,6 +661,15 @@ public class ReviewDebateToolFactory {
     private static List<UUID> ids(Object value) { if (value == null) return List.of(); if (!(value instanceof Collection<?> collection)) throw new IllegalArgumentException("IDs must be an array"); return collection.stream().map(Object::toString).map(UUID::fromString).toList(); }
     private static void requireNoInput(Map<String, Object> input) { if (!input.isEmpty()) throw new IllegalArgumentException("tool does not accept input"); }
     private static Map<String, Object> objectSchema(Map<String, Object> properties, List<String> required) { return Map.of("type", "object", "properties", properties, "required", required, "additionalProperties", false); }
+    /** [AIREVIEW-PLAN-044#1] Optional public title, truncated to 200 chars at the agent-facing boundary. */
+    private static String publicTitle(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String title = value.toString();
+        return title.length() > 200 ? title.substring(0, 200) : title;
+    }
+
     private static Map<String, Object> turnSchema(Map<String, Object> additional, List<String> required) { java.util.LinkedHashMap<String, Object> properties = new java.util.LinkedHashMap<>(); properties.put("targetRole", enumSchema(RoleType.PRODUCT.name(), RoleType.PROJECT.name(), RoleType.FRONTEND.name(), RoleType.BACKEND.name())); properties.put("topicId", stringSchema("Debate topic UUID")); properties.put("round", Map.of("type", "integer", "enum", List.of(1, 2))); properties.put("publicContent", stringSchema("Public debate content")); properties.put("evidenceIds", idArraySchema("Evidence UUIDs")); properties.putAll(additional); return objectSchema(Map.copyOf(properties), required); }
     private static Map<String, Object> stringSchema(String description) { return Map.of("type", "string", "description", description); }
     private static Map<String, Object> idArraySchema(String description) { return Map.of("type", "array", "description", description, "items", Map.of("type", "string")); }

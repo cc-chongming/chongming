@@ -18,6 +18,7 @@ public final class DebateTopic {
     private final TopicId id;
     private final ReviewId reviewId;
     private final String subjectKey;
+    private final String publicTitle;
     private List<ClaimId> claimIds;
     private final List<DebateTurn> turns = new ArrayList<>();
     private DebateTopicStatus status;
@@ -26,12 +27,21 @@ public final class DebateTopic {
     private Instant closedAt;
 
     public DebateTopic(TopicId id, ReviewId reviewId, String subjectKey, List<ClaimId> claimIds) {
+        this(id, reviewId, subjectKey, claimIds, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-044#1] Creates a topic with an optional display-only Chinese public title;
+     * subjectKey remains the matching key. The title is nullable and never enters matching or dedup.
+     */
+    public DebateTopic(TopicId id, ReviewId reviewId, String subjectKey, List<ClaimId> claimIds, String publicTitle) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.reviewId = Objects.requireNonNull(reviewId, "reviewId must not be null");
         if (subjectKey == null || subjectKey.isBlank()) {
             throw new IllegalArgumentException("subjectKey must not be blank");
         }
         this.subjectKey = subjectKey;
+        this.publicTitle = publicTitle;
         // [AIREVIEW-PLAN-024#方案4] claimIds may be empty when the topic is opened from a purely
         // Assessment-borne contradiction; Claim-backed topics keep their previous contract.
         this.claimIds = List.copyOf(claimIds);
@@ -52,7 +62,25 @@ public final class DebateTopic {
             List<DebateTurn> turns,
             String resolution,
             Instant closedAt) {
-        DebateTopic topic = new DebateTopic(id, reviewId, subjectKey, claimIds);
+        return restore(id, reviewId, subjectKey, claimIds, null, status, currentRound, turns, resolution, closedAt);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-044#1] Restore overload that also carries the optional display-only Chinese
+     * public title; the legacy signature delegates with a null title.
+     */
+    public static DebateTopic restore(
+            TopicId id,
+            ReviewId reviewId,
+            String subjectKey,
+            List<ClaimId> claimIds,
+            String publicTitle,
+            DebateTopicStatus status,
+            int currentRound,
+            List<DebateTurn> turns,
+            String resolution,
+            Instant closedAt) {
+        DebateTopic topic = new DebateTopic(id, reviewId, subjectKey, claimIds, publicTitle);
         topic.status = Objects.requireNonNull(status, "status must not be null");
         topic.currentRound = currentRound;
         topic.turns.addAll(List.copyOf(turns));
@@ -71,6 +99,14 @@ public final class DebateTopic {
 
     public String subjectKey() {
         return subjectKey;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-044#1] Display-only Chinese public title; null when the Director did not
+     * provide one (read models and the frontend fall back to subjectKey).
+     */
+    public String publicTitle() {
+        return publicTitle;
     }
 
     public List<ClaimId> claimIds() {

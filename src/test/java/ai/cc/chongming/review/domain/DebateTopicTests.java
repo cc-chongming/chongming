@@ -41,4 +41,15 @@ class DebateTopicTests {
 
         assertThat(topic.claimIds()).containsExactly(member);
     }
+
+    @Test
+    void carriesTheOptionalChinesePublicTitle() {
+        DebateTopic titled = new DebateTopic(new TopicId(UUID.randomUUID()), new ReviewId(UUID.randomUUID()),
+                "authentication", List.of(), "认证失败需人工介入");
+        DebateTopic legacy = new DebateTopic(new TopicId(UUID.randomUUID()), new ReviewId(UUID.randomUUID()),
+                "authentication", List.of());
+
+        assertThat(titled.publicTitle()).isEqualTo("认证失败需人工介入");
+        assertThat(legacy.publicTitle()).isNull();
+    }
 }

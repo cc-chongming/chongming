@@ -223,6 +223,29 @@ class ReviewQueryServiceTests {
     }
 
     @Test
+    void debateViewExposesTheChinesePublicTitle() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ClaimId memberId = new ClaimId(UUID.randomUUID());
+        Claim member = claim(memberId, reviewId, "authentication", ClaimStatus.SUBMITTED);
+        TopicId topicId = new TopicId(UUID.randomUUID());
+        DebateTopic topic = new DebateTopic(topicId, reviewId, "authentication", List.of(memberId),
+                "认证失败需人工介入的处置方式");
+        ReviewDebateStore debateStore = mock(ReviewDebateStore.class);
+        when(debateStore.findClaims(reviewId)).thenReturn(List.of(member));
+        when(debateStore.findTopics(reviewId)).thenReturn(List.of(topic));
+        when(debateStore.findTurns(reviewId)).thenReturn(List.of());
+        when(debateStore.findJudgeDecisions(reviewId)).thenReturn(Map.of());
+        ReviewQueryService service = new ReviewQueryService(
+                mock(ReviewEventStore.class), debateStore, mock(EvidenceLedgerService.class),
+                mock(HumanGateDecisionStore.class), mock(ReviewRegistry.class));
+
+        ReviewQueryService.DebateView view = service.findDebates(reviewId).get(0);
+
+        assertThat(view.title()).isEqualTo("认证失败需人工介入的处置方式");
+        assertThat(view.subjectKey()).isEqualTo("authentication");
+    }
+
+    @Test
     void restoresActivatedRolesFromDurableProjectionWhenRegistryIsEmptyAfterRestart() {
         ReviewId reviewId = new ReviewId(UUID.randomUUID());
         ReviewEventStore eventStore = mock(ReviewEventStore.class);

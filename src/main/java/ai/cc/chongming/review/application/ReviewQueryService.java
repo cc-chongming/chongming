@@ -416,7 +416,8 @@ public class ReviewQueryService {
                 topic.closedAt() == null ? null : format(topic.closedAt()),
                 claims,
                 turns,
-                Optional.ofNullable(decisionsByTopic.get(topic.id())).map(this::toJudgeView).orElse(null));
+                Optional.ofNullable(decisionsByTopic.get(topic.id())).map(this::toJudgeView).orElse(null),
+                topic.publicTitle());
     }
 
     private EventView toEventView(ReviewEvent event) {
@@ -671,7 +672,9 @@ public class ReviewQueryService {
             String closedAt,
             List<ClaimView> claims,
             List<TurnView> turns,
-            JudgeView judgement) {
+            JudgeView judgement,
+            // [AIREVIEW-PLAN-044#1] Display-only Chinese public title; null falls back to subjectKey.
+            String title) {
     }
 
     /**

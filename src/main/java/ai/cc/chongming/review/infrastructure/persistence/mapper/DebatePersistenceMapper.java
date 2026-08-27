@@ -50,12 +50,14 @@ public interface DebatePersistenceMapper {
 
     @Insert("""
             INSERT INTO review_debate_topic
-                (topic_id, review_id, subject_key, claim_ids_json, status, current_round, resolution, closed_at, created_at)
+                (topic_id, review_id, subject_key, public_title, claim_ids_json, status, current_round,
+                 resolution, closed_at, created_at)
             VALUES
-                (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.claimIdsJson}, #{row.status},
-                 #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
+                (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.publicTitle}, #{row.claimIdsJson},
+                 #{row.status}, #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
             ON DUPLICATE KEY UPDATE
                 subject_key = VALUES(subject_key),
+                public_title = VALUES(public_title),
                 claim_ids_json = VALUES(claim_ids_json),
                 status = VALUES(status),
                 current_round = VALUES(current_round),
@@ -67,14 +69,16 @@ public interface DebatePersistenceMapper {
     @Insert("""
             <script>
             INSERT INTO review_debate_topic
-                (topic_id, review_id, subject_key, claim_ids_json, status, current_round, resolution, closed_at, created_at)
+                (topic_id, review_id, subject_key, public_title, claim_ids_json, status, current_round,
+                 resolution, closed_at, created_at)
             VALUES
             <foreach collection="rows" item="row" separator=",">
-                (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.claimIdsJson}, #{row.status},
-                 #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
+                (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.publicTitle}, #{row.claimIdsJson},
+                 #{row.status}, #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
             </foreach>
             ON DUPLICATE KEY UPDATE
                 subject_key = VALUES(subject_key),
+                public_title = VALUES(public_title),
                 claim_ids_json = VALUES(claim_ids_json),
                 status = VALUES(status),
                 current_round = VALUES(current_round),
@@ -86,8 +90,8 @@ public interface DebatePersistenceMapper {
 
     @Select("""
             SELECT topic_id AS topicId, review_id AS reviewId, subject_key AS subjectKey,
-                   claim_ids_json AS claimIdsJson, status, current_round AS currentRound,
-                   resolution, closed_at AS closedAt, created_at AS createdAt
+                   public_title AS publicTitle, claim_ids_json AS claimIdsJson, status,
+                   current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt
             FROM review_debate_topic
             WHERE review_id = #{reviewId}
             ORDER BY topic_id
@@ -96,8 +100,8 @@ public interface DebatePersistenceMapper {
 
     @Select("""
             SELECT topic_id AS topicId, review_id AS reviewId, subject_key AS subjectKey,
-                   claim_ids_json AS claimIdsJson, status, current_round AS currentRound,
-                   resolution, closed_at AS closedAt, created_at AS createdAt
+                   public_title AS publicTitle, claim_ids_json AS claimIdsJson, status,
+                   current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt
             FROM review_debate_topic
             WHERE review_id = #{reviewId} AND topic_id = #{topicId}
             """)
@@ -233,6 +237,7 @@ public interface DebatePersistenceMapper {
             String topicId,
             String reviewId,
             String subjectKey,
+            String publicTitle,
             String claimIdsJson,
             String status,
             int currentRound,

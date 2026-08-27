@@ -107,6 +107,7 @@ class MyBatisReviewDebateStoreTests {
                 reviewId,
                 "增量展示权限",
                 List.of(claimId),
+                "权限不足需要人工仲裁",
                 DebateTopicStatus.RESOLVED,
                 2,
                 List.of(challenge),
@@ -119,6 +120,7 @@ class MyBatisReviewDebateStoreTests {
         DebateTopic reloaded = store.findTopic(reviewId, topicId).orElseThrow();
         assertThat(reloaded.reviewId()).isEqualTo(reviewId);
         assertThat(reloaded.subjectKey()).isEqualTo("增量展示权限");
+        assertThat(reloaded.publicTitle()).isEqualTo("权限不足需要人工仲裁");
         assertThat(reloaded.claimIds()).containsExactly(claimId);
         assertThat(reloaded.status()).isEqualTo(DebateTopicStatus.RESOLVED);
         assertThat(reloaded.currentRound()).isEqualTo(2);

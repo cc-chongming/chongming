@@ -151,7 +151,8 @@ public class DebateService {
         List<DebateTopic> topicsToSave = new ArrayList<>();
         for (DebateToolCommands.TopicProposal proposal : deduplicated.values()) {
             DebateTopic topic = new DebateTopic(
-                    new TopicId(UUID.randomUUID()), review.id(), proposal.subjectKey(), proposal.claimIds());
+                    new TopicId(UUID.randomUUID()), review.id(), proposal.subjectKey(), proposal.claimIds(),
+                    normalizePublicTitle(proposal.publicTitle()));
             topicsToSave.add(topic);
             registered.add(new TopicResult(topic, false));
             persistedIds.add(topic.id().value().toString());
@@ -241,6 +242,15 @@ public class DebateService {
         review.recordCommand(command.metadata(), turn.turnId().value().toString());
         publishTurn(review, turn);
         return new TurnResult(turn, false);
+    }
+
+    /** [AIREVIEW-PLAN-044#1] Trim the optional display title and normalize whitespace-only values to null. */
+    private static String normalizePublicTitle(String publicTitle) {
+        if (publicTitle == null) {
+            return null;
+        }
+        String normalized = publicTitle.trim();
+        return normalized.isBlank() ? null : normalized;
     }
 
     /** Records a non-destructive position change; the source Claim remains immutable. */
@@ -338,7 +348,7 @@ public class DebateService {
     private List<DebateTopic> topicsWithStoreTurns(Review review) {
         return debateStore.findTopics(review.id()).stream()
                 .map(topic -> DebateTopic.restore(topic.id(), topic.reviewId(), topic.subjectKey(),
-                        topic.claimIds(), topic.status(), topic.currentRound(),
+                        topic.claimIds(), topic.publicTitle(), topic.status(), topic.currentRound(),
                         debateStore.findTurns(review.id(), topic.id()), topic.resolution(), topic.closedAt()))
                 .toList();
     }

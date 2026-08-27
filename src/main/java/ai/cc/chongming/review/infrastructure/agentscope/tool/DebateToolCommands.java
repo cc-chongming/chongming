@@ -16,15 +16,22 @@ public final class DebateToolCommands {
     }
 
     /**
-     * [AIREVIEW-PLAN-024#方案4] One candidate topic selection submitted by the Director inside a
-     * batch registration; claimIds may be empty for a purely Assessment-borne contradiction.
+     * [AIREVIEW-PLAN-024#方案4][AIREVIEW-PLAN-044#1] One candidate topic selection submitted by
+     * the Director inside a batch registration; claimIds may be empty for a purely Assessment-borne
+     * contradiction. publicTitle is an optional display-only Chinese title; subjectKey keeps its
+     * matching semantics unchanged.
      *
      * @author wangli
      */
-    public record TopicProposal(String subjectKey, List<ClaimId> claimIds) {
+    public record TopicProposal(String subjectKey, List<ClaimId> claimIds, String publicTitle) {
         public TopicProposal {
             requireText(subjectKey, "subjectKey");
             claimIds = claimIds == null ? List.of() : List.copyOf(claimIds);
+        }
+
+        /** [AIREVIEW-PLAN-044#1] Legacy call sites keep compiling; the title is optional and defaults to null. */
+        public TopicProposal(String subjectKey, List<ClaimId> claimIds) {
+            this(subjectKey, claimIds, null);
         }
     }
 

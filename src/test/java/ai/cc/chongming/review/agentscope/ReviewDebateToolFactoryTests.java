@@ -1,20 +1,31 @@
 package ai.cc.chongming.review.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.IntakeCancellation;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewDebateToolFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkflowDispatcher;
+import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateTools;
+import io.agentscope.core.message.ToolUseBlock;
+import io.agentscope.core.tool.ToolCallParam;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /**
  * [AIREVIEW-PLAN-021#10][AIREVIEW-PLAN-024#方案3/方案4] Verifies the model receives authoritative
@@ -89,5 +100,59 @@ class ReviewDebateToolFactoryTests {
                             .as("tool %s must demand a dispatch commandId", tool.getName())
                             .contains("commandId");
                 });
+    }
+
+    @Test
+    void registerTopicsSchemaAdvertisesTheOptionalChinesePublicTitle() {
+        ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
+                mock(ReviewRegistry.class), mock(DebateTools.class), mock(DebateService.class),
+                mock(ReviewDebateStore.class));
+        io.agentscope.core.tool.AgentTool registerTopics = factory.directorTools(new ReviewRuntimeContext(
+                new ReviewId(UUID.randomUUID()), 1, "test-user", "test-trace", IntakeCancellation.neverCancelled()))
+                .stream()
+                .filter(tool -> tool.getName().equals("register_topics"))
+                .findFirst()
+                .orElseThrow();
+
+        String schema = String.valueOf(registerTopics.getParameters());
+        assertThat(schema)
+                .as("register_topics must advertise the optional Chinese publicTitle")
+                .contains("publicTitle", "简明中文标题", "建议不超过 20 字");
+    }
+
+    @Test
+    void registerTopicsParsesTheChinesePublicTitleAndTruncatesOverlongTitles() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Review review = Review.restore(reviewId, ReviewStage.CONFLICT_DETECTION, 1, 4L, List.of(), Map.of());
+        ReviewRegistry registry = mock(ReviewRegistry.class);
+        when(registry.find(reviewId)).thenReturn(Optional.of(review));
+        DebateTools debateTools = mock(DebateTools.class);
+        when(debateTools.registerDebateTopics(any(), any()))
+                .thenReturn(new DebateService.RegisterTopicsResult(List.of(), false));
+        ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
+                registry, debateTools, mock(DebateService.class), mock(ReviewDebateStore.class));
+        ReviewRuntimeContext context = new ReviewRuntimeContext(
+                reviewId, 1, "test-user", "test-trace", IntakeCancellation.neverCancelled());
+        io.agentscope.core.tool.AgentTool registerTopics = factory.directorTools(context).stream()
+                .filter(tool -> tool.getName().equals("register_topics"))
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> input = Map.of("topics", List.of(Map.of(
+                "subjectKey", "mcp.security",
+                "claimIds", List.of(),
+                "publicTitle", "辩".repeat(205))));
+
+        registerTopics.callAsync(ToolCallParam.builder()
+                .toolUseBlock(new ToolUseBlock("call-register", "register_topics", input))
+                .input(input)
+                .build()).block();
+
+        ArgumentCaptor<DebateToolCommands.RegisterTopics> captor =
+                ArgumentCaptor.forClass(DebateToolCommands.RegisterTopics.class);
+        verify(debateTools).registerDebateTopics(any(), captor.capture());
+        DebateToolCommands.TopicProposal proposal = captor.getValue().proposals().get(0);
+        assertThat(proposal.publicTitle()).hasSize(200);
+        assertThat(proposal.subjectKey()).isEqualTo("mcp.security");
+        assertThat(proposal.claimIds()).isEmpty();
     }
 }

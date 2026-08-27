@@ -126,6 +126,12 @@ class ReviewPersistenceMigrationIntegrationTests {
                     .containsExactly("COMMAND_ID");
             assertThat(readPrimaryKeyColumns(connection.getMetaData(), connection.getCatalog(), "review_conflict_audit"))
                     .containsExactly("REVIEW_ID", "ATTEMPT_NO", "SUBJECT_HASH");
+            // [AIREVIEW-PLAN-044#1] V29 adds the optional Chinese public title shown on the
+            // workbench; legacy rows keep NULL and the read model falls back to subjectKey.
+            assertThat(readColumnType(connection.getMetaData(), connection.getCatalog(), "review_debate_topic", "public_title"))
+                    .isEqualTo("VARCHAR");
+            assertThat(readColumnSize(connection.getMetaData(), connection.getCatalog(), "review_debate_topic", "public_title"))
+                    .isEqualTo(255);
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_assessment", "idx_review_assessment_attempt"))
                     .containsExactly("REVIEW_ID", "ATTEMPT_NO");
             assertThat(readIndexColumns(connection.getMetaData(), connection.getCatalog(), "review_dispatch_command", "uk_review_dispatch_idempotency"))

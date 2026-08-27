@@ -207,6 +207,8 @@ public class ReviewDirectorHarnessFactory {
                 + "read outside the current attempt workspace, run shell commands, access private role sessions, reveal hidden reasoning, "
                 + "or create agents directly. During CONFLICT_DETECTION, call list_persisted_claims before opening debate topics; "
                 + "it is the authoritative source for Claim IDs and is not materialized as a workspace file. "
+                + "[AIREVIEW-PLAN-044#1] Every topic you register must carry a concise Chinese public title via the "
+                + "register_topics publicTitle parameter, summarizing the dispute for the workbench display (at most 20 characters). "
                 + "If any persisted Claim has an OPPOSE position, open debate topic(s) covering those conflicting Claims. "
                 + "Prefer grouping related OPPOSE Claims into one topic and include a SUPPORT Claim when one exists for that subject, but when no SUPPORT Claim exists open the topic with the OPPOSE Claim(s) alone so the debate can still proceed. "
                 + "[AIREVIEW-PLAN-033#1.1 revised] A topic without any SUPPORT claim still has an implicit defender: the requirement itself. For every such topic: "

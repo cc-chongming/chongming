@@ -118,6 +118,47 @@ class DebateToolsContractTests {
         assertThat(opened.topic().claimIds()).containsExactly(backendClaim.claimId());
     }
 
+    @Test
+    void registerTopicsPersistsTheChinesePublicTitleTrimmed() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        DebateTools tools = new DebateTools(
+                new ClaimService(evidenceLedgerFor(store), store, new ReviewProtocolGuard()), debateService, new JudgeService(store));
+        Review review = conflictDetectionReview();
+        Claim backendClaim = claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE, "mcp.security");
+        store.saveClaim(backendClaim);
+
+        DebateService.RegisterTopicsResult registered = tools.registerDebateTopics(review,
+                new DebateToolCommands.RegisterTopics(metadata(review, "open-with-title"), RoleType.DIRECTOR,
+                        List.of(new DebateToolCommands.TopicProposal("mcp.security",
+                                List.of(backendClaim.claimId()), "  MCP 安全基线未覆盖外部访问风险  "))));
+        DebateService.TopicResult opened = registered.topics().get(0);
+
+        assertThat(opened.topic().publicTitle()).isEqualTo("MCP 安全基线未覆盖外部访问风险");
+        assertThat(store.findTopics(review.id()).get(0).publicTitle())
+                .isEqualTo("MCP 安全基线未覆盖外部访问风险");
+    }
+
+    @Test
+    void registerTopicsNormalizesBlankPublicTitleToNull() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        DebateTools tools = new DebateTools(
+                new ClaimService(evidenceLedgerFor(store), store, new ReviewProtocolGuard()), debateService, new JudgeService(store));
+        Review review = conflictDetectionReview();
+        Claim backendClaim = claim(review.id(), RoleType.BACKEND, ClaimPosition.OPPOSE, "mcp.security");
+        store.saveClaim(backendClaim);
+
+        DebateService.RegisterTopicsResult registered = tools.registerDebateTopics(review,
+                new DebateToolCommands.RegisterTopics(metadata(review, "open-blank-title"), RoleType.DIRECTOR,
+                        List.of(new DebateToolCommands.TopicProposal("mcp.security",
+                                List.of(backendClaim.claimId()), "   "))));
+        DebateService.TopicResult opened = registered.topics().get(0);
+
+        assertThat(opened.topic().publicTitle()).isNull();
+        assertThat(store.findTopics(review.id()).get(0).publicTitle()).isNull();
+    }
+
     private EvidenceLedgerService evidenceLedgerFor(InMemoryReviewDebateStore store) {
         return new EvidenceLedgerService();
     }

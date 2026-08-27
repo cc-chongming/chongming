@@ -252,6 +252,8 @@ const conflictTopics = computed(() => debateTopics.value.map((topic, index) => {
         index: index + 1,
         topicId: topic.topicId,
         subject: topic.subjectKey,
+        // [AIREVIEW-PLAN-044#2] 协调者给出的中文议题标题（可空，前端回退 subjectKey）。
+        title: topic.title ?? null,
         severity,
         supports,
         opposes,
@@ -645,7 +647,8 @@ onUnmounted(() => loadQueue.dispose());
 
                     <section v-if="activePhase === 'judge' && judgements.length" class="flow-judgement-section" aria-label="议题裁决">
                         <article v-for="topic in judgements" :key="topic.topicId" class="flow-judgement-card">
-                            <header><span class="flow-judgement-badge">{{ gateLabel(topic.judgement.result) }}</span><strong>{{ topic.subjectKey }}</strong></header>
+                            <!-- [AIREVIEW-PLAN-044#2] 裁决卡优先显示中文议题标题。 -->
+                            <header><span class="flow-judgement-badge">{{ gateLabel(topic.judgement.result) }}</span><strong>{{ topic.title ?? topic.subjectKey }}</strong></header>
                             <p>{{ topic.judgement.reasonSummary }}</p>
                             <small>接受 {{ topic.judgement.acceptedClaimIds?.length ?? 0 }} 项 · 拒绝 {{ topic.judgement.rejectedClaimIds?.length ?? 0 }} 项</small>
                             <details v-if="topic.judgement.acceptedClaimIds?.length"><summary>查看采信的 Claim</summary><ReviewClaimList :claims="claimsForIds(topic.judgement.acceptedClaimIds)" /></details>
@@ -680,7 +683,8 @@ onUnmounted(() => loadQueue.dispose());
                     <section v-if="conflictTopics.length" class="flow-conflict-section" aria-label="冲突列表">
                         <p class="flow-conflict-heading">⚡ 已登记 {{ conflictTopics.length }} 个辩论议题<span v-if="opposingCount > 0"> · {{ opposingCount }} 组立场对立</span></p>
                         <article v-for="topic in conflictTopics" :key="topic.topicId" :class="['flow-conflict-card', topic.severity, { 'dissent-only': !topic.opposed }]">
-                            <header>议题 #{{ topic.index }} [{{ topic.severity }}] · {{ topic.subject }}</header>
+                            <!-- [AIREVIEW-PLAN-044#2] 议题优先显示中文标题，subjectKey 降为技术标识。 -->
+                            <header>议题 #{{ topic.index }} [{{ topic.severity }}] · {{ topic.title ?? topic.subject }}<small v-if="topic.title" class="flow-conflict-tech">技术标识：{{ topic.subject }}</small></header>
                             <template v-if="topic.opposed">
                                 <p><span class="flow-conflict-role">{{ roleTitle(topic.supports[0].role) }}</span> “{{ topic.supports[0].statement }}” vs <span class="flow-conflict-role">{{ roleTitle(topic.opposes[0].role) }}</span> “{{ topic.opposes[0].statement }}”</p>
                                 <small>类型: 立场对立 · 需进入辩论</small>
