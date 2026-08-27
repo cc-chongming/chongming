@@ -27,6 +27,22 @@ import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
 import { reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
+// [AIREVIEW-PLAN-041#1] 阶段流程节点图标：import.meta.glob 收集 phase-icons 资产（192×192），
+// 按「阶段 id → 资产前缀」与「phaseState → 资产状态」映射取图；failed 状态复用 running 图。
+const phaseIconAssets = import.meta.glob('../assets/phase-icons/*.png', { eager: true, import: 'default' });
+const PHASE_ASSET_PREFIX = {
+    scout: 'intake', director: 'planning', review: 'review', conflict: 'conflict',
+    debate: 'debate', judge: 'judging', human: 'human'
+};
+const PHASE_STATE_ASSET = { pending: 'pending', running: 'running', done: 'done', failed: 'running' };
+
+function phaseIconUrl(phaseId, state) {
+    const prefix = PHASE_ASSET_PREFIX[phaseId] ?? phaseId;
+    const assetState = PHASE_STATE_ASSET[state] ?? 'pending';
+    return phaseIconAssets[`../assets/phase-icons/${prefix}.${assetState}.png`]
+        ?? phaseIconAssets[`../assets/phase-icons/${prefix}.pending.png`]
+        ?? '';
+}
 
 const props = defineProps({ reviewId: { type: String, required: true } });
 const store = createReviewStore();
@@ -518,7 +534,7 @@ onUnmounted(() => loadQueue.dispose());
                 <p>评审流程</p>
                 <template v-for="(phase, index) in phaseList" :key="phase.id">
                     <button type="button" :class="['flow-phase-button', phaseState(index), { active: activePhase === phase.id }]" @click="selectPhase(phase)">
-                        <span class="flow-phase-icon">{{ phase.icon }}</span>
+                        <span class="flow-phase-icon"><img :src="phaseIconUrl(phase.id, phaseState(index))" :alt="phase.name"></span>
                         <span><strong>{{ phase.name }}</strong><small>{{ phase.subtitle }}</small></span>
                     </button>
                     <span v-if="index < phaseList.length - 1" :class="['flow-phase-connector', phaseState(index) === 'done' ? 'done' : '']"></span>
