@@ -19,6 +19,7 @@ import {
     partitionClaimsByPosition
 } from '../services/runtime-conversation-adapter';
 import { describeLiveRunState } from '../services/live-run-status';
+import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
 import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
 import { reviewApi } from '../api/review-api';
@@ -127,19 +128,6 @@ const phases = [
 ];
 const streamPhases = ['scout', 'director', 'judge'];
 const severityRank = { P0: 0, P1: 1, P2: 2, P3: 3 };
-const phaseIndexByStage = {
-    SNAPSHOTTING: 0,
-    PLANNING: 1,
-    INITIAL_REVIEW: 2,
-    CONFLICT_DETECTION: 3,
-    DEBATE_ROUND_1: 4,
-    DEBATE_ROUND_2: 4,
-    JUDGING: 5,
-    WAITING_HUMAN: 6,
-    NOTIFYING: 6,
-    COMPLETED: 6,
-    CANCELLED: 6
-};
 
 function roleTitle(role) {
     return {
@@ -163,13 +151,14 @@ function phaseForRole(role) {
     return 2;
 }
 
+// [AIREVIEW-PLAN-037#1] 初次进入停留在上下文侦察：PLANNING 窗口内 Scout 仍在流式输出，
+// 只有它结束（scoutConcluded）后被动观看才切换到评审规划；手动点选阶段不受影响。
 const activePhaseIndex = computed(() => {
     if (stage.value === 'FAILED') {
         const lastItem = runtimeItems.value.at(-1);
         return lastItem ? phaseForRole(lastItem.role) : 1;
     }
-    if (stage.value === 'PENDING') return runtimeItems.value.some((item) => item.role === 'CONTEXT_SCOUT') ? 0 : 1;
-    return phaseIndexByStage[stage.value] ?? 1;
+    return resolvePhaseLanding({ stage: stage.value, runtimeItems: runtimeItems.value, scoutConcluded: scoutConcluded.value });
 });
 const activePhase = computed(() => selectedPhase.value ?? phases[activePhaseIndex.value].id);
 const activePhaseDefinition = computed(() => phases.find((phase) => phase.id === activePhase.value) ?? phases[activePhaseIndex.value]);
@@ -198,10 +187,12 @@ const scoutHasActivity = computed(() => runtimeTrace.state.events.some((event) =
     String(event?.runId ?? '').includes(':context-scout')));
 const scoutRunFinished = computed(() => runtimeTrace.state.events.some((event) =>
     event?.type === 'RUN_FINISHED' && String(event?.runId ?? '').includes(':context-scout')));
-const scoutComplete = computed(() =>
-    activePhaseIndex.value >= 2
-    || store.state.summary?.contextScout?.status === 'DEGRADED'
-    || scoutRunFinished.value);
+// [AIREVIEW-PLAN-037#1] Scout 结束双信号：运行流 RUN_FINISHED 或 summary.contextScout 落库（COMPLETED/DEGRADED 均使其非空）。
+const scoutConcluded = computed(() => isScoutConcluded({
+    contextScout: store.state.summary?.contextScout ?? null,
+    scoutRunFinished: scoutRunFinished.value
+}));
+const scoutComplete = computed(() => scoutConcluded.value || activePhaseIndex.value >= 2);
 const maxDebateRound = computed(() => Math.max(1,
     store.state.summary?.stage === 'DEBATE_ROUND_2' ? 2 : 1,
     ...debateTopics.value.map((topic) => topic.currentRound ?? 1),

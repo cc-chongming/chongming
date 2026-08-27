@@ -982,3 +982,30 @@ chongming 评审自身时，工作区快照把 .agentscope/workspace 等运行�
 - Tags: process, plan-driven, documentation
 
 ---
+
+## [LRN-20260827-001] PLANNING 窗口内初次进入应停在上下文侦察，阶段机索引不等于观看落位
+
+**Logged**: 2026-08-27T00:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: review-ui, phase-navigation
+
+### Summary
+
+Context Scout 在阶段机进入 PLANNING 后仍持续流式输出（Scout 运行横跨 SNAPSHOTTING→PLANNING 窗口）。此前 `activePhaseIndex` 直接按 `phaseIndexByStage` 落位，PLANNING 即停在“评审规划”，而侧边栏却显示“评审规划=未开始、上下文侦察=进行中”——页面停在未开始的阶段，体验割裂。
+
+### Details
+
+修复（AIREVIEW-PLAN-037）：落位决策抽为纯函数 `resolvePhaseLanding`（frontend/src/services/review-phase-presenter.js）：按阶段索引落位，仅当结果为 1（PLANNING）且 Scout 未结束时回落到 0。Scout 结束双信号 = 运行流 RUN_FINISHED 事件或 `summary.contextScout` 落库（COMPLETED 结论/COMPLETED 事件/DEGRADED 事件都使其非空，见 ReviewQueryService 的 ContextScoutView 构造）。回放缺 RUN_FINISHED 时由 summary 兜底。`scoutComplete` 同步重写为 `scoutConcluded || activePhaseIndex >= 2`，消除原先对 activePhaseIndex 的双向依赖。
+
+### Suggested Action
+
+改阶段导航时记住：阶段机索引 ≠ 观看落位；任何“窗口内并行流”（Scout 之于 PLANNING）都要用结束信号决定初次落位与徽章，新增类似窗口时在 resolvePhaseLanding 加分支并补单测。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-037 implementation
+- Related Files: frontend/src/services/review-phase-presenter.js, frontend/src/views/ReviewLiveView.vue, src/main/java/ai/cc/chongming/review/application/ReviewQueryService.java, docs/AIREVIEW-PLAN-037-初次进入停留上下文侦察阶段.md
+- Tags: review-ui, phase-landing, context-scout, live-view
+
+---
