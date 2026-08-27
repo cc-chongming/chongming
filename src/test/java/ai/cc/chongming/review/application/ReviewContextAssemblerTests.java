@@ -176,7 +176,8 @@ class ReviewContextAssemblerTests {
                 Kind.ROLE_ASSESSMENT,
                 "role-reviewer",
                 Duration.ofSeconds(30),
-                4);
+                4,
+                null);
         ReviewContextAssembler assembler = new ReviewContextAssembler();
         var result = assembler.assemble(new ContextRequest(
                 new ReviewId(UUID.randomUUID()),

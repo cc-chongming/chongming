@@ -100,7 +100,8 @@ class RolePackContractTests {
                 .hasSize(1)
                 .allSatisfy(checkpoint -> {
                     assertThat(checkpoint.required()).isTrue();
-                    assertThat(checkpoint.instruction()).contains("SUPPORT").contains("oppose");
+                    // [AIREVIEW-PLAN-032#4.2] 中文 instruction 保留协议机制词（大写）以供冲突检测契约。
+                    assertThat(checkpoint.instruction()).contains("SUPPORT").contains("OPPOSE");
                 });
     }
 
@@ -133,6 +134,27 @@ class RolePackContractTests {
                 .filteredOn(Checkpoint::required)
                 .isNotEmpty()
                 .allSatisfy(checkpoint -> assertThat(checkpoint.instruction()).isNotBlank());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-032#4.2] Every role pack must carry role-mother-tongue expression guidance:
+     * Chinese identity, professional focus, forbidden machine identifiers and a checkpoint lens.
+     */
+    @Test
+    void givesEveryRolePackRoleMotherTongueVoiceGuidance() {
+        RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+
+        assertThat(registry.all())
+                .allSatisfy(rolePack -> assertThat(rolePack.voice())
+                        .as("role %s must carry expression guidance", rolePack.roleType())
+                        .isNotNull()
+                        .satisfies(voice -> {
+                            assertThat(voice.isEmpty()).isFalse();
+                            assertThat(voice.identity()).isNotBlank();
+                            assertThat(voice.focus()).isNotEmpty();
+                            assertThat(voice.avoid()).isNotEmpty();
+                            assertThat(voice.lens()).isNotBlank();
+                        }));
     }
 
     @Test
@@ -177,6 +199,7 @@ class RolePackContractTests {
                 Kind.ROLE_ASSESSMENT,
                 "role-reviewer",
                 timeout,
-                maxIterations);
+                maxIterations,
+                null);
     }
 }

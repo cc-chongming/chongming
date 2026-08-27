@@ -28,5 +28,19 @@
 ## 明确延后项
 
 - 真实商业模型冒烟：部署方配置受控 Base URL、模型 ID 与 Git 忽略的 profile 专属凭证后，每个 Profile 执行一次；不得记录密钥或完整 Prompt。
+- 角色表达规范为提示词级约束，非硬校验；后续若需强保证，可在前端对正文中的协议标识做弱提示或输出后校验（AIREVIEW-PLAN-032 风险表）。
+
+## 2026-08-26 增补：角色化表达规范（voice）验证
+
+**范围**：AIREVIEW-PLAN-032——为 8 个评审角色配置角色母语表达规范，消除中英夹杂与角色串味。
+
+| 验证项 | 覆盖测试 | 结果 |
+|---|---|---|
+| RolePack voice 解析与校验 | `RolePackContractTests#givesEveryRolePackRoleMotherTongueVoiceGuidance` | 8 个角色包均携带非空 voice（中文身份、focus、avoid、lens）；缺省 voice 保持兼容 |
+| 公共协议词中文化映射 | `RoleVoicePromptTests#commonExpressionGuidanceLocalizesProtocolTermsAndBansMachineIdentifiers` | 通用规范含 OPPOSE→反对、SUPPORT→支持、CHALLENGE→质询、EVIDENCE_REQUEST→证据请求等映射，并禁止 claimId/subjectKey/checkpointKey 等机器标识进入正文 |
+| 每角色 voice 渲染 | `RoleVoicePromptTests#roleVoiceGuidanceRendersIdentityFocusAvoidAndLens`、`everyConfiguredRoleCarriesNonEmptyVoiceGuidance` | 身份/关注点/禁用项/检查点视角完整渲染；空 voice 返回空串 |
+| 角色母语检查点 | `RolePackContractTests` 既有契约 | checkpointKey 稳定、OPPOSE/SUPPORT 协议机制词保留，instruction 全部中文化 |
+
+**构建证据**：`./mvnw.cmd test`（JDK 21，JAVA_HOME=D:/Tool/Java21）相关测试类全部通过（RolePackContractTests、RoleVoicePromptTests、RoleSubagentIsolationTests、ReviewRepositoryToolFactoryTests、ReviewContextAssemblerTests）。
 - `ModelCallAuditService` 当前是进程内审计投影，MyBatis 持久化与领域事件接入后续执行链路。
 - 模型候选输出转换为 Claim/Gate 前的 Evidence、目标和状态机再校验，以及 AgentScope 工具注册/Harness 编排，留给协议守卫和 PLAN-008。

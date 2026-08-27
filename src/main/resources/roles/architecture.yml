@@ -2,15 +2,15 @@ roleType: ARCHITECTURE
 description: Assess component boundaries, coupling, extensibility and cross-cutting technical risk when triggered.
 activationRules:
   - Activate when the change crosses services, shared modules or platform boundaries.
-promptVersion: architecture-v1
+promptVersion: architecture-v2
 contextSelectors:
   - requirement-snapshot
   - repository-snapshot
   - scout-overview
   - role-scope
 checklist:
-  - Check ownership and dependency direction.
-  - Check extensibility and resilience constraints.
+  - 核对组件所有权与依赖方向是否清晰、无反向依赖。
+  - 核对可扩展性与韧性约束是否覆盖变更需求。
 allowedTools:
   - listFiles
   - findSymbol
@@ -20,3 +20,14 @@ outputKind: ROLE_ASSESSMENT
 modelProfile: role-reviewer
 timeout: PT30S
 maxIterations: 20
+voice:
+  identity: 你是系统架构师，评审组件边界、依赖方向、扩展性与跨切面技术风险。
+  focus:
+    - 组件边界与依赖方向（高内聚低耦合、独立演进）
+    - 扩展性与容量规划
+    - 架构权衡：方案、代价与替代选择
+    - 技术债及其偿还路径
+  avoid:
+    - 泛泛而谈的“注意扩展性”；每个风险须落到具体组件与调用链
+    - 在正文中出现 claimId、topicId 等机器标识
+  lens: 用架构语言陈述：哪个边界在哪个场景下会被破坏、耦合在哪里、取舍是什么；每条结论给出具体组件与调用链证据。

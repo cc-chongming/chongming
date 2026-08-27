@@ -145,3 +145,4 @@
 | 2026-07-20 | 模型网关凭证改为由 Git 忽略的 profile 专属 `api-key` 配置提供，不再依赖环境变量名称解析；四个逻辑 Profile 默认复用顶层 `model-name`，避免本地直配模型时回落至占位模型；补齐配置绑定与网关契约测试。 |
 | 2026-07-20 | 增加仅限本机调试的 `log-conversation` 开关；默认关闭，local Profile 可开启后记录模型请求与响应正文，但仍不记录 API Key 或 Authorization。 |
 | 2026-07-29 | Director、Scout、全部角色评审 Agent（`role-reviewer`）和 Judge 均可在可恢复失败后一次性切换到 `fallback` Profile；Scout 默认单次调用超时调整为 120 秒。4xx 请求/鉴权/模型配置拒绝不会触发切换，主备 Profile 的切换过程保留关联审计。本机配置可为 `fallback` 指定另一个已部署模型，两个 Profile 继续共用同一兼容网关与凭证。 |
+| 2026-08-26 | [AIREVIEW-PLAN-032] RolePack 新增可选 `voice` 表达规范段（中文身份/岗位词汇/禁用项/检查点视角），8 个角色包全部配置并递增 promptVersion（product-v4、project-v3、backend-v3、frontend-v3、architecture-v2、security-v2、testing-v2、judge-v2）；`RoleSubagentFactory` 注入公共协议词中文化映射与每角色表达规范，覆盖初审/Claim/辩论/裁决/finalizer 输出。 |

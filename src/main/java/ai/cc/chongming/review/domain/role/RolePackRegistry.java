@@ -116,7 +116,8 @@ public class RolePackRegistry {
                 Kind.valueOf(text(values, "outputKind").toUpperCase(Locale.ROOT)),
                 text(values, "modelProfile"),
                 Duration.parse(text(values, "timeout")),
-                integer(values, "maxIterations"));
+                integer(values, "maxIterations"),
+                voice(values, resource.getFilename()));
         if (!ALLOWED_TOOL_NAMES.containsAll(rolePack.allowedTools())) {
             throw new IllegalArgumentException("RolePack requests a non-whitelisted tool: " + rolePack.roleType());
         }
@@ -211,6 +212,48 @@ public class RolePackRegistry {
         return list.stream().map(item -> {
             if (!(item instanceof String text) || text.isBlank()) {
                 throw new IllegalArgumentException("RolePack list contains blank value: " + key);
+            }
+            return text;
+        }).toList();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-032#1.2] Parses the optional {@code voice:} block carrying the
+     * role-mother-tongue expression guidance. A missing block keeps the legacy empty voice;
+     * a present but empty block is rejected so a voice is either absent or meaningful.
+     */
+    @SuppressWarnings("unchecked")
+    private RolePack.Voice voice(Map<String, Object> values, String filename) {
+        Object raw = values.get("voice");
+        if (!(raw instanceof Map<?, ?> voiceMap)) {
+            return RolePack.Voice.EMPTY;
+        }
+        Object identityRaw = voiceMap.get("identity");
+        String identity = identityRaw instanceof String identityText && !identityText.isBlank()
+                ? identityText : null;
+        Object lensRaw = voiceMap.get("lens");
+        String lens = lensRaw instanceof String lensText && !lensText.isBlank() ? lensText : null;
+        RolePack.Voice voice = new RolePack.Voice(
+                identity,
+                optionalList(voiceMap.get("focus"), "voice.focus", filename),
+                optionalList(voiceMap.get("avoid"), "voice.avoid", filename),
+                lens);
+        if (voice.isEmpty()) {
+            throw new IllegalArgumentException("RolePack voice block must not be empty: " + filename);
+        }
+        return voice;
+    }
+
+    private List<String> optionalList(Object raw, String key, String filename) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException("RolePack property must be a list: " + key + ": " + filename);
+        }
+        return list.stream().map(item -> {
+            if (!(item instanceof String text) || text.isBlank()) {
+                throw new IllegalArgumentException("RolePack list contains blank value: " + key + ": " + filename);
             }
             return text;
         }).toList();

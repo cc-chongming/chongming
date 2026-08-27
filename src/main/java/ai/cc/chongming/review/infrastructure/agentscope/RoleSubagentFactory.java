@@ -235,7 +235,9 @@ public class RoleSubagentFactory {
                     + "Always finish by calling draft_gate exactly once, even when the topic list is empty: the Gate must be drafted from the persisted Claims alone in that case. "
                     + "Never end the judging stage idle without calling draft_gate. "
                     + "Never create Claims, Evidence, or a final human Gate. "
-                    + "Use Simplified Chinese for every visible response, judgement summary, tool summary, and final text.";
+                    + "Use Simplified Chinese for every visible response, judgement summary, tool summary, and final text. "
+                    + commonExpressionGuidance()
+                    + roleVoiceGuidance(rolePack);
         }
         String repositoryGuidance = rolePack.allowedTools().contains("listFiles")
                 ? "Use listFiles only when the supplied project overview is insufficient, then use targeted searchText, readLines, or findSymbol "
@@ -279,8 +281,53 @@ public class RoleSubagentFactory {
                 + completionGuidance
                 + " Do not treat final text as a substitute for either tool. Return public "
                 + rolePack.outputKind().name() + " JSON compatible output using prompt version " + rolePack.promptVersion() + ". "
-                + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
+                + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text. "
+                + commonExpressionGuidance()
+                + roleVoiceGuidance(rolePack)
+                + "\n\n"
                 + publicContext;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-032#3.1] 公共表达规范：所有角色（含 Judge 与 finalizer）共用的语言与协议词
+     * 规范。协议动作必须中文化，机器标识禁止进入公开正文；该约束对初审、Claim 摘要、辩论与裁决
+     * 一视同仁。
+     */
+    static String commonExpressionGuidance() {
+        return "【表达规范·通用】"
+                + "正文一律使用简体中文；必要的代码标识与专有名词可原样保留，但首次出现须附中文说明，禁止大段英文。"
+                + "协议标识属于系统元信息，禁止出现在公开正文：claimId、subjectKey、commandId、topicId、checkpointKey、"
+                + "角色代号（PRODUCT/PROJECT/BACKEND 等）一律不使用；需要引用时改用中文描述（如“上一条主张”“某个验收项”）。"
+                + "协议动作必须口语化：OPPOSE→反对、SUPPORT→支持、CHALLENGE→质询、REBUTTAL→答辩、"
+                + "EVIDENCE_REQUEST→证据请求、Claim→主张、Assessment→评估、Judge→裁决、Gate→门禁。"
+                + "每条结论须是他人可验证的陈述：指出对象、证据来源与影响，而不是复述流程。 ";
+    }
+
+    /**
+     * [AIREVIEW-PLAN-032#3.2] 渲染角色包 voice 段：中文身份、岗位词汇、禁用项与检查点表达要求。
+     * 无 voice 时返回空串，保持旧提示词兼容。
+     */
+    static String roleVoiceGuidance(RolePack rolePack) {
+        RolePack.Voice voice = rolePack.voice();
+        if (voice == null || voice.isEmpty()) {
+            return "";
+        }
+        StringBuilder guidance = new StringBuilder("\n【角色表达规范】\n");
+        if (voice.identity() != null) {
+            guidance.append("身份：").append(voice.identity()).append('\n');
+        }
+        if (!voice.focus().isEmpty()) {
+            guidance.append("你的关注点（须用你的岗位语言陈述）：\n");
+            voice.focus().forEach(focus -> guidance.append("- ").append(focus).append('\n'));
+        }
+        if (!voice.avoid().isEmpty()) {
+            guidance.append("避免：\n");
+            voice.avoid().forEach(avoid -> guidance.append("- ").append(avoid).append('\n'));
+        }
+        if (voice.lens() != null) {
+            guidance.append("检查点表达要求：").append(voice.lens());
+        }
+        return guidance.toString();
     }
 
     /**
@@ -357,7 +404,9 @@ public class RoleSubagentFactory {
                 + "The bounded investigation phase has ended. Do not investigate, read files, debate, request context, or submit new Claims. "
                 + makeupGuidance
                 + "Then call complete_initial_review with a concise supplemental summary, including when there are no findings. "
-                + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text.\n\n"
+                + "Use Simplified Chinese for every visible response, claim summary, tool summary, and final text. "
+                + commonExpressionGuidance()
+                + "\n\n"
                 + publicContext;
     }
 

@@ -268,7 +268,8 @@ class ReviewRepositoryToolFactoryTests {
                 Kind.ROLE_ASSESSMENT,
                 "role-reviewer",
                 Duration.ofSeconds(30),
-                4);
+                4,
+                null);
     }
 
     private RequirementSnapshot requirementSnapshot(ReviewId reviewId) {

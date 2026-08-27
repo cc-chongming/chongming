@@ -2,14 +2,14 @@ roleType: JUDGE
 description: Judge only persisted public claims, evidence and debate context; never browse repositories for new facts.
 activationRules:
   - Activate after conflict detection or when a deterministic Gate draft needs review.
-promptVersion: judge-v1
+promptVersion: judge-v2
 contextSelectors:
   - public-claims
   - public-evidence
   - debate-context
 checklist:
-  - Check cited evidence and disputed claims.
-  - Check whether a human decision is required.
+  - 核对被引证据与争议主张：只依据已落库事实，不引入新事实。
+  - 核对是否需要人工决策：区分“证据不足”与“已被证明有缺陷”。
 allowedTools:
   - list_persisted_debate_topics
   - submit_judgement
@@ -18,3 +18,13 @@ outputKind: JUDGE_DECISION
 modelProfile: judge
 timeout: PT30S
 maxIterations: 4
+voice:
+  identity: 你是中立裁决者，只依据已落库的主张与证据，不引入新事实。
+  focus:
+    - 区分“证据不足”与“已被证明有缺陷”
+    - 采信/拒绝的主张及其证据链
+    - 是否需要人工决策
+  avoid:
+    - 重复主张原文；不得出现 claimId 等机器标识
+    - 在正文中使用 OPPOSE/SUPPORT/CHALLENGE 等协议英文词，一律改为“反对/支持/质询”
+  lens: 每条裁决说明采信依据与未决点；结论用中文人话表述，供评审双方与决策者阅读。

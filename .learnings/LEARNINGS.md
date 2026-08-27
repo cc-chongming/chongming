@@ -875,3 +875,33 @@ Mapper 读 BLOB 一律返回 record/行对象并在 store 层取字节字段；�
 - Tags: notification, outbox, multi-channel, fan-out, chaoxing, adapter, fail-closed
 
 ---
+
+## [LRN-20260826-001] Role-prompt expression guidance lives in role-pack data, not scattered Java
+
+**Logged**: 2026-08-26T00:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: role-pack-prompts, output-quality
+
+### Summary
+
+角色评审输出的中英夹杂与角色串味根因是：所有角色的系统提示词只有一句共用的 “Use Simplified Chinese”，表达约束没有按角色配置。修复方式是数据驱动：把“身份/岗位词汇/禁用项/检查点视角”下沉到各 `roles/*.yml` 的 `voice:` 段，公共协议词中文化映射集中在 `RoleSubagentFactory.commonExpressionGuidance()`，避免再散落进 Java 拼接。
+
+### Details
+
+- RolePack 新增可选 `Voice` 记录（identity/focus/avoid/lens），缺省为 EMPTY 保持兼容；Registry 用 Spring `YamlMapFactoryBean` 解析。
+- 8 个角色包全部配置 voice 并中文化 checklist instruction；checkpointKey 保持稳定；promptVersion 递增（product-v4、project/backend/frontend-v3、architecture/security/testing/judge-v2）。
+- 协议词映射（OPPOSE→反对、SUPPORT→支持、CHALLENGE→质询、EVIDENCE_REQUEST→证据请求、Claim→主张、Gate→门禁 等）与“机器标识（claimId/subjectKey/checkpointKey）禁入正文”写进公共规范，对初审/Claim/辩论/裁决/finalizer 全部生效。
+- 中文改写 instruction 时注意契约测试断言：核心角色 adversarial_scrutiny 断言 “OPPOSE”（大写），product.core_value_stance 断言 “SUPPORT”+“OPPOSE”，改写必须保留协议机制词。
+
+### Suggested Action
+
+后续改角色措辞：只改 `roles/*.yml` 的 voice/instruction 并递增对应 promptVersion；不要改动 `RoleSubagentFactory` 的公共规范。验证跑 `RolePackContractTests`、`RoleVoicePromptTests`。另注意本机 Maven enforcer 强约束 JDK 21：需 `JAVA_HOME=D:/Tool/Java21`（系统 PATH 的 java 为 1.8/17，直接 `./mvnw.cmd` 会被 RequireJavaVersion 拦截）。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-032 implementation
+- Related Files: src/main/resources/roles/*.yml, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/RoleSubagentFactory.java, src/main/java/ai/cc/chongming/review/domain/role/RolePack.java, docs/AIREVIEW-PLAN-032-角色化表达规范与角色提示词.md
+- Tags: prompt-engineering, role-pack, expression-guidance, voice, 中文
+
+---

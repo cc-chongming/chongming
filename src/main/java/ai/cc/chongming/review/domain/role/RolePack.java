@@ -9,7 +9,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Versioned role contract containing responsibilities, bounded tools and a public output schema.
+ * [AIREVIEW-PLAN-032#1.1] Versioned role contract containing responsibilities, bounded tools,
+ * a public output schema and role-mother-tongue {@link Voice} expression guidance.
  *
  * @author wangli
  */
@@ -24,7 +25,8 @@ public record RolePack(
         Kind outputKind,
         String modelProfile,
         Duration timeout,
-        int maxIterations) {
+        int maxIterations,
+        Voice voice) {
 
     public RolePack {
         Objects.requireNonNull(roleType, "roleType must not be null");
@@ -42,6 +44,7 @@ public record RolePack(
         if (maxIterations < 1 || maxIterations > 20) {
             throw new IllegalArgumentException("maxIterations must be between 1 and 20");
         }
+        voice = voice == null ? Voice.EMPTY : voice;
     }
 
     /**
@@ -69,6 +72,49 @@ public record RolePack(
 
         public boolean hasStableKey() {
             return checkpointKey != null;
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-032#1.1] Role-mother-tongue expression guidance rendered into the role system
+     * prompt: Chinese identity, professional vocabulary, forbidden machine identifiers and a
+     * checkpoint lens. An absent or all-empty {@code voice} keeps legacy prompts unchanged.
+     *
+     * @author wangli
+     */
+    public record Voice(
+            String identity,
+            List<String> focus,
+            List<String> avoid,
+            String lens) {
+
+        /** Voice with no content; legacy role packs without a voice block render no role guidance. */
+        public static final Voice EMPTY = new Voice(null, List.of(), List.of(), null);
+
+        public Voice {
+            if (identity != null && identity.isBlank()) {
+                throw new IllegalArgumentException("voice.identity must not be blank");
+            }
+            if (lens != null && lens.isBlank()) {
+                throw new IllegalArgumentException("voice.lens must not be blank");
+            }
+            focus = normalizeList(focus, "voice.focus");
+            avoid = normalizeList(avoid, "voice.avoid");
+        }
+
+        /** True when no expression guidance is configured for the role. */
+        public boolean isEmpty() {
+            return identity == null && focus.isEmpty() && avoid.isEmpty() && lens == null;
+        }
+
+        private static List<String> normalizeList(List<String> values, String name) {
+            if (values == null) {
+                return List.of();
+            }
+            if (values.stream().anyMatch(value -> value == null || value.isBlank())) {
+                throw new IllegalArgumentException(name + " must not contain blank values");
+            }
+            return List.copyOf(values);
         }
     }
 
