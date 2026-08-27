@@ -4,6 +4,8 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatChinaTime } from '../services/china-time';
 import LiveAgentConversation from '../components/LiveAgentConversation.vue';
+// [AIREVIEW-PLAN-049#1] 角色头像资产组件：替换 flow-agent-avatar 的字符内容（缺图时组件内回退字符）。
+import RoleAvatar from '../components/RoleAvatar.vue';
 import HumanReviewPanel from '../components/HumanReviewPanel.vue';
 import DebateTimeline from '../components/DebateTimeline.vue';
 import EvidenceDrawer from '../components/EvidenceDrawer.vue';
@@ -617,7 +619,8 @@ onUnmounted(() => loadQueue.dispose());
                     <!-- [AIREVIEW-PLAN-037#2] flow-stream-live：仅流式阶段面板参与视口拉伸与内部滚动，冲突阶段的协调者卡片不参与。 -->
                     <section class="flow-stream-panel flow-stream-live" aria-label="当前阶段公开运行流">
                         <header>
-                            <div class="flow-agent-avatar" :data-role="streamOwner.role">{{ streamOwner.initial }}</div>
+                            <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                            <div class="flow-agent-avatar" :data-role="streamOwner.role"><RoleAvatar :role="streamOwner.role" /></div>
                             <div><strong>{{ streamOwner.name }}</strong><span>{{ streamOwner.roleDesc }}</span></div>
                             <small>{{ phaseItems.length }} 条运行记录</small>
                         </header>
@@ -631,7 +634,8 @@ onUnmounted(() => loadQueue.dispose());
                             <small>{{ activationRows.length }} 个子代理</small>
                         </header>
                         <article v-for="row in activationRows" :key="row.role" class="flow-activation-row">
-                            <span class="flow-agent-avatar" :data-role="row.role">{{ roleInitial(row.role) }}</span>
+                            <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                            <span class="flow-agent-avatar" :data-role="row.role"><RoleAvatar :role="row.role" /></span>
                             <div class="flow-activation-name"><strong>{{ roleTitle(row.role) }}</strong><time v-if="row.activatedAt">{{ formatChinaTime(row.activatedAt) }}</time></div>
                             <span :class="['flow-activation-badge', row.state]">{{ activationBadgeText(row.state) }}</span>
                         </article>
@@ -664,7 +668,8 @@ onUnmounted(() => loadQueue.dispose());
                     <div class="flow-review-grid">
                         <article v-for="card in reviewCards" :key="card.role" :class="['flow-review-card', card.tone, { expanded: expandedRole === card.role }]">
                             <button type="button" class="flow-review-card-head" @click="toggleRole(card.role)">
-                                <span class="flow-agent-avatar" :data-role="card.role">{{ card.initials }}</span>
+                                <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                                <span class="flow-agent-avatar" :data-role="card.role"><RoleAvatar :role="card.role" /></span>
                                 <strong>{{ card.label }}</strong>
                                 <span class="flow-review-badge">{{ card.badge }}</span>
                             </button>
@@ -700,7 +705,8 @@ onUnmounted(() => loadQueue.dispose());
                     <div v-else class="flow-empty"><strong>尚未检测到立场冲突</strong><p>当支持方与质疑方同时提交 Claim 后，ConflictDetector 会在此汇总冲突组。</p></div>
 
                     <section class="flow-stream-panel flow-conflict-director" aria-label="协调者冲突处置">
-                        <header><div class="flow-agent-avatar director">协</div><div><strong>协调者</strong><span>冲突处置决策</span></div></header>
+                        <!-- [AIREVIEW-PLAN-049#1] 协调者卡头像资产 -->
+                        <header><div class="flow-agent-avatar director"><RoleAvatar role="DIRECTOR" /></div><div><strong>协调者</strong><span>冲突处置决策</span></div></header>
                         <div class="flow-conflict-director-body">
                             <p v-if="conflictTopics.length">已合并为 {{ debateTopics.length }} 个辩论议题（{{ opposingCount }} 组立场对立 + {{ dissentCount }} 个异议答辩），进入结构化辩论流程。</p>
                             <p v-else>暂无需要处置的冲突；如后续出现立场对立，将自动合并为辩论议题。</p>
@@ -732,7 +738,8 @@ onUnmounted(() => loadQueue.dispose());
                             <div class="flow-debate-side pro">
                                 <p class="flow-debate-label">🟢 支持方</p>
                                 <article v-for="claim in proClaims" :key="claim.claimId" class="flow-debate-claim">
-                                    <header><span class="flow-agent-avatar" :data-role="claim.role">{{ roleInitial(claim.role) }}</span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
+                                    <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                                    <header><span class="flow-agent-avatar" :data-role="claim.role"><RoleAvatar :role="claim.role" /></span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
                                     <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                                 </article>
                                 <p v-if="!proClaims.length" class="flow-debate-empty">暂无支持方 Claim。</p>
@@ -752,7 +759,8 @@ onUnmounted(() => loadQueue.dispose());
                             <div class="flow-debate-side con">
                                 <p class="flow-debate-label">🔴 质疑方</p>
                                 <article v-for="claim in conClaims" :key="claim.claimId" class="flow-debate-claim">
-                                    <header><span class="flow-agent-avatar" :data-role="claim.role">{{ roleInitial(claim.role) }}</span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
+                                    <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                                    <header><span class="flow-agent-avatar" :data-role="claim.role"><RoleAvatar :role="claim.role" /></span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
                                     <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                                 </article>
                                 <p v-if="!conClaims.length" class="flow-debate-empty">暂无质疑方 Claim。</p>
@@ -762,7 +770,8 @@ onUnmounted(() => loadQueue.dispose());
                         <section v-if="neutralClaims.length" class="flow-neutral-claims" aria-label="中立方 Claim">
                             <p class="flow-debate-label">⚪ 中立方</p>
                             <article v-for="claim in neutralClaims" :key="claim.claimId" class="flow-debate-claim">
-                                <header><span class="flow-agent-avatar" :data-role="claim.role">{{ roleInitial(claim.role) }}</span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
+                                <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                                <header><span class="flow-agent-avatar" :data-role="claim.role"><RoleAvatar :role="claim.role" /></span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
                                 <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                             </article>
                         </section>
@@ -772,7 +781,8 @@ onUnmounted(() => loadQueue.dispose());
                             <p class="flow-conflict-heading">📜 辩论对话流 · R{{ selectedRound }}</p>
                             <ol v-if="roundTurns.length" class="flow-dialogue-list">
                                 <li v-for="turn in roundTurns" :key="turn.turnId">
-                                    <header><span class="flow-agent-avatar" :data-role="turn.actorRole">{{ roleInitial(turn.actorRole) }}</span><strong>{{ roleTitle(turn.actorRole) }}</strong><span class="flow-turn-type">{{ turnTypeLabel(turn.type) }}</span><span v-if="turn.targetRole" class="flow-turn-target">→ {{ roleTitle(turn.targetRole) }}</span></header>
+                                    <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                                    <header><span class="flow-agent-avatar" :data-role="turn.actorRole"><RoleAvatar :role="turn.actorRole" /></span><strong>{{ roleTitle(turn.actorRole) }}</strong><span class="flow-turn-type">{{ turnTypeLabel(turn.type) }}</span><span v-if="turn.targetRole" class="flow-turn-target">→ {{ roleTitle(turn.targetRole) }}</span></header>
                                     <p>{{ turn.content }}</p>
                                     <small v-if="turn.stanceBefore || turn.stanceAfter">立场：{{ turn.stanceBefore || '—' }} → {{ turn.stanceAfter || '—' }}</small>
                                 </li>

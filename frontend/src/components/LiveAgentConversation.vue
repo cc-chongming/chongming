@@ -6,6 +6,8 @@ import { buildRuntimeConversation } from '../services/runtime-conversation-adapt
 import { formatChinaClock } from '../services/china-time';
 import AgUiToolCallMessage from './AgUiToolCallMessage.vue';
 import SafeMarkdown from './SafeMarkdown.vue';
+// [AIREVIEW-PLAN-049#1] 角色头像资产组件：替换消息行 agent-avatar 的字符内容（缺图时组件内回退字符）。
+import RoleAvatar from './RoleAvatar.vue';
 
 const props = defineProps({
     events: { type: Array, default: () => [] },
@@ -111,7 +113,8 @@ onUnmounted(() => globalThis.clearTimeout(scrollGuardTimer));
             <ol v-if="conversation.length" class="live-agent-timeline" aria-live="polite">
                 <li v-for="row in rows" :key="row.id" :class="['live-agent-entry', row.kind === 'tool-group' ? 'is-tool-group' : `is-${row.kind}`]">
                     <template v-if="row.kind === 'message'">
-                        <div class="agent-avatar" :data-role="row.role" aria-hidden="true">{{ roleInitial(row.role) }}</div>
+                        <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容（省略占位行保持“…”不变） -->
+                        <div class="agent-avatar" :data-role="row.role" aria-hidden="true"><RoleAvatar :role="row.role" /></div>
                         <article class="agent-dialogue">
                             <header class="agent-dialogue-header">
                                 <strong>{{ roleTitle(row.role) }}</strong>
