@@ -289,7 +289,8 @@ const phaseItems = computed(() => {
     const phase = activePhase.value;
     if (phase === 'scout') return runtimeItems.value.filter((item) => item.role === 'CONTEXT_SCOUT');
     if (phase === 'director') return runtimeItems.value.filter((item) => item.role === 'DIRECTOR');
-    if (phase === 'judge') return runtimeItems.value.filter((item) => item.role === 'JUDGE' || item.role === 'DIRECTOR');
+    // [AIREVIEW-PLAN-034#5] 裁决阶段只展示裁决者事件；协调者编排事件归属评审规划流。
+    if (phase === 'judge') return runtimeItems.value.filter((item) => item.role === 'JUDGE');
     return [];
 });
 const streamOwner = computed(() => {
