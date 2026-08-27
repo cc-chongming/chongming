@@ -1,4 +1,5 @@
 <script setup>
+// [AIREVIEW-PLAN-034#3] Trace events render through SafeMarkdown instead of plain text.
 import { computed } from 'vue';
 import SafeMarkdown from './SafeMarkdown.vue';
 const props = defineProps({ role: { type: String, default: null }, events: { type: Array, default: () => [] }, embedded: { type: Boolean, default: false } });

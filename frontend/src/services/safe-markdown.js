@@ -1,4 +1,5 @@
 // [AIREVIEW-PLAN-023#7.1] Minimal safe Markdown renderer for public model output.
+// [AIREVIEW-PLAN-034#3] Fence parsing hardened: indented fences, space before language, 3+ backticks, unclosed streaming fences.
 function escapeHtml(value) {
     return String(value ?? '')
         .replaceAll('&', '&amp;')

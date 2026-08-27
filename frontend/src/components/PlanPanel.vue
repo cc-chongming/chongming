@@ -1,4 +1,5 @@
 <script setup>
+// [AIREVIEW-PLAN-034#6] Scout degradation notice localized.
 import { formatChinaTime } from '../services/china-time';
 
 defineProps({

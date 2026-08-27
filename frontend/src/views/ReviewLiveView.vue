@@ -1,4 +1,5 @@
 <script setup>
+// [AIREVIEW-PLAN-034#1#6] De-bubbled stream panels, tool-call grouping layout and Chinese role/phase labels.
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatChinaTime } from '../services/china-time';

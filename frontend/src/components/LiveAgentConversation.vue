@@ -1,5 +1,6 @@
 <script setup>
 // [AIREVIEW-PLAN-023#7.1] Unified public AI conversation for every review Agent.
+// [AIREVIEW-PLAN-034#1#2#4#6] De-bubbled answers, Codex-style tool groups, scroll-follow fix, Chinese role labels.
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { buildRuntimeConversation } from '../services/runtime-conversation-adapter';
 import { formatChinaClock } from '../services/china-time';

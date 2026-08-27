@@ -1,5 +1,6 @@
 <script setup>
 // [AIREVIEW-PLAN-023#7.1] Render only the supported, sanitized public Markdown subset.
+// [AIREVIEW-PLAN-034#3] Shared sanitized renderer for every public conversation surface.
 import { computed } from 'vue';
 import { renderSafeMarkdown } from '../services/safe-markdown';
 

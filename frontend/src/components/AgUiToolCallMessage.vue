@@ -1,5 +1,6 @@
 <script setup>
 // [AIREVIEW-PLAN-023#7.2] Tools stay compact and collapsed; diagnostics are masked before display.
+// [AIREVIEW-PLAN-034#2] Monochrome SVG tool icon; light expanded I/O panels.
 import { computed, ref } from 'vue';
 import { maskSensitiveValue } from '../services/runtime-conversation-adapter';
 

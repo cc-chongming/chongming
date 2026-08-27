@@ -1,5 +1,6 @@
 <script setup>
 // [AIREVIEW-PLAN-023#7.3] Global conversation, review facts and runtime diagnostics share one drawer.
+// [AIREVIEW-PLAN-034#6] Compact role labels localized.
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { formatChinaTime } from '../services/china-time';
 import LiveAgentConversation from './LiveAgentConversation.vue';

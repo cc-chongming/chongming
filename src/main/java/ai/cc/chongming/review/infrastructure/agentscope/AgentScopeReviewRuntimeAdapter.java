@@ -52,7 +52,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(AgentScopeReviewRuntimeAdapter.class);
 
-    // The enforced budget matches the Scout prompt and the persisted baseline
+    // [AIREVIEW-PLAN-035#3.1] The enforced budget matches the Scout prompt and the persisted baseline
     // contract exactly, so a compliant model never trips the hard stop and any trip is a true violation.
     private static final Map<String, Integer> SCOUT_INIT_TOOL_LIMITS = Map.of(
             "glob_files", 2,
@@ -250,6 +250,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         }
         // [AIREVIEW-PLAN-025] Scout degradation used to be silent; log the root cause so the
         // advisory fallback stays diagnosable in server logs.
+        // [AIREVIEW-PLAN-035#3.3] Surface the violating tool in the degradation WARN.
         String detail = failure instanceof ScoutLimitExceededException limitExceeded ? limitExceeded.detail() : null;
         log.warn(
                 "context_scout_degraded reviewId={} attemptNo={} failureType={} message={} detail={}",
@@ -787,6 +788,7 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         return new AgentScopeProperties(false, ".agentscope/state");
     }
 
+    /** [AIREVIEW-PLAN-035#3.2] Carries the violating tool detail so degradations stay diagnosable. */
     private static final class ScoutLimitExceededException extends RuntimeException {
 
         private final String reasonCode;

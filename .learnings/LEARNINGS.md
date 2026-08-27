@@ -905,3 +905,80 @@ Mapper 读 BLOB 一律返回 record/行对象并在 store 层取字节字段；�
 - Tags: prompt-engineering, role-pack, expression-guidance, voice, 中文
 
 ---
+
+## [LRN-20260826-002] 自评审仓库的运行时状态会污染快照与模块根
+
+**Logged**: 2026-08-26T00:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: repository-snapshot, context-scout
+
+### Summary
+
+chongming 评审自身时，工作区快照把 .agentscope/workspace 等运行时状态当作评审内容冻入；模块根探测取清单前 40 文件的顶级目录，全部命中 .agentscope，INIT 清单告诉 Scout "唯一模块根是 .agentscope"。Scout 检索落空后循环重试，撞硬预算降级。另：违规调用在事件发布前被异常吞掉，日志无工具名，诊断靠考古。
+
+### Details
+
+修复（AIREVIEW-PLAN-035）：快照复制与指纹排除运行时目录（.agentscope/.qoder/.claude/.codex/.learnings 任意深度，output/logs 仅根级）；模块根改为全量清单按顶级目录计数取前 8；硬预算与提示词/基线统一为 2/3/4；违规异常携带工具名与次数并进入降级 WARN。
+
+### Suggested Action
+
+评审任何"仓库评审自身"的场景前，先检查快照顶层构成与 INIT 清单的模块根是否合理；Scout 降级时先看 context_scout_degraded 的 detail 字段。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-035 implementation
+- Related Files: src/main/java/ai/cc/chongming/review/application/RepositorySnapshotService.java, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewRepositoryToolFactory.java, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/AgentScopeReviewRuntimeAdapter.java, docs/AIREVIEW-PLAN-035-快照治理与Scout契约可观测.md
+- Tags: snapshot, module-roots, scout-contract, observability
+
+---
+
+## [LRN-20260826-003] 一边倒评审是结构问题：冲突需要显式的支持方
+
+**Logged**: 2026-08-26T00:00:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: review-debate, conflict-detection
+
+### Summary
+
+独立审查全部产出 OPPOSE 且各挂不同主题时，冲突检测（要求同主题 SUPPORT+OPPOSE）报告"无冲突"，兜底开题也没有防守方。"检测不到冲突"不等于"没有冲突"：需求文档本身是隐含支持方，但无角色代表它；反对与反对之间也可能互不相容。
+
+### Details
+
+修复（AIREVIEW-PLAN-033）：A 议题无支持方时 Director 必须指派 PRODUCT 为需求答辩人逐条回应（辩护或承认）；B 全部初审角色新增平衡义务（认可点须以 SUPPORT 提交，required 检查点强制）；C ConflictDetector 新增 OPPOSE_DIVERGENCE（同主题多角色反对即候选，基础分 40）。服务端 skip 闸门自 2026-08-19 起已禁止带 OPPOSE 跳过，register_topics 本就接受无 SUPPORT 主题。
+
+### Suggested Action
+
+再出现"一边倒"时：先确认各角色是否提交了 SUPPORT 主张（平衡义务生效与否），再看 OPPOSE_DIVERGENCE 是否把相关异议归入候选；答辩质量差时调整 product voice 的答辩义务措辞而非改状态机。
+
+### Metadata
+
+- Source: AIREVIEW-PLAN-033 implementation
+- Related Files: src/main/java/ai/cc/chongming/review/domain/debate/ConflictDetector.java, src/main/java/ai/cc/chongming/review/infrastructure/agentscope/ReviewDirectorHarnessFactory.java, src/main/resources/roles/*.yml, docs/AIREVIEW-PLAN-033-需求答辩人与平衡初审机制.md
+- Tags: debate, conflict-detection, defender, balanced-review
+
+---
+
+## [LRN-20260826-004] 计划驱动开发规则需先读后动，事后补齐成本更高
+
+**Logged**: 2026-08-26T00:00:00+08:00
+**Priority**: medium
+**Status**: resolved
+**Area**: process, plan-driven-development
+
+### Summary
+
+.codex/rules/plan-driven-development.md 要求"先出计划，再写代码"：计划文档含头部元信息/分段方案/文件清单/实施顺序/风险/变更记录，代码注释标注 [PLAN-编号#段.子段]。本次多个功能先行实施后才读规则，补齐计划文档与段标注花了额外一轮。
+
+### Suggested Action
+
+接到新功能/重构任务时，先读 .codex/rules/ 与 AGENTS.md，在 docs/ 下建 AIREVIEW-PLAN-XXX 计划文档再动手；实施中段更新状态，收尾时更新 .learnings 与（如有）CLAUDE.md。
+
+### Metadata
+
+- Source: retroactive plan backfill session
+- Related Files: .codex/rules/plan-driven-development.md, docs/AIREVIEW-PLAN-033-*.md, docs/AIREVIEW-PLAN-034-*.md, docs/AIREVIEW-PLAN-035-*.md
+- Tags: process, plan-driven, documentation
+
+---

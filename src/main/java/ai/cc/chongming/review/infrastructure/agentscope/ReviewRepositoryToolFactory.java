@@ -316,7 +316,7 @@ public class ReviewRepositoryToolFactory {
         }
         List<ai.cc.chongming.review.infrastructure.repository.RepositorySearchIndex.FileMetadata> files =
                 repositoryTools.listFiles(toolContext, 40, runtimeContext.cancellation());
-        // Module roots are aggregated over the full snapshot manifest instead of
+        // [AIREVIEW-PLAN-035#2.1] Module roots are aggregated over the full snapshot manifest instead of
         // the first 40 entries, so one alphabetically-early junk directory cannot hijack the roots.
         Map<String, Long> rootCounts = new LinkedHashMap<>();
         for (String relativePath : snapshotFileList(runtimeContext, toolContext)) {

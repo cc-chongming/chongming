@@ -57,10 +57,10 @@ public class RepositorySnapshotService {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
     private static final Set<String> EXCLUDED_DIRECTORIES = Set.of(
             ".git", "target", "node_modules", ".idea",
-            // Local agent/build runtime state must never become reviewable content:
+            // [AIREVIEW-PLAN-035#1.1] Local agent/build runtime state must never become reviewable content:
             // it dominated snapshots when a repository reviewed its own worktree.
             ".agentscope", ".qoder", ".claude", ".codex", ".learnings");
-    // Root-only artifacts: generic names that are noise at the repository root but may be legitimate deeper.
+    // [AIREVIEW-PLAN-035#1.2] Root-only artifacts: generic names that are noise at the repository root but may be legitimate deeper.
     private static final Set<String> EXCLUDED_ROOT_DIRECTORIES = Set.of("output", "logs");
     private static final int BINARY_PROBE_SIZE = 8192;
 
@@ -702,6 +702,7 @@ public class RepositorySnapshotService {
         }
     }
 
+    // [AIREVIEW-PLAN-035#1.3] The worktree fingerprint stays blind to the same exclusions.
     private boolean isExcluded(Path relative) {
         int segmentIndex = 0;
         for (Path segment : relative) {

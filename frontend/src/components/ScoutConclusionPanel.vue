@@ -1,5 +1,6 @@
 <script setup>
 // [AIREVIEW-PLAN-023#5.2] Stable, readable rendering of the persisted Scout conclusion.
+// [AIREVIEW-PLAN-034#6] Empty-state copy localized (上下文侦察).
 import { computed } from 'vue';
 import SafeMarkdown from './SafeMarkdown.vue';
 

@@ -1,4 +1,5 @@
 <script setup>
+// [AIREVIEW-PLAN-034#6] Scout preview copy localized (上下文侦察).
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import AgUiConversationPanel from '../components/AgUiConversationPanel.vue';

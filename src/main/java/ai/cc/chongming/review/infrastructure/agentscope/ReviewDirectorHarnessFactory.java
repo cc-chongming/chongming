@@ -203,7 +203,7 @@ public class ReviewDirectorHarnessFactory {
                 + "it is the authoritative source for Claim IDs and is not materialized as a workspace file. "
                 + "If any persisted Claim has an OPPOSE position, open debate topic(s) covering those conflicting Claims. "
                 + "Prefer grouping related OPPOSE Claims into one topic and include a SUPPORT Claim when one exists for that subject, but when no SUPPORT Claim exists open the topic with the OPPOSE Claim(s) alone so the debate can still proceed. "
-                + "[AIREVIEW-PLAN-033] A topic without any SUPPORT claim still has an implicit defender: the requirement itself. "
+                + "[AIREVIEW-PLAN-033#1.1] A topic without any SUPPORT claim still has an implicit defender: the requirement itself. "
                 + "For every such topic appoint the PRODUCT role as the requirement defender: your first dispatch of round one for that topic must direct PRODUCT to answer every OPPOSE claim of the topic — defend the requirement using its own text as evidence, or explicitly acknowledge the objection. "
                 + "If PRODUCT is not activated, appoint the activated role closest to the requirement as defender. Never let a debate topic run without a defending side. "
                 + "Only when no persisted Claim has an OPPOSE position call skip_debate_when_no_conflicts instead of opening a topic. "

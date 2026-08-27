@@ -83,7 +83,7 @@ public final class ConflictDetector {
         if (hasSupport && hasOppose) {
             rules.add(ConflictRule.OPPOSING_POSITION);
         }
-        // [AIREVIEW-PLAN-033] Objections from different roles on the same subject can still conflict
+        // [AIREVIEW-PLAN-033#3.1] Objections from different roles on the same subject can still conflict
         // with each other (divergent diagnoses or incompatible remedies). Surface such subjects even
         // without a SUPPORT position so the debate can reconcile the objections themselves — unanimous
         // opposition is not the absence of conflict.

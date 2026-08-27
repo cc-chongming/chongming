@@ -1,4 +1,5 @@
 <script setup>
+// [AIREVIEW-PLAN-034#3#6] Scout/review transcripts render through SafeMarkdown; names localized.
 import AgUiToolCallMessage from './AgUiToolCallMessage.vue';
 import SafeMarkdown from './SafeMarkdown.vue';
 
