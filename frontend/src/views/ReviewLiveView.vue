@@ -545,7 +545,8 @@ onUnmounted(() => loadQueue.dispose());
                 <header class="flow-phase-header">
                     <div>
                         <p>{{ activePhaseDefinition.subtitle }}</p>
-                        <h1>{{ activePhaseDefinition.icon }} {{ activePhaseDefinition.name }}<template v-if="activePhase === 'debate' && debateSubject"> — {{ debateSubject }}</template></h1>
+                        <!-- [AIREVIEW-PLAN-041#2] 阶段大标题同步使用三状态图标（状态与左侧流程一致）。 -->
+                        <h1><img class="flow-phase-title-icon" :src="phaseIconUrl(activePhaseDefinition.id, phaseState(phases.findIndex((phase) => phase.id === activePhase)))" :alt="activePhaseDefinition.name">{{ activePhaseDefinition.name }}<template v-if="activePhase === 'debate' && debateSubject"> — {{ debateSubject }}</template></h1>
                     </div>
                     <span :class="['flow-phase-badge', phaseState(phases.findIndex((phase) => phase.id === activePhase))]">{{ phaseBadgeText(phaseState(phases.findIndex((phase) => phase.id === activePhase))) }}</span>
                 </header>
