@@ -93,3 +93,4 @@ SafeMarkdown 围栏解析脆弱，且部分对话面未渲染 Markdown。本计�
 ## 变更记录
 
 - 2026-08-26：实施完成（提交 3fce4e9）；按 .codex/rules/plan-driven-development.md 补齐本计划文档。
+- 2026-08-26：修复侧边栏"退出登录"按钮文字溢出（#5 延伸）：按钮禁止 flex 收缩，用户名/角色名超长时省略号截断。

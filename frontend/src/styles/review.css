@@ -722,7 +722,10 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .auth-actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .35rem; }
 .auth-switch { color: #1456a9; font-size: .85rem; text-decoration: none; }
 .auth-switch:hover { text-decoration: underline; }
-.user-area .auth-logout { margin-left: auto; font-size: 11px; white-space: nowrap; }
+/* [AIREVIEW-PLAN-034#5] Keep the logout button whole; long user names ellipsize instead of squeezing it. */
+.user-area > div:not(.avatar) { min-width: 0; }
+.user-area .user-name, .user-area .user-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-area .auth-logout { margin-left: auto; flex: 0 0 auto; font-size: 11px; white-space: nowrap; }
 
 /* [AIREVIEW-PLAN-029] Repository source picker: configured whitelist vs online repository. */
 .repo-source-picker { display: grid; gap: .55rem; width: 100%; }
