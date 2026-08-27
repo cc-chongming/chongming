@@ -214,9 +214,29 @@ const conflicts = computed(() => debateTopics.value.flatMap((topic, index) => {
     const severity = [...claims].sort((left, right) => (severityRank[left.severity] ?? 9) - (severityRank[right.severity] ?? 9))[0]?.severity ?? 'P2';
     return [{ index: index + 1, topicId: topic.topicId, subject: topic.subjectKey, severity, support: supports[0], oppose: opposes[0] }];
 }));
+// [AIREVIEW-PLAN-034#5 延伸] 每个已登记议题都进入冲突视图：立场对立或纯异议答辩，
+// 与需求答辩机制（大量议题为"只有反对方 + 答辩人待回应"）保持一致。
+const conflictTopics = computed(() => debateTopics.value.map((topic, index) => {
+    const claims = topic.claims ?? [];
+    const supports = claims.filter((claim) => claim.position === 'SUPPORT');
+    const opposes = claims.filter((claim) => claim.position === 'OPPOSE');
+    const severity = [...claims].sort((left, right) => (severityRank[left.severity] ?? 9) - (severityRank[right.severity] ?? 9))[0]?.severity ?? 'P2';
+    return {
+        index: index + 1,
+        topicId: topic.topicId,
+        subject: topic.subjectKey,
+        severity,
+        supports,
+        opposes,
+        opposed: supports.length > 0 && opposes.length > 0,
+        round: topic.currentRound ?? 1
+    };
+}));
+const opposingCount = computed(() => conflictTopics.value.filter((topic) => topic.opposed).length);
+const dissentCount = computed(() => conflictTopics.value.length - opposingCount.value);
 const phaseList = computed(() => phases.map((phase) => {
     if (phase.id === 'review') return { ...phase, subtitle: `${completedRoles.value}/${reviewRoleCodes.value.length} 角色初审完成` };
-    if (phase.id === 'conflict' && conflicts.value.length) return { ...phase, subtitle: `${conflicts.value.length} 组冲突发现` };
+    if (phase.id === 'conflict' && conflictTopics.value.length) return { ...phase, subtitle: `${conflictTopics.value.length} 个议题登记` };
     if (phase.id === 'debate' && debateTopics.value.length) return { ...phase, subtitle: `第 ${maxDebateRound.value} 轮 · ${debateTopics.value.length} 个议题` };
     return phase;
 }));
@@ -275,7 +295,7 @@ const phaseItems = computed(() => {
 const streamOwner = computed(() => {
     if (activePhase.value === 'scout') return { initial: '侦', role: 'CONTEXT_SCOUT', name: '上下文侦察', roleDesc: '项目上下文探索' };
     if (activePhase.value === 'judge') return { initial: '裁', role: 'JUDGE', name: '裁决者', roleDesc: '仅基于已持久化的 Claim 和证据裁决' };
-    return { initial: '协', role: 'DIRECTOR', name: '协调者', roleDesc: '评审流程编排' };
+    return { initial: '协', role: 'DIRECTOR', name: '协调者', roleDesc: '评审流程编排 · 贯穿规划/冲突/调度' };
 });
 const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
     const items = runtimeItems.value.filter((item) => item.role === role);
@@ -580,12 +600,18 @@ onUnmounted(() => loadQueue.dispose());
 
                 <!-- ── 冲突检测 ── -->
                 <template v-else-if="activePhase === 'conflict'">
-                    <section v-if="conflicts.length" class="flow-conflict-section" aria-label="冲突列表">
-                        <p class="flow-conflict-heading">⚡ ConflictDetector 发现 {{ conflicts.length }} 组冲突</p>
-                        <article v-for="conflict in conflicts" :key="conflict.topicId" :class="['flow-conflict-card', conflict.severity]">
-                            <header>冲突 #{{ conflict.index }} [{{ conflict.severity }}] · {{ conflict.subject }}</header>
-                            <p><span class="flow-conflict-role">{{ roleTitle(conflict.support.role) }}</span> “{{ conflict.support.statement }}” vs <span class="flow-conflict-role">{{ roleTitle(conflict.oppose.role) }}</span> “{{ conflict.oppose.statement }}”</p>
-                            <small>类型: 立场对立 · 需进入辩论</small>
+                    <section v-if="conflictTopics.length" class="flow-conflict-section" aria-label="冲突列表">
+                        <p class="flow-conflict-heading">⚡ 已登记 {{ conflictTopics.length }} 个辩论议题<span v-if="opposingCount > 0"> · {{ opposingCount }} 组立场对立</span></p>
+                        <article v-for="topic in conflictTopics" :key="topic.topicId" :class="['flow-conflict-card', topic.severity, { 'dissent-only': !topic.opposed }]">
+                            <header>议题 #{{ topic.index }} [{{ topic.severity }}] · {{ topic.subject }}</header>
+                            <template v-if="topic.opposed">
+                                <p><span class="flow-conflict-role">{{ roleTitle(topic.supports[0].role) }}</span> “{{ topic.supports[0].statement }}” vs <span class="flow-conflict-role">{{ roleTitle(topic.opposes[0].role) }}</span> “{{ topic.opposes[0].statement }}”</p>
+                                <small>类型: 立场对立 · 需进入辩论</small>
+                            </template>
+                            <template v-else>
+                                <p>{{ topic.opposes.length }} 条反对主张（{{ topic.opposes.map((claim) => roleTitle(claim.role)).join('、') }}）——等待需求答辩人逐条回应。</p>
+                                <small>类型: 异议答辩 · 第 {{ topic.round }} 轮</small>
+                            </template>
                         </article>
                     </section>
                     <div v-else class="flow-empty"><strong>尚未检测到立场冲突</strong><p>当支持方与质疑方同时提交 Claim 后，ConflictDetector 会在此汇总冲突组。</p></div>
@@ -593,7 +619,7 @@ onUnmounted(() => loadQueue.dispose());
                     <section class="flow-stream-panel flow-conflict-director" aria-label="协调者冲突处置">
                         <header><div class="flow-agent-avatar director">协</div><div><strong>协调者</strong><span>冲突处置决策</span></div></header>
                         <div class="flow-conflict-director-body">
-                            <p v-if="conflicts.length">检测到 {{ conflicts.length }} 组冲突，已合并为 {{ debateTopics.length }} 个辩论议题，进入结构化辩论流程。</p>
+                            <p v-if="conflictTopics.length">已合并为 {{ debateTopics.length }} 个辩论议题（{{ opposingCount }} 组立场对立 + {{ dissentCount }} 个异议答辩），进入结构化辩论流程。</p>
                             <p v-else>暂无需要处置的冲突；如后续出现立场对立，将自动合并为辩论议题。</p>
                             <p v-if="runtimeItems.filter((item) => item.role === 'DIRECTOR').length" class="flow-conflict-director-latest">{{ itemSummary(runtimeItems.filter((item) => item.role === 'DIRECTOR').at(-1)) }}</p>
                         </div>

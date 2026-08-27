@@ -297,6 +297,8 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-conflict-card header { color: #f0b6bc; font-size: .74rem; font-weight: 800; }.flow-conflict-card.P1 header { color: #ffd58f; }.flow-conflict-card.P2 header, .flow-conflict-card.P3 header { color: #b8c7ff; }
 .flow-conflict-card p { margin: .35rem 0 0; color: #d3d9e8; font-size: .75rem; line-height: 1.65; }.flow-conflict-role { color: #7fd6c2; font-weight: 700; }
 .flow-conflict-card small { display: block; margin-top: .35rem; color: var(--flow-dim); font-size: .66rem; }
+/* 纯异议答辩卡片：沿用基础卡片式样，左侧色条/边框与标题换为琥珀色系，与 stone 单色调和。 */
+.flow-conflict-card.dissent-only { border-left-color: #f59e0b; }.flow-conflict-card.dissent-only header { color: #fbbf24; }
 .flow-conflict-director { margin-top: .25rem; }.flow-conflict-director-body { padding: .85rem 1rem; }.flow-conflict-director-body p { margin: 0; color: #d7dced; font-size: .78rem; line-height: 1.65; }.flow-conflict-director-latest { margin-top: .45rem !important; color: var(--flow-dim) !important; font-size: .7rem !important; }
 .flow-round-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; }
 .flow-round-tab { padding: .4rem .9rem; color: var(--flow-dim); background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .4rem; font-size: .72rem; font-weight: 700; cursor: pointer; }.flow-round-tab span { margin-left: .3rem; font-size: .62rem; opacity: .8; }.flow-round-tab:hover { color: var(--flow-text); border-color: var(--flow-accent); }.flow-round-tab.active { color: #fff; background: var(--flow-accent); border-color: var(--flow-accent); }
@@ -624,6 +626,7 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-severity.P0 { color: #b91c1c; background: #fee2e2; }.flow-severity.P1 { color: #9a3412; background: #ffedd5; }.flow-severity.P2 { color: #1d4ed8; background: #dbeafe; }.flow-severity.P3 { color: #57534e; background: #e7e5e4; }
 .flow-conflict-card, .flow-debate-claim { color: #292524; background: #fafaf9; }
 .flow-conflict-card header { color: #b91c1c; }.flow-conflict-card.P1 header { color: #9a3412; }.flow-conflict-card.P2 header, .flow-conflict-card.P3 header { color: #1d4ed8; }
+.flow-conflict-card.dissent-only header { color: #b45309; }
 .flow-conflict-card p, .flow-conflict-director-body p, .flow-dialogue-list p { color: #44403c; }
 .flow-conflict-heading { color: #44403c; }.flow-dialogue-list li header strong { color: #1c1917; }
 .flow-empty, .flow-empty strong { color: #44403c; }
