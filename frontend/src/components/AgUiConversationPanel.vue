@@ -1,5 +1,6 @@
 <script setup>
 import AgUiToolCallMessage from './AgUiToolCallMessage.vue';
+import SafeMarkdown from './SafeMarkdown.vue';
 
 defineProps({
     conversation: { type: Object, required: true },
@@ -12,7 +13,7 @@ defineProps({
         <div class="panel-heading">
             <div>
                 <p class="eyebrow">AG-UI · CUSTOM + TEXT_MESSAGE</p>
-                <h2 id="ag-ui-title">{{ variant === 'scout' ? 'Context Scout 执行流' : '公开对话流' }}</h2>
+                <h2 id="ag-ui-title">{{ variant === 'scout' ? '上下文侦察执行流' : '公开对话流' }}</h2>
             </div>
             <span class="topic-status">{{ conversation.status }}</span>
         </div>
@@ -22,17 +23,17 @@ defineProps({
             <li v-for="item in conversation.items" :key="item.id" :class="['scout-timeline-item', item.type]">
                 <AgUiToolCallMessage v-if="item.type === 'toolCall'" :item="item" />
                 <article v-else class="ag-ui-message assistant">
-                    <header><strong>{{ item.name || 'Context Scout' }}</strong><span>{{ item.status }}</span></header>
-                    <p>{{ item.content }}</p>
+                    <header><strong>{{ item.name || '上下文侦察' }}</strong><span>{{ item.status }}</span></header>
+                    <SafeMarkdown :content="item.content" />
                 </article>
             </li>
         </ol>
         <ol v-else-if="variant !== 'scout' && conversation.messages.length" class="ag-ui-messages">
             <li v-for="message in conversation.messages" :key="message.id" :class="['ag-ui-message', message.role]">
                 <header><strong>{{ message.name || message.role }}</strong><span>{{ message.status }}</span></header>
-                <p>{{ message.content }}</p>
+                <SafeMarkdown :content="message.content" />
             </li>
         </ol>
-        <p v-else class="empty-note">{{ variant === 'scout' ? '等待 Context Scout 开始受限快照检索。' : '等待公开 Claim、质询、答辩或裁决事件。人工决定请使用下方审核表单。' }}</p>
+        <p v-else class="empty-note">{{ variant === 'scout' ? '等待上下文侦察开始受限快照检索。' : '等待公开 Claim、质询、答辩或裁决事件。人工决定请使用下方审核表单。' }}</p>
     </section>
 </template>

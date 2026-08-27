@@ -12,6 +12,16 @@ describe('safe markdown', () => {
         expect(html).toContain('href="https://example.com"');
     });
 
+    it('renders robust fenced code variants (space before language, indentation, long fences, streaming)', () => {
+        expect(renderSafeMarkdown('``` json\n{"a": 1}\n```')).toContain('<pre><code class="language-json">');
+        expect(renderSafeMarkdown('  ```json\n{"a": 1}\n  ```')).toContain('<pre><code class="language-json">');
+        expect(renderSafeMarkdown('````json\n{"a": 1}\n````')).toContain('<pre><code class="language-json">');
+        expect(renderSafeMarkdown('流式中：\n```json\n{"a": 1,')).toContain('<pre><code class="language-json">');
+        const nested = renderSafeMarkdown('````md\n```json\n{"a":1}\n```\n````');
+        expect(nested).toContain('<pre><code class="language-md">');
+        expect(nested).toContain('{&quot;a&quot;:1}');
+    });
+
     it('escapes raw html and removes dangerous link targets', () => {
         const html = renderSafeMarkdown('<img src=x onerror=alert(1)>\n\n[攻击](javascript:alert(1))');
 

@@ -56,7 +56,7 @@ async function copy(kind, value) {
     <article class="ag-ui-tool-call" :data-status="effectiveStatus">
         <details>
             <summary :aria-label="`${toolLabel}，${statusLabel}`">
-                <span class="tool-call-symbol" aria-hidden="true">🔧</span>
+                <span class="tool-call-symbol" aria-hidden="true"><svg class="tool-call-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.75"/><path d="M4.75 6.25 6.75 8l-2 1.75"/><path d="M8.25 10.25h3"/></svg></span>
                 <strong>{{ toolLabel }}</strong>
                 <code>{{ item.toolName }}</code>
                 <span class="tool-call-status">{{ statusLabel }}</span>

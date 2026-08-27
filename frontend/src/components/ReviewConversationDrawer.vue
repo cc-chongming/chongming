@@ -22,7 +22,7 @@ const roles = computed(() => [...new Set(props.items.map((item) => item.role).fi
 const filteredItems = computed(() => roleFilter.value === 'ALL' ? props.items : props.items.filter((item) => item.role === roleFilter.value));
 
 function roleTitle(role) {
-    return { CONTEXT_SCOUT: 'Scout', DIRECTOR: 'Director', PRODUCT: '产品', PROJECT: '项目', FRONTEND: '前端', BACKEND: '后端', ARCHITECTURE: '架构', SECURITY: '安全', TESTING: '测试', PERFORMANCE: '性能', JUDGE: 'Judge' }[role] ?? role;
+    return { CONTEXT_SCOUT: '侦察', DIRECTOR: '协调', PRODUCT: '产品', PROJECT: '项目', FRONTEND: '前端', BACKEND: '后端', ARCHITECTURE: '架构', SECURITY: '安全', TESTING: '测试', PERFORMANCE: '性能', JUDGE: '裁决' }[role] ?? role;
 }
 
 function onKeydown(event) {

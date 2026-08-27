@@ -67,6 +67,6 @@ function scopeText(item) {
                 <SafeMarkdown v-if="cleanedRaw" :content="cleanedRaw" />
             </details>
         </div>
-        <div v-else class="scout-conclusion-empty"><strong>等待 Context Scout 形成结论</strong><p>公开对话会先实时增长；收集完成后，这里将保留可重启回放的模块、入口、约束、风险与证据摘要。</p></div>
+        <div v-else class="scout-conclusion-empty"><strong>等待上下文侦察形成结论</strong><p>公开对话会先实时增长；收集完成后，这里将保留可重启回放的模块、入口、约束、风险与证据摘要。</p></div>
     </section>
 </template>

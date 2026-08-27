@@ -38,10 +38,11 @@ const commandMessage = ref('');
 const lifecycleError = ref('');
 const stage = computed(() => store.state.summary?.stage ?? 'PENDING');
 // [AIREVIEW-PLAN-030] The lifecycle card only earns its space when it is actionable:
-// pending start, or a terminal failure/cancellation needing retry. Running reviews keep
-// refresh/cancel as compact header buttons instead of a card on every phase.
+// pending start, a terminal failure/cancellation needing retry, or a real command error.
+// Transient "command accepted" notes during STARTING no longer summon the card — running
+// reviews keep refresh/cancel as compact header buttons instead.
 const lifecycleCardRelevant = computed(() => ['PENDING', 'FAILED', 'CANCELLED'].includes(stage.value)
-    || commandMessage.value !== '' || lifecycleError.value !== '');
+    || lifecycleError.value !== '');
 const liveCancelable = computed(() => store.state.summary?.reviewVersion != null
     && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(stage.value));
 const liveRunState = computed(() => describeLiveRunState(stage.value, runtimeTrace.state.status));
@@ -115,13 +116,13 @@ async function retryNotification(entry) {
 }
 
 const phases = [
-    { id: 'scout', icon: '🔍', name: 'Context Scout', subtitle: '项目信息收集' },
-    { id: 'director', icon: '🎬', name: 'Director 规划', subtitle: '创建评审计划' },
-    { id: 'review', icon: '👥', name: '独立审查', subtitle: '多角色并行' },
-    { id: 'conflict', icon: '⚡', name: '冲突检测', subtitle: '识别分歧与风险' },
-    { id: 'debate', icon: '⚖️', name: '多轮辩论', subtitle: '围绕争议收敛' },
-    { id: 'judge', icon: '👨‍⚖️', name: 'Judge 裁决', subtitle: '形成评审判断' },
-    { id: 'human', icon: '🧑', name: '人工决策', subtitle: '最终 Gate' }
+    { id: 'scout', icon: '侦', name: '上下文侦察', subtitle: '项目信息收集' },
+    { id: 'director', icon: '协', name: '评审规划', subtitle: '创建评审计划' },
+    { id: 'review', icon: '审', name: '独立审查', subtitle: '多角色并行' },
+    { id: 'conflict', icon: '冲', name: '冲突检测', subtitle: '识别分歧与风险' },
+    { id: 'debate', icon: '辩', name: '多轮辩论', subtitle: '围绕争议收敛' },
+    { id: 'judge', icon: '裁', name: '裁决者裁决', subtitle: '形成评审判断' },
+    { id: 'human', icon: '人', name: '人工决策', subtitle: '最终关口' }
 ];
 const streamPhases = ['scout', 'director', 'judge'];
 const severityRank = { P0: 0, P1: 1, P2: 2, P3: 3 };
@@ -141,14 +142,17 @@ const phaseIndexByStage = {
 
 function roleTitle(role) {
     return {
-        DIRECTOR: 'Director 协调者', CONTEXT_SCOUT: 'Context Scout', PRODUCT: '产品经理', PROJECT: '项目经理',
+        DIRECTOR: '协调者', CONTEXT_SCOUT: '上下文侦察', PRODUCT: '产品经理', PROJECT: '项目经理',
         FRONTEND: '前端工程师', BACKEND: '后端工程师', ARCHITECTURE: '架构师', SECURITY: '安全工程师',
-        TESTING: '测试工程师', PERFORMANCE: '性能工程师', JUDGE: 'Judge 裁决者'
-    }[role] ?? role ?? 'Agent';
+        TESTING: '测试工程师', PERFORMANCE: '性能工程师', JUDGE: '裁决者'
+    }[role] ?? role ?? '智能体';
 }
 
 function roleInitial(role) {
-    return role === 'CONTEXT_SCOUT' ? 'S' : role === 'DIRECTOR' ? 'D' : role === 'JUDGE' ? 'J' : String(role ?? 'A').slice(0, 1);
+    return {
+        CONTEXT_SCOUT: '侦', DIRECTOR: '协', PRODUCT: '产', PROJECT: '项', FRONTEND: '前', BACKEND: '后',
+        ARCHITECTURE: '架', SECURITY: '安', TESTING: '测', PERFORMANCE: '能', JUDGE: '裁'
+    }[role] ?? String(role ?? '审').slice(0, 1);
 }
 
 function phaseForRole(role) {
@@ -268,9 +272,9 @@ const phaseItems = computed(() => {
     return [];
 });
 const streamOwner = computed(() => {
-    if (activePhase.value === 'scout') return { initial: 'S', role: 'CONTEXT_SCOUT', name: 'Context Scout', roleDesc: '项目上下文探索 Agent' };
-    if (activePhase.value === 'judge') return { initial: 'J', role: 'JUDGE', name: 'Judge 裁决者', roleDesc: '仅基于已持久化的 Claim 和证据裁决' };
-    return { initial: 'D', role: 'DIRECTOR', name: 'Director 协调者', roleDesc: '评审流程编排 Agent' };
+    if (activePhase.value === 'scout') return { initial: '侦', role: 'CONTEXT_SCOUT', name: '上下文侦察', roleDesc: '项目上下文探索' };
+    if (activePhase.value === 'judge') return { initial: '裁', role: 'JUDGE', name: '裁决者', roleDesc: '仅基于已持久化的 Claim 和证据裁决' };
+    return { initial: '协', role: 'DIRECTOR', name: '协调者', roleDesc: '评审流程编排' };
 });
 const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
     const items = runtimeItems.value.filter((item) => item.role === role);
@@ -291,7 +295,7 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
         summary: claims.length
             ? claimOverview(claims)
             : completed ? '初审已完成，等待冲突检测汇总各方论点。'
-            : latest ? itemSummary(latest) : activated ? '角色已激活，等待公开运行事件。' : '等待 Director 分配评审任务。',
+            : latest ? itemSummary(latest) : activated ? '角色已激活，等待公开运行事件。' : '等待协调者分配评审任务。',
         claims,
         items
     };
@@ -303,12 +307,12 @@ const streamEmpty = computed(() => {
     if (liveRunState.value.emptyState) return liveRunState.value.emptyState;
     if (activePhase.value === 'director') {
         return {
-            title: 'Director 尚未广播运行时对话',
-            message: '评审计划以持久化事实发布（见下方计划卡的任务清单与修订原因）；Director 的运行时消息仅在编排层广播 AG-UI 事件时出现。'
+            title: '协调者尚未广播运行时对话',
+            message: '评审计划以持久化事实发布（见下方计划卡的任务清单与修订原因）；协调者的运行时消息仅在编排层广播 AG-UI 事件时出现。'
         };
     }
     if (activePhase.value === 'judge') {
-        return { title: '等待 Judge 开始裁决', message: 'Judge 仅基于已持久化的 Claim 与证据工作，运行事件到达后按顺序展示。' };
+        return { title: '等待裁决者开始裁决', message: '裁决者仅基于已持久化的 Claim 与证据工作，运行事件到达后按顺序展示。' };
     }
     return { title: '等待当前阶段的公开运行事件', message: '运行事件会按照实际到达顺序显示；工具参数与完整结果仅在展开后可见。' };
 });
@@ -419,14 +423,14 @@ function runtimeDebugSummary(event) {
 
 function eventTitle(event) {
     return {
-        PLAN_CREATED: 'Director 发布评审计划', ROLE_ACTIVATED: `激活 ${roleTitle(event.actorRole)} 角色`,
+        PLAN_CREATED: '协调者发布评审计划', ROLE_ACTIVATED: `激活 ${roleTitle(event.actorRole)} 角色`,
         ROLE_STARTED: `${roleTitle(event.actorRole)} 开始运行`, ROLE_COMPLETED: `${roleTitle(event.actorRole)} 初审已完成`,
         INITIAL_REVIEW_COMPLETED: '全部角色初审已完成',
         CLAIM_SUBMITTED: `${roleTitle(event.actorRole)} 提交 Claim`,
         EVIDENCE_CAPTURED: '登记证据', DEBATE_TOPIC_OPENED: '创建辩论议题',
         DEBATE_TOPIC_CLOSED: '关闭辩论议题', CHALLENGE_SUBMITTED: '提交质询',
         REBUTTAL_SUBMITTED: '提交答辩', POSITION_CHANGED: '更新立场',
-        JUDGEMENT_SUBMITTED: 'Judge 提交裁决', GATE_DRAFTED: '形成 Gate 草案',
+        JUDGEMENT_SUBMITTED: '裁决者提交裁决', GATE_DRAFTED: '形成关口草案',
         HUMAN_GATE_FINALIZED: '人工确认最终 Gate', REVIEW_FAILED: '评审运行失败',
         REVIEW_CANCELLED: '评审已取消'
     }[event.type] ?? event.type;
@@ -563,7 +567,7 @@ onUnmounted(() => loadQueue.dispose());
                                 <section class="flow-review-conversation"><h2>公开对话</h2><LiveAgentConversation compact :items="card.items" :empty-state="{ title: '等待公开对话', message: '该角色的正式 AI 输出到达后显示在这里。' }" /></section>
                             </div>
                         </article>
-                        <p v-if="!reviewCards.length" class="flow-empty flow-review-grid-empty"><strong>尚未激活独立审查角色</strong><span>Director 发布角色激活结果后，这里只展示实际参与评审的角色。</span></p>
+                        <p v-if="!reviewCards.length" class="flow-empty flow-review-grid-empty"><strong>尚未激活独立审查角色</strong><span>协调者发布角色激活结果后，这里只展示实际参与评审的角色。</span></p>
                     </div>
 
                 </template>
@@ -580,8 +584,8 @@ onUnmounted(() => loadQueue.dispose());
                     </section>
                     <div v-else class="flow-empty"><strong>尚未检测到立场冲突</strong><p>当支持方与质疑方同时提交 Claim 后，ConflictDetector 会在此汇总冲突组。</p></div>
 
-                    <section class="flow-stream-panel flow-conflict-director" aria-label="Director 冲突处置">
-                        <header><div class="flow-agent-avatar director">D</div><div><strong>Director 协调者</strong><span>冲突处置决策</span></div></header>
+                    <section class="flow-stream-panel flow-conflict-director" aria-label="协调者冲突处置">
+                        <header><div class="flow-agent-avatar director">协</div><div><strong>协调者</strong><span>冲突处置决策</span></div></header>
                         <div class="flow-conflict-director-body">
                             <p v-if="conflicts.length">检测到 {{ conflicts.length }} 组冲突，已合并为 {{ debateTopics.length }} 个辩论议题，进入结构化辩论流程。</p>
                             <p v-else>暂无需要处置的冲突；如后续出现立场对立，将自动合并为辩论议题。</p>
@@ -652,16 +656,16 @@ onUnmounted(() => loadQueue.dispose());
                         </section>
                     </template>
                     <DebateTimeline v-if="debateTopics.length" class="flow-debate-timeline" :debates="debateTopics" @open-evidence="store.selectEvidence" />
-                    <div v-else class="flow-empty"><strong>尚未开启辩论议题</strong><p>冲突检测完成后，Director 会将冲突组合并为辩论议题并在此展示回合对阵。</p></div>
+                    <div v-else class="flow-empty"><strong>尚未开启辩论议题</strong><p>冲突检测完成后，协调者会将冲突组合并为辩论议题并在此展示回合对阵。</p></div>
                 </template>
 
                 <!-- ── 人工决策 ── -->
                 <template v-else-if="activePhase === 'human'">
                     <p v-if="!humanPhaseReachable" class="flow-human-not-ready" role="status">
-                        评审尚未进入人工决策阶段（当前阶段：{{ stageLabel[stage] ?? stage }}）。Judge 提交裁决并形成 Gate 草案后，流程会自动推进到这里。
+                        评审尚未进入人工决策阶段（当前阶段：{{ stageLabel[stage] ?? stage }}）。裁决者提交裁决并形成关口草案后，流程会自动推进到这里。
                     </p>
                     <section class="flow-conclusion-chain" aria-label="评审结论链">
-                        <article><span>1</span><div><small>Judge 议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else-if="pendingJudgementTopics.length">{{ pendingJudgementTopics.length }} 个议题已升级，等待 Judge 裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
+                        <article><span>1</span><div><small>议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else-if="pendingJudgementTopics.length">{{ pendingJudgementTopics.length }} 个议题已升级，等待 Judge 裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
                         <i aria-hidden="true">↓</i>
                         <article><span>2</span><div><small>确定性 AI Gate 草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><p v-if="gateDraft?.reasonSummary">{{ gateDraft.reasonSummary }}</p></div></article>
                         <i aria-hidden="true">↓</i>

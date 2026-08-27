@@ -74,24 +74,24 @@ onUnmounted(() => { subscription?.close(); store.dispose(); });
     <section class="live-observatory-page">
         <header class="workbench-header">
             <div>
-                <p class="eyebrow">Context Scout 独立预览</p>
+                <p class="eyebrow">上下文侦察独立预览</p>
                 <h1>项目上下文侦察</h1>
                 <p class="connection" :data-status="connection"><span aria-hidden="true">●</span>{{ statusText }}</p>
             </div>
             <RouterLink class="button secondary" :to="{ name: 'review-live', params: { reviewId } }">返回实时观察台</RouterLink>
         </header>
 
-        <p class="live-observatory-note">此入口只读取当前评审尝试绑定的冻结快照；不会启动 Director、角色、辩论或 Gate，也不会把预览结果写入正式角色上下文。</p>
+        <p class="live-observatory-note">此入口只读取当前评审尝试绑定的冻结快照；不会启动协调者、角色、辩论或关口，也不会把预览结果写入正式角色上下文。</p>
         <p v-if="store.state.error || error" class="error-banner" role="alert">{{ formatApiError(store.state.error || error) }}</p>
         <div v-else-if="store.state.loading" class="loading-grid" aria-label="正在加载评审数据"><span></span><span></span><span></span></div>
         <template v-else>
             <section class="panel">
                 <div class="panel-heading">
-                    <div><p class="eyebrow">受限 AS2 工作区</p><h2>执行 Scout</h2></div>
+                    <div><p class="eyebrow">受限 AS2 工作区</p><h2>执行侦察</h2></div>
                     <span class="topic-status">尝试 #{{ attemptNo }}</span>
                 </div>
                 <p class="muted">执行策略：根目录与构建识别、需求定向检索、高相关文件读取，最多三轮收敛。模型仅输出中文项目概览。</p>
-                <div class="form-actions"><button class="button" type="button" :disabled="busy" @click="startPreview">{{ busy ? '正在启动…' : '运行 Context Scout' }}</button><span v-if="preview" class="muted">预览 {{ preview.previewId }}</span></div>
+                <div class="form-actions"><button class="button" type="button" :disabled="busy" @click="startPreview">{{ busy ? '正在启动…' : '运行上下文侦察' }}</button><span v-if="preview" class="muted">预览 {{ preview.previewId }}</span></div>
             </section>
             <AgUiConversationPanel variant="scout" :conversation="conversation" />
         </template>
