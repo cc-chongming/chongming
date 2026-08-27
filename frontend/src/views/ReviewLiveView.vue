@@ -55,6 +55,8 @@ const selectedPhase = ref(null);
 const selectedRound = ref(1);
 // [AIREVIEW-PLAN-045#1] 辩论议题 Tab：记录当前聚焦议题；议题列表变化（新增/重放）时按 topicId 稳定选择，选中项消失自动回落第一个。
 const selectedTopicId = ref(null);
+// [AIREVIEW-PLAN-050#1] Claim 详情弹框：保存被点击的 Claim（null 表示关闭）。
+const claimDetail = ref(null);
 const expandedRole = ref(null);
 const drawerOpen = ref(true);
 const latestReviewReady = ref(false);
@@ -737,10 +739,11 @@ onUnmounted(() => loadQueue.dispose());
                         <div class="flow-debate-court">
                             <div class="flow-debate-side pro">
                                 <p class="flow-debate-label">🟢 支持方</p>
-                                <article v-for="claim in proClaims" :key="claim.claimId" class="flow-debate-claim">
+                                <article v-for="claim in proClaims" :key="claim.claimId" class="flow-debate-claim" @click="claimDetail = claim">
                                     <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
                                     <header><span class="flow-agent-avatar" :data-role="claim.role"><RoleAvatar :role="claim.role" /></span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
-                                    <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
+                                    <!-- [AIREVIEW-PLAN-050#1] 卡片正文三行截断（见 review.css），悬浮显示完整正文。 -->
+                                    <p :title="claim.statement">{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                                 </article>
                                 <p v-if="!proClaims.length" class="flow-debate-empty">暂无支持方 Claim。</p>
                             </div>
@@ -758,10 +761,11 @@ onUnmounted(() => loadQueue.dispose());
                             </div>
                             <div class="flow-debate-side con">
                                 <p class="flow-debate-label">🔴 质疑方</p>
-                                <article v-for="claim in conClaims" :key="claim.claimId" class="flow-debate-claim">
+                                <article v-for="claim in conClaims" :key="claim.claimId" class="flow-debate-claim" @click="claimDetail = claim">
                                     <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
                                     <header><span class="flow-agent-avatar" :data-role="claim.role"><RoleAvatar :role="claim.role" /></span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
-                                    <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
+                                    <!-- [AIREVIEW-PLAN-050#1] 卡片正文三行截断（见 review.css），悬浮显示完整正文。 -->
+                                    <p :title="claim.statement">{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                                 </article>
                                 <p v-if="!conClaims.length" class="flow-debate-empty">暂无质疑方 Claim。</p>
                             </div>
@@ -769,10 +773,11 @@ onUnmounted(() => loadQueue.dispose());
 
                         <section v-if="neutralClaims.length" class="flow-neutral-claims" aria-label="中立方 Claim">
                             <p class="flow-debate-label">⚪ 中立方</p>
-                            <article v-for="claim in neutralClaims" :key="claim.claimId" class="flow-debate-claim">
+                            <article v-for="claim in neutralClaims" :key="claim.claimId" class="flow-debate-claim" @click="claimDetail = claim">
                                 <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
                                 <header><span class="flow-agent-avatar" :data-role="claim.role"><RoleAvatar :role="claim.role" /></span><strong>{{ roleTitle(claim.role) }}</strong><span :class="['flow-severity', claim.severity]">{{ claim.severity }}</span></header>
-                                <p>{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
+                                <!-- [AIREVIEW-PLAN-050#1] 卡片正文三行截断（见 review.css），悬浮显示完整正文。 -->
+                                <p :title="claim.statement">{{ claim.statement || '该 Claim 暂无公开正文' }}</p><small v-if="claim.subjectKey">技术标识：{{ claim.subjectKey }}</small>
                             </article>
                         </section>
                         </div><!-- /flow-debate-board [AIREVIEW-PLAN-043#4] -->
@@ -858,6 +863,23 @@ onUnmounted(() => loadQueue.dispose());
             </main>
 
             <ReviewConversationDrawer :open="drawerOpen" :items="runtimeItems" :facts="factTimeline" :debug-items="debugItems" @close="drawerOpen = false" />
+        </div>
+
+        <!-- [AIREVIEW-PLAN-050#1] Claim 详情弹框：点击辩论卡打开；点击遮罩空白处或关闭按钮关闭。 -->
+        <div v-if="claimDetail" class="flow-claim-modal-overlay" @click.self="claimDetail = null">
+            <article class="flow-claim-modal" role="dialog" aria-modal="true" aria-label="Claim 详情">
+                <header>
+                    <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
+                    <span class="flow-agent-avatar" :data-role="claimDetail.role"><RoleAvatar :role="claimDetail.role" /></span>
+                    <strong>{{ roleTitle(claimDetail.role) }}</strong>
+                    <span :class="['flow-severity', claimDetail.severity]">{{ claimDetail.severity }}</span>
+                    <button type="button" class="flow-claim-modal-close" aria-label="关闭 Claim 详情" @click="claimDetail = null">×</button>
+                </header>
+                <div class="flow-claim-modal-body">
+                    <p>{{ claimDetail.statement || '该 Claim 暂无公开正文' }}</p>
+                    <small v-if="claimDetail.subjectKey">技术标识：{{ claimDetail.subjectKey }}</small>
+                </div>
+            </article>
         </div>
         <EvidenceDrawer :evidence="store.state.selectedEvidence" @close="store.state.selectedEvidence = null" />
     </section>

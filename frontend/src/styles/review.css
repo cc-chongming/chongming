@@ -346,15 +346,19 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-topic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .flow-topic-status { flex: 0 0 auto; padding: .12rem .42rem; border-radius: 99px; font-size: .6rem; font-weight: 800; white-space: nowrap; color: #79e6b6; background: rgba(52, 211, 153, .16); }
 .flow-topic-status.adjudicated { color: #b9c3db; background: var(--flow-surface-3); }
-.flow-debate-court { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr); min-height: 20rem; overflow: hidden; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
+.flow-debate-court { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr); min-height: 16rem; overflow: hidden; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
 .flow-debate-side { padding: .95rem; overflow: auto; }.flow-debate-side.pro { border-right: 1px solid var(--flow-border); }.flow-debate-side.con { border-left: 1px solid var(--flow-border); }
 .flow-debate-label { margin: 0 0 .7rem; padding-bottom: .5rem; border-bottom: 1px solid var(--flow-border); font-size: .7rem; font-weight: 800; letter-spacing: .08em; }.flow-debate-side.pro .flow-debate-label { color: var(--flow-green); }.flow-debate-side.con .flow-debate-label { color: var(--flow-red); }
-.flow-debate-claim { margin-bottom: .55rem; padding: .6rem .7rem; color: #d3d9e8; background: var(--flow-surface-2); border-radius: .5rem; font-size: .72rem; line-height: 1.55; }.flow-debate-claim header { display: flex; align-items: center; gap: .4rem; margin-bottom: .3rem; }.flow-debate-claim header .flow-agent-avatar { width: 1.35rem; height: 1.35rem; font-size: .58rem; }.flow-debate-claim header strong { flex: 1; color: #e7ebf7; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* [AIREVIEW-PLAN-050#1] Claim 卡可点击：正文三行截断，悬浮 title 与点击弹框均展示完整正文。 */
+.flow-debate-claim { margin-bottom: .55rem; padding: .6rem .7rem; color: #d3d9e8; background: var(--flow-surface-2); border-radius: .5rem; font-size: .72rem; line-height: 1.55; cursor: pointer; }
+.flow-debate-claim p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }.flow-debate-claim header { display: flex; align-items: center; gap: .4rem; margin-bottom: .3rem; }.flow-debate-claim header .flow-agent-avatar { width: 1.35rem; height: 1.35rem; font-size: .58rem; }.flow-debate-claim header strong { flex: 1; color: #e7ebf7; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-debate-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; padding: 1rem .6rem; background: var(--flow-surface-2); border-left: 1px solid var(--flow-border); border-right: 1px solid var(--flow-border); text-align: center; }
 .flow-consensus-gauge { position: relative; width: 6.5rem; height: 6.5rem; }.flow-consensus-gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }.flow-consensus-gauge .track { fill: none; stroke: var(--flow-border); stroke-width: 8; }.flow-consensus-gauge .fill { fill: none; stroke: var(--flow-yellow); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset .8s ease; }.flow-consensus-gauge strong { position: absolute; inset: 0; display: grid; place-items: center; font-size: 1.25rem; font-weight: 900; }
 .flow-debate-center small { color: var(--flow-dim); font-size: .62rem; }.flow-round-display { margin: .3rem 0 0; color: var(--flow-dim); font-size: .68rem; }.flow-round-display strong { color: var(--flow-accent); font-size: 1rem; }
-.flow-debate-dialogue { margin-top: 1rem; }
-.flow-dialogue-list { display: grid; gap: .7rem; margin: 0; padding: 1rem; list-style: none; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
+/* [AIREVIEW-PLAN-050#1] 对话流改为弹性列：标题固定在顶部不随列表滚动，列表独占剩余高度滚动；选择器限定于对话流容器，不影响冲突页同名标题。 */
+.flow-debate-dialogue { display: flex; flex-direction: column; overflow: hidden; margin-top: 1rem; }
+.flow-debate-dialogue > .flow-conflict-heading { flex: 0 0 auto; }
+.flow-dialogue-list { display: grid; gap: .7rem; flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 1rem; list-style: none; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
 .flow-dialogue-list li header { display: flex; align-items: center; gap: .45rem; margin-bottom: .3rem; }.flow-dialogue-list li header .flow-agent-avatar { width: 1.45rem; height: 1.45rem; font-size: .6rem; }.flow-dialogue-list li header strong { color: #e7ebf7; font-size: .72rem; }
 .flow-turn-type { color: #9fe0c2; font-size: .62rem; font-weight: 700; }.flow-turn-target { color: var(--flow-dim); font-size: .62rem; }
 .flow-dialogue-list p { margin: 0; color: #cfd6e6; font-size: .74rem; line-height: 1.65; overflow-wrap: anywhere; }.flow-dialogue-list small { display: block; margin-top: .25rem; color: var(--flow-dim); font-size: .62rem; }
@@ -658,9 +662,9 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 /* [AIREVIEW-PLAN-043#4] 辩论页两块独立定高内滚：对抗看板（法庭+中立方）与对话流上下分栏，
    各自 flex 填充 + 内部滚动；块间距由容器 gap 承担，子块原有外边距归零。 */
 .flow-content > .flow-debate-split { display: flex; flex: 1 1 auto; flex-direction: column; gap: .8rem; min-height: 0; }
-.flow-debate-board { display: grid; flex: 1 1 auto; gap: .8rem; min-height: 0; overflow-y: auto; }
+.flow-debate-board { display: grid; flex: 2 1 0; gap: .8rem; min-height: 0; overflow-y: auto; }
 .flow-debate-board > .flow-neutral-claims { margin-top: 0; }
-.flow-debate-split > .flow-debate-dialogue { flex: 1 1 auto; min-height: 0; margin-top: 0; overflow-y: auto; }
+.flow-debate-split > .flow-debate-dialogue { flex: 3 1 0; min-height: 0; margin-top: 0; }
 .flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* [AIREVIEW-PLAN-043#3] 上下文侦察：收集结论卡同样定高内滚，运行流面板与结论卡分享剩余高度。 */
 .flow-content > .scout-conclusion-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
@@ -710,6 +714,17 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-topic-tab.active { color: #fff; background: #2563eb; border-color: #2563eb; box-shadow: 0 2px 10px rgba(37, 99, 235, .28); }
 .flow-topic-status { color: #047857; background: #d1fae5; }
 .flow-topic-status.adjudicated { color: #57534e; background: #e7e5e4; }
+/* [AIREVIEW-PLAN-050#1] Claim 详情弹框：遮罩 + 居中浅色 DSH 卡片；z-index 70 高于页面内容与抽屉浮层；正文区超高时自身内滚。 */
+.flow-claim-modal-overlay { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 1rem; background: rgba(28, 25, 23, .45); }
+.flow-claim-modal { display: flex; flex-direction: column; width: min(40rem, calc(100vw - 2rem)); max-height: 70vh; color: #1c1917; background: #fff; border: 1px solid #d6d3d1; border-radius: .65rem; box-shadow: 0 14px 44px rgba(28, 25, 23, .24); }
+.flow-claim-modal > header { display: flex; flex: 0 0 auto; align-items: center; gap: .55rem; padding: .85rem 1rem; border-bottom: 1px solid #d6d3d1; }
+.flow-claim-modal > header .flow-agent-avatar { width: 1.8rem; height: 1.8rem; font-size: .7rem; }
+.flow-claim-modal > header strong { flex: 1; min-width: 0; color: #1c1917; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-claim-modal-close { flex: 0 0 auto; width: 1.8rem; height: 1.8rem; padding: 0; color: #78716c; background: transparent; border: 0; border-radius: .3rem; font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.flow-claim-modal-close:hover { color: #1c1917; background: #f5f5f4; }
+.flow-claim-modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1rem 1.1rem; }
+.flow-claim-modal-body p { margin: 0; color: #1c1917; font-size: .86rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.flow-claim-modal-body small { display: block; margin-top: .6rem; color: #78716c; font-size: .72rem; overflow-wrap: anywhere; }
 .flow-verdict-text { color: #44403c; }.flow-verdict-badge { color: #9a3412; background: #ffedd5; }
 .flow-lifecycle { margin: 0 0 12px; }
 .flow-debate-timeline { margin-top: 12px; }
