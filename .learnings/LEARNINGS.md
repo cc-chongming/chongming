@@ -1060,7 +1060,7 @@ Context Scout 在阶段机进入 PLANNING 后仍持续流式输出（Scout 运�
 
 **Logged**: 2026-08-28T15:00:00+08:00
 **Priority**: high
-**Status**: open
+**Status**: resolved
 **Area**: process, delegation, dsh-runtime
 
 ### Summary
@@ -1080,6 +1080,11 @@ Context Scout 在阶段机进入 PLANNING 后仍持续流式输出（Scout 运�
 - Source: 本会话连续 6 次子代理失败 + 用户说明（qorder 已删除）
 - Related Files: docs/AIREVIEW-PLAN-055-README同步机制状态.md, docs/AIREVIEW-PLAN-056-侦察面板中宽视口推出视口修复.md, docs/AIREVIEW-PLAN-057-独立审查落位闸门.md, docs/AIREVIEW-PLAN-058-冲突检测停留窗口.md
 - Tags: process, delegation, subagent, provider, dsh-runtime
+
+### Resolution
+
+- **Resolved**: 2026-08-28T15:40:00+08:00
+- **Notes**: 用户重新配置 qoder 供应商后，金丝雀子代理（foreground）健康返回，通道恢复；后续派发恢复默认异步派发，无需显式 provider/model。
 
 ---
 
