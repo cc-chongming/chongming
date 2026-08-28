@@ -248,16 +248,22 @@ public class ReviewContextAssembler {
     }
 
     /**
-     * [AIREVIEW-PLAN-024] Only evidence paths inside the Scout-declared scope of this role are
-     * rendered into role context, so ungranted file paths never reach a role prompt.
+     * [AIREVIEW-PLAN-024] [AIREVIEW-PLAN-062#3] Only path-like evidence paths inside the
+     * path-like Scout-declared scope of this role are rendered into role context, so prose
+     * sentences and ungranted file paths never reach a role prompt.
      */
     private static List<String> scopedEvidencePaths(ContextScoutConclusion conclusion, RoleType roleType) {
-        List<String> scopes = conclusion.roleScopes().getOrDefault(roleType.name(), List.of());
-        if (scopes.isEmpty()) {
+        List<String> pathLikeScopes = conclusion.roleScopes().getOrDefault(roleType.name(), List.of()).stream()
+                .filter(ReviewContextAssembler::pathLike)
+                .map(scope -> scope.replace('\\', '/').trim())
+                .toList();
+        if (pathLikeScopes.isEmpty()) {
             return List.of();
         }
         return conclusion.evidencePaths().stream()
-                .filter(path -> matchesAnyScope(path, scopes))
+                .filter(ReviewContextAssembler::pathLike)
+                .map(path -> path.replace('\\', '/').trim())
+                .filter(path -> matchesAnyScope(path, pathLikeScopes))
                 .toList();
     }
 
@@ -269,10 +275,37 @@ public class ReviewContextAssembler {
                         || (scope.endsWith("/") && normalized.contains("/" + scope))));
     }
 
-    private static Predicate<String> reviewRelevance(ContextScoutConclusion conclusion, RoleType roleType) {
-        Set<String> relevantFiles = new HashSet<>(conclusion.evidencePaths());
-        List<String> roleScopes = conclusion.roleScopes().getOrDefault(roleType.name(), List.of());
-        return path -> relevantFiles.contains(path) || matchesAnyScope(path, roleScopes);
+    /**
+     * [AIREVIEW-PLAN-062#1] Path-like strings only: normalized without whitespace, ASCII-only
+     * (below U+2E80) and containing a slash or a dot. Natural-language prose is filtered out.
+     */
+    private static boolean pathLike(String value) {
+        String normalized = value == null ? "" : value.replace('\\', '/').trim();
+        return !normalized.isEmpty()
+                && normalized.indexOf(' ') < 0
+                && normalized.chars().allMatch(c -> c < 0x2E80)
+                && (normalized.contains("/") || normalized.contains("."));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024] [AIREVIEW-PLAN-062#2] Builds the review-relevance predicate from the
+     * Scout conclusion: a file is relevant when it is a path-like evidence path or lives beneath a
+     * path-like Scout-declared scope for this role. Returns {@code null} when neither path-like
+     * evidence nor path-like scopes exist, leaving relevance unconstrained.
+     */
+    static Predicate<String> reviewRelevance(ContextScoutConclusion conclusion, RoleType roleType) {
+        Set<String> pathLikeEvidence = new HashSet<>(conclusion.evidencePaths().stream()
+                .filter(ReviewContextAssembler::pathLike)
+                .map(path -> path.replace('\\', '/').trim())
+                .toList());
+        List<String> pathLikeScopes = conclusion.roleScopes().getOrDefault(roleType.name(), List.of()).stream()
+                .filter(ReviewContextAssembler::pathLike)
+                .map(scope -> scope.replace('\\', '/').trim())
+                .toList();
+        if (pathLikeEvidence.isEmpty() && pathLikeScopes.isEmpty()) {
+            return null;
+        }
+        return path -> pathLikeEvidence.contains(path) || matchesAnyScope(path, pathLikeScopes);
     }
 
     private static void addSection(List<String> sections, String label, List<String> values) {

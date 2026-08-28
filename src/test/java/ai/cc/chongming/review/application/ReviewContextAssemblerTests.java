@@ -193,6 +193,84 @@ class ReviewContextAssemblerTests {
         assertThat(result.characterCount()).isEqualTo("critical claim".length());
     }
 
+    @Test
+    void reviewRelevanceReturnsNullForProseOnlyConclusion() {
+        ContextScoutConclusion conclusion =
+                scoutConclusion(new ReviewId(UUID.randomUUID()), List.of("INIT清单：需求文本…"), Map.of());
+
+        assertThat(ReviewContextAssembler.reviewRelevance(conclusion, RoleType.BACKEND)).isNull();
+    }
+
+    @Test
+    void reviewRelevanceIgnoresProseAndMatchesOnlyPathLikeEvidence() {
+        ContextScoutConclusion conclusion = scoutConclusion(
+                new ReviewId(UUID.randomUUID()),
+                List.of("src/main/java/A.java", "散文句"),
+                Map.of());
+
+        Predicate<String> relevance = ReviewContextAssembler.reviewRelevance(conclusion, RoleType.BACKEND);
+        assertThat(relevance).isNotNull();
+        assertThat(relevance.test("src/main/java/A.java")).isTrue();
+        assertThat(relevance.test("src/main/java/B.java")).isFalse();
+    }
+
+    @Test
+    void reviewRelevanceReturnsNullForEmptyConclusion() {
+        ContextScoutConclusion conclusion = scoutConclusion(new ReviewId(UUID.randomUUID()), List.of(), Map.of());
+
+        assertThat(ReviewContextAssembler.reviewRelevance(conclusion, RoleType.BACKEND)).isNull();
+    }
+
+    @Test
+    void keepsProseEvidenceOutOfThePublicFactText() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ContextScoutConclusion conclusion = scoutConclusion(
+                reviewId,
+                List.of("src/main/java/App.java", "INIT清单：需求文本…"),
+                Map.of("BACKEND", List.of("src/main/")));
+        ReviewContextAssembler assembler = new ReviewContextAssembler(storeOf(reviewId, conclusion));
+
+        ContextFact backendFact = assembler.contextScoutFact(reviewId, 1, RoleType.BACKEND).orElseThrow();
+        assertThat(backendFact.publicText())
+                .contains("Evidence paths: src/main/java/App.java")
+                .doesNotContain("INIT清单");
+    }
+
+    @Test
+    void omitsEvidencePathsSectionWhenRoleHasNoPathLikeScopes() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        ContextScoutConclusion conclusion = scoutConclusion(
+                reviewId,
+                List.of("src/main/java/App.java", "INIT清单：需求文本…"),
+                Map.of());
+        ReviewContextAssembler assembler = new ReviewContextAssembler(storeOf(reviewId, conclusion));
+
+        ContextFact fact = assembler.contextScoutFact(reviewId, 1, RoleType.BACKEND).orElseThrow();
+        assertThat(fact.publicText())
+                .doesNotContain("Evidence paths")
+                .doesNotContain("src/main/java/App.java")
+                .doesNotContain("INIT清单");
+    }
+
+    private ContextScoutConclusion scoutConclusion(
+            ReviewId reviewId,
+            List<String> evidencePaths,
+            Map<String, List<String>> roleScopes) {
+        return new ContextScoutConclusion(
+                reviewId,
+                1,
+                1,
+                "overview",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                evidencePaths,
+                roleScopes,
+                "{}",
+                Instant.parse("2026-08-10T08:00:00Z"));
+    }
+
     private ContextFact fact(String id, String selector, Priority priority, boolean disputed, String text) {
         return new ContextFact(id, selector, priority, disputed, Instant.parse("2026-07-16T00:00:00Z"), text);
     }
