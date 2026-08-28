@@ -65,7 +65,12 @@ export function renderSafeMarkdown(markdown) {
             index += 1;
             while (index < lines.length && !closingFence.test(lines[index])) code.push(lines[index++]);
             if (index < lines.length) index += 1;
-            const infoToken = (fence[2].trim().split(/\s+/)[0] ?? '').replace(/[^\w+#.-]/g, '');
+            // [AIREVIEW-PLAN-051#1] info 仅取语言前缀（\w+#.-），与既有清洗口径一致；
+            // 前缀之后的残留（如 ```json{ 的 `{`、```js console.log(1) 的整行内联）回补为代码块第一行。
+            const infoMatch = /^[\w+#.-]+/.exec(fence[2].trim());
+            const infoToken = infoMatch ? infoMatch[0] : '';
+            const remainder = fence[2].trim().slice(infoToken.length).trim();
+            if (remainder) code.unshift(remainder);
             const language = infoToken ? ` class="language-${escapeHtml(infoToken)}"` : '';
             blocks.push(`<pre><code${language}>${escapeHtml(code.join('\n'))}</code></pre>`);
             continue;

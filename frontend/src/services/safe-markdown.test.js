@@ -22,6 +22,19 @@ describe('safe markdown', () => {
         expect(nested).toContain('{&quot;a&quot;:1}');
     });
 
+    it('preserves content glued to the fence info string ([AIREVIEW-PLAN-051#1])', () => {
+        const glued = renderSafeMarkdown('```json{\n"a": 1\n```');
+        expect(glued).toContain('class="language-json"');
+        expect(glued).toContain('>{');   // 代码内容以 `{` 开头（残留回补）
+        expect(glued).toContain('&quot;a&quot;: 1');
+        const spaced = renderSafeMarkdown('```json {\n"a": 1\n```');
+        expect(spaced).toContain('class="language-json"');
+        expect(spaced).toContain('>{');   // 空格形态同样回补 `{`
+        expect(spaced).toContain('&quot;a&quot;: 1');
+        expect(renderSafeMarkdown('```js console.log(1)\nlet x = 2;\n```')).toBe('<pre><code class="language-js">console.log(1)\nlet x = 2;</code></pre>');
+        expect(renderSafeMarkdown('```json\n{\n```')).toBe('<pre><code class="language-json">{</code></pre>');
+    });
+
     it('escapes raw html and removes dangerous link targets', () => {
         const html = renderSafeMarkdown('<img src=x onerror=alert(1)>\n\n[攻击](javascript:alert(1))');
 
