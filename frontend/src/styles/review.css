@@ -266,7 +266,8 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-header-link { padding: .42rem .65rem; color: #c8d4ff; border: 1px solid #42517a; border-radius: .35rem; font-size: .78rem; font-weight: 700; text-decoration: none; }.flow-header-link:hover { color: #fff; background: #28345c; }
 .flow-error { max-width: 72rem; margin: 1.25rem auto; padding: .8rem 1rem; color: #ffd6da; background: #55242b; border: 1px solid #a84c59; border-radius: .45rem; }.flow-human-not-ready { margin: 0 0 1rem; padding: .7rem .9rem; color: #ffe3b3; background: rgba(217, 119, 6, .14); border: 1px solid rgba(217, 119, 6, .5); border-radius: .45rem; font-size: .84rem; line-height: 1.5; }.flow-loading { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; max-width: 70rem; margin: 3rem auto; }.flow-loading span { height: 16rem; background: linear-gradient(100deg, #13161f 35%, #222738 50%, #13161f 65%); background-size: 220% 100%; border-radius: .6rem; animation: shimmer 1.3s infinite; }
 /* [AIREVIEW-PLAN-037#2] 固定为视口高度：运行流面板在内部滚动，页面本身不再被对话流撑高。 */
-.review-flow-layout { display: grid; grid-template-columns: 14rem minmax(0, 1fr) 19rem; height: calc(100vh - 3.8rem); }
+/* [AIREVIEW-PLAN-056#1] 行轨道禁止被内容撑高（全宽度生效）：修复 761-1120px 中宽视口 auto 行轨道把页面撑出外层滚动条（PLAN-037#3 原先仅 ≥1121px 启用）。 */
+.review-flow-layout { display: grid; grid-template-columns: 14rem minmax(0, 1fr) 19rem; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 3.8rem); }
 .flow-pipeline { padding: 1.2rem 0; background: var(--flow-surface); border-right: 1px solid var(--flow-border); overflow: auto; }.flow-pipeline > p { margin: 0 1rem .9rem; color: var(--flow-dim); font-size: .7rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .flow-phase-button { display: grid; grid-template-columns: 1.9rem minmax(0, 1fr); width: 100%; gap: .65rem; padding: .58rem .85rem; color: var(--flow-dim); text-align: left; background: transparent; border: 0; border-left: 3px solid transparent; cursor: pointer; }.flow-phase-button:hover, .flow-phase-button.active { color: var(--flow-text); background: rgba(108, 140, 255, .1); }.flow-phase-button.active { border-left-color: var(--flow-accent); }.flow-phase-button.done { opacity: .76; }.flow-phase-button.failed { color: #ffb1b8; background: rgba(248, 113, 113, .1); border-left-color: var(--flow-red); }
 /* [AIREVIEW-PLAN-041#1] 图标改为图片资产：容器保留 1.8rem 尺寸，去掉圆形底色/字符色，视觉以设计稿 PNG 为准。 */
@@ -679,14 +680,13 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-debate-board > .flow-neutral-claims { margin-top: 0; }
 .flow-debate-split > .flow-debate-dialogue { flex: 1 1 auto; min-height: 0; margin-top: 0; }
 .flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-/* [AIREVIEW-PLAN-043#3][AIREVIEW-PLAN-052#1] 上下文侦察：运行流面板与结论卡分享剩余高度；052 起面板改为弹性列，
-   标题区固定，仅 .scout-conclusion-body 内滚。 */
-.flow-content > .scout-conclusion-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
-/* [AIREVIEW-PLAN-037#3] 视口框定收口：行轨道禁止被内容撑高，观察抽屉改为弹性列，
+/* [AIREVIEW-PLAN-043#3][AIREVIEW-PLAN-052#1][AIREVIEW-PLAN-056#2] 上下文侦察：结论卡按内容自适应但封顶主区 45%（内部滚动），
+   剩余高度让给运行流面板；上方输出再多结论卡也始终可见。 */
+.flow-content > .scout-conclusion-panel { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 0; max-height: 45%; overflow: hidden; }
+/* [AIREVIEW-PLAN-037#3][AIREVIEW-PLAN-056#1] 视口框定收口：行轨道禁止被内容撑高（已提升为基础规则全宽生效）；观察抽屉改为弹性列，
    对话/事实/调试各自内部滚动——页面在浏览器 100% 缩放下无外层滚动条。
-   ≤1120px 抽屉变为底部区块，沿用原 max-height 口径，不在本规则内。 */
+   ≤1120px 抽屉变为底部 auto 行，主行 1fr 吸收剩余高度。 */
 @media (min-width: 1121px) {
-    .review-flow-layout { grid-template-rows: minmax(0, 1fr); }
     .flow-sidebar { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     .flow-drawer-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
     .flow-drawer-panel .flow-role-filter { flex: 0 0 auto; }
