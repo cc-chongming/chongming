@@ -65,6 +65,25 @@ class RoleVoicePromptTests {
         assertThat(RoleSubagentFactory.roleVoiceGuidance(pack(Voice.EMPTY))).isEmpty();
     }
 
+    /**
+     * [AIREVIEW-PLAN-070#2][AIREVIEW-PLAN-070#4] The Judge spawn/system prompt must keep the
+     * judge on standby until the server dispatches the JUDGING wake: no proactive topic queries,
+     * Gate drafts, or verdict submissions that create rejected turns and drawer noise.
+     */
+    @Test
+    void judgeSpawnPromptKeepsStandbyUntilServerJudgingWake() {
+        RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());
+        RolePack judgePack = registry.require(RoleType.JUDGE);
+
+        String prompt = RoleSubagentFactory.rolePrompt(judgePack, "");
+
+        assertThat(prompt)
+                .contains("在收到服务端进入 JUDGING 阶段的唤醒前保持待命")
+                .contains("不主动查询议题清单")
+                .contains("不起草门禁")
+                .contains("不提交裁决结论");
+    }
+
     @Test
     void everyConfiguredRoleCarriesNonEmptyVoiceGuidance() {
         RolePackRegistry registry = new RolePackRegistry(new PathMatchingResourcePatternResolver());

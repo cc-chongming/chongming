@@ -228,9 +228,16 @@ public class RoleSubagentFactory {
                 .build();
     }
 
-    private String rolePrompt(RolePack rolePack, String publicContext) {
+    /**
+     * [AIREVIEW-PLAN-070#2] Judge spawn/system prompt. The judge must stay on standby until the
+     * server actually dispatches the JUDGING wake; it must never query the topic list, draft a
+     * Gate, or submit a verdict while still idle, otherwise every spawn produces rejected turns
+     * and drawer noise before judging even starts.
+     */
+    static String rolePrompt(RolePack rolePack, String publicContext) {
         if (rolePack.roleType() == RoleType.JUDGE) {
             return "You are the JUDGE role. Remain idle until the server sends a JUDGING-stage instruction. "
+                    + "在收到服务端进入 JUDGING 阶段的唤醒前保持待命：不主动查询议题清单、不起草门禁、不提交裁决结论。"
                     + "Then first call list_persisted_debate_topics. If terminal topics exist, use submit_judgement for every one of them. "
                     + "Always finish by calling draft_gate exactly once, even when the topic list is empty: the Gate must be drafted from the persisted Claims alone in that case. "
                     + "Never end the judging stage idle without calling draft_gate. "

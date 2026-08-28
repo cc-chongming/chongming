@@ -154,6 +154,16 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         this.reviewDebateStore = reviewDebateStore;
     }
 
+    /**
+     * [AIREVIEW-PLAN-069#4] Shares the Spring-managed plan revision promoter so terminal cleanup
+     * (dispatcher COMPLETED observation) can clear its per-runtime promotion watermarks. Optional:
+     * manual/test wiring keeps using the lazy {@link #planRevisionPromoter()} fallback.
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void configurePlanRevisionPromoter(DirectorPlanRevisionPromoter promoter) {
+        this.planRevisionPromoter = promoter;
+    }
+
     @Override
     public Mono<AgentRuntimeSession> start(AgentRuntimeStartRequest request) {
         return Mono.defer(() -> {
@@ -423,8 +433,38 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
         });
     }
 
+    /**
+     * [AIREVIEW-PLAN-070#1] Sends a plain wake/instruction message. A review role whose initial
+     * review is already completed must stay silent during INITIAL_REVIEW: re-waking it only makes
+     * it redo finished work and re-paste long conclusions, so the wake is skipped and logged.
+     * Dispatch envelopes (see {@link #deliverDispatchCommand}) deliberately bypass this gate.
+     */
     @Override
     public Mono<Void> send(String runtimeId, String recipientLabel, String message) {
+        return sendInternal(runtimeId, recipientLabel, message, true);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-024#方案3] Injects the validated dispatch envelope into exactly the recipient
+     * role's context. The envelope message already carries the commandId and the single authorized
+     * write action; the role's write tools resolve the commandId server-side, so minimal delivery
+     * through {@link #send} preserves the orchestration flow without restructuring this hub.
+     *
+     * <p>[AIREVIEW-PLAN-070#1] The completed-initial-review skip gate applies to plain wakes only:
+     * debate-stage envelopes targeting a role are legal even when that role has long finished its
+     * initial review, so this path never applies the {@code ROLE_WAKE_SKIPPED_COMPLETED} cut.
+     */
+    @Override
+    public Mono<Void> deliverDispatchCommand(
+            String runtimeId, String recipientLabel, String message,
+            ai.cc.chongming.review.domain.model.ReviewDispatchCommand command) {
+        LOGGER.info("DISPATCH_ENVELOPE_INJECTED runtimeId={} recipient={} commandId={} action={}",
+                runtimeId, recipientLabel, command.commandId().value(), command.allowedAction());
+        return sendInternal(runtimeId, recipientLabel, message, false);
+    }
+
+    private Mono<Void> sendInternal(
+            String runtimeId, String recipientLabel, String message, boolean enforceCompletedRoleGate) {
         return Mono.defer(() -> {
             RuntimeState state = state(runtimeId);
             requireText(recipientLabel, "recipientLabel");
@@ -439,24 +479,47 @@ public class AgentScopeReviewRuntimeAdapter implements AgentRuntimeAdapter {
             if (role == null) {
                 return Mono.error(new IllegalArgumentException("unknown role label: " + recipientLabel));
             }
+            if (enforceCompletedRoleGate && shouldSkipCompletedInitialReviewWake(state, recipientLabel)) {
+                LOGGER.info("ROLE_WAKE_SKIPPED_COMPLETED runtimeId={} role={} reason=initial_review_completed",
+                        runtimeId, recipientLabel);
+                return Mono.empty();
+            }
             return run(state, role.agent(), role.roleType(), role.label(), role.sessionId(),
                     ReviewStage.INITIAL_REVIEW, message, role.toolTraceCollector());
         }).then();
     }
 
     /**
-     * [AIREVIEW-PLAN-024#方案3] Injects the validated dispatch envelope into exactly the recipient
-     * role's context. The envelope message already carries the commandId and the single authorized
-     * write action; the role's write tools resolve the commandId server-side, so minimal delivery
-     * through {@link #send} preserves the orchestration flow without restructuring this hub.
+     * [AIREVIEW-PLAN-070#1] Plain wakes to a review role are silenced while the review is still in
+     * INITIAL_REVIEW and that role's activation is already marked initialReviewCompleted, so
+     * post-finalizer liveness re-wakes cannot ask it to redo finished work or re-paste conclusions.
      */
-    @Override
-    public Mono<Void> deliverDispatchCommand(
-            String runtimeId, String recipientLabel, String message,
-            ai.cc.chongming.review.domain.model.ReviewDispatchCommand command) {
-        LOGGER.info("DISPATCH_ENVELOPE_INJECTED runtimeId={} recipient={} commandId={} action={}",
-                runtimeId, recipientLabel, command.commandId().value(), command.allowedAction());
-        return send(runtimeId, recipientLabel, message);
+    private boolean shouldSkipCompletedInitialReviewWake(RuntimeState state, String recipientLabel) {
+        if (reviewRegistry == null) {
+            return false;
+        }
+        Review review = reviewRegistry.find(state.context().reviewId()).orElse(null);
+        if (review == null || review.stage() != ReviewStage.INITIAL_REVIEW) {
+            return false;
+        }
+        RoleType roleType = resolveRoleTypeFromLabel(state, recipientLabel);
+        return roleType != null && review.roleActivations().stream()
+                .anyMatch(activation -> activation.roleType() == roleType
+                        && activation.initialReviewCompleted());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-070#1] Reverse-resolves the target role type from the recipient label with
+     * the exact {@link ReviewRuntimeContext#roleLabel(RoleType)} convention used by role spawns.
+     */
+    private static RoleType resolveRoleTypeFromLabel(RuntimeState state, String recipientLabel) {
+        for (RoleType roleType : RoleType.values()) {
+            if (roleType != RoleType.DIRECTOR
+                    && recipientLabel.equals(state.context().roleLabel(roleType))) {
+                return roleType;
+            }
+        }
+        return null;
     }
 
     @Override

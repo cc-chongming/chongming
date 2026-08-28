@@ -14,7 +14,9 @@ import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.gateway.ModelGatewayException;
 import ai.cc.chongming.review.domain.model.ContextScoutConclusion;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import ai.cc.chongming.review.domain.model.ReviewTypes.AssessmentStatus;
+import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
@@ -47,6 +49,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -289,6 +292,82 @@ class AgentScopeReviewRuntimeAdapterTests {
                 .containsExactly(ReviewEventType.ROLE_FAILED, ReviewEventType.REVIEW_FAILED);
     }
 
+    /**
+     * [AIREVIEW-PLAN-070#1][AIREVIEW-PLAN-070#4] A plain wake addressed to a review role whose
+     * initial review is already completed must be silently dropped while the review is still in
+     * INITIAL_REVIEW: no model round is started, no finalizer runs, and the review stays untouched.
+     */
+    @Test
+    void skipsPlainWakeToRoleWhoseInitialReviewAlreadyCompleted() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.INITIAL_REVIEW, context.attemptNo(), 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, context.roleLabel(RoleType.PRODUCT), true)),
+                Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        AtomicInteger modelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapterWithModelCounter(registry, null, events, modelCalls);
+
+        adapter.start(startRequest(context)).block();
+        adapter.registerRole(new AgentRuntimeRoleRequest(
+                context.runtimeId(), context, RoleType.PRODUCT, context.roleLabel(RoleType.PRODUCT),
+                context.roleSessionId(RoleType.PRODUCT))).block();
+
+        adapter.send(context.runtimeId(), context.roleLabel(RoleType.PRODUCT),
+                "None of your initial-review work is needed anymore.").block();
+
+        // The completed role receives nothing: no model round, no finalizer, no domain event, and
+        // the review stays in INITIAL_REVIEW instead of failing/re-posting conclusions.
+        assertThat(modelCalls).hasValue(0);
+        assertThat(review.stage()).isEqualTo(ReviewStage.INITIAL_REVIEW);
+        assertThat(events).isEmpty();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-070#1][AIREVIEW-PLAN-070#4] dispatch envelope delivery must remain legal for
+     * a role whose initial review already completed: the ROLE_WAKE_SKIPPED_COMPLETED gate only
+     * silences plain {@code send} wakes, never validated debate-stage envelopes.
+     */
+    @Test
+    void deliverDispatchCommandStillReachesRoleWhoseInitialReviewAlreadyCompleted() {
+        ReviewRuntimeContext context = context(1);
+        Review review = Review.restore(context.reviewId(), ReviewStage.INITIAL_REVIEW, context.attemptNo(), 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, context.roleLabel(RoleType.PRODUCT), true)),
+                Map.of());
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        registry.register(review);
+        List<ReviewEventDraft> events = new ArrayList<>();
+        AtomicInteger modelCalls = new AtomicInteger();
+        AgentScopeReviewRuntimeAdapter adapter = adapterWithModelCounter(registry, null, events, modelCalls);
+
+        adapter.start(startRequest(context)).block();
+        adapter.registerRole(new AgentRuntimeRoleRequest(
+                context.runtimeId(), context, RoleType.PRODUCT, context.roleLabel(RoleType.PRODUCT),
+                context.roleSessionId(RoleType.PRODUCT))).block();
+
+        ReviewDispatchCommand command = new ReviewDispatchCommand(
+                new ReviewDispatchCommand.CommandId(UUID.randomUUID()),
+                review.id(),
+                review.attemptNo(),
+                ReviewStage.DEBATE,
+                1,
+                RoleType.PRODUCT,
+                ReviewDispatchCommand.DispatchedAction.CHALLENGE,
+                null, null, null,
+                Instant.now().plusSeconds(600),
+                ReviewDispatchCommand.DispatchCommandStatus.PENDING,
+                new IdempotencyKey("plan070-dispatch:" + UUID.randomUUID()),
+                Instant.now());
+
+        adapter.deliverDispatchCommand(context.runtimeId(), context.roleLabel(RoleType.PRODUCT),
+                "Challenge envelope: " + command.commandId().value(), command).block();
+
+        // The envelope is still delivered to the completed role: exactly one model round starts.
+        assertThat(modelCalls).hasValue(1);
+        assertThat(review.stage()).isEqualTo(ReviewStage.INITIAL_REVIEW);
+    }
+
     @Test
     void failsReviewWhenDirectorEndsConflictDetectionWithoutTransition() {
         ReviewRuntimeContext context = context(1);
@@ -513,6 +592,45 @@ class AgentScopeReviewRuntimeAdapterTests {
                 "response-001", "test-model", "Review completed without a tool call.",
                 new ModelGateway.Usage(1, 1, 2), ModelGateway.FinishReason.STOP,
                 Duration.ofMillis(5), 1, request.traceId()));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<io.agentscope.harness.agent.DistributedStore> storeProvider = Mockito.mock(ObjectProvider.class);
+        return new AgentScopeReviewRuntimeAdapter(
+                new ReviewDirectorHarnessFactory(workspaceLayout, gateway, properties, storeProvider),
+                new RoleSubagentFactory(
+                        new ai.cc.chongming.review.domain.role.RolePackRegistry(
+                                new org.springframework.core.io.support.PathMatchingResourcePatternResolver()),
+                        gateway,
+                        properties,
+                        workspaceLayout),
+                new AgentEventAdapter(),
+                registry,
+                progressService,
+                null,
+                null,
+                null,
+                events::add);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-070#4] Builds an adapter whose model gateway counts every invocation so the
+     * tests can prove a wake was either skipped (zero model rounds) or delivered (one model round).
+     */
+    private AgentScopeReviewRuntimeAdapter adapterWithModelCounter(
+            InMemoryReviewRegistry registry,
+            InitialReviewProgressService progressService,
+            List<ReviewEventDraft> events,
+            AtomicInteger modelCalls) {
+        ReviewProperties reviewProperties = new ReviewProperties(temporaryDirectory.toString(), 8, 2);
+        ReviewWorkspaceLayout workspaceLayout = new ReviewWorkspaceLayout(
+                reviewProperties, new com.fasterxml.jackson.databind.ObjectMapper());
+        AgentScopeProperties properties = new AgentScopeProperties(false, temporaryDirectory.resolve("state").toString());
+        ModelGateway gateway = (request, cancellation) -> {
+            modelCalls.incrementAndGet();
+            return Mono.just(new ModelGateway.ModelResponse(
+                    "response-001", "test-model", "Review completed without a tool call.",
+                    new ModelGateway.Usage(1, 1, 2), ModelGateway.FinishReason.STOP,
+                    Duration.ofMillis(5), 1, request.traceId()));
+        };
         @SuppressWarnings("unchecked")
         ObjectProvider<io.agentscope.harness.agent.DistributedStore> storeProvider = Mockito.mock(ObjectProvider.class);
         return new AgentScopeReviewRuntimeAdapter(
