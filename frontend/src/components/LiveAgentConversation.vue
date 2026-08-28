@@ -155,7 +155,8 @@ onUnmounted(() => globalThis.clearTimeout(scrollGuardTimer));
                     </template>
                     <template v-else-if="row.kind === 'tool-group'">
                         <span class="agent-entry-spacer" aria-hidden="true"></span>
-                        <details class="tool-group">
+                        <!-- [AIREVIEW-PLAN-067#1] 探索期工具组自动展开：scout 活动实时可见 -->
+                        <details class="tool-group" :open="!groupDone(row) || !rows.some(r => r.kind === 'message')">
                             <!-- [AIREVIEW-PLAN-054#1] 单工具组摘要：{工具中文名} · {状态文案}；多工具保持“N 个工具调用 + groupStatusLabel”。 -->
                             <summary :aria-label="row.tools.length === 1
                                 ? `${toolLabel(row.tools[0])}，${toolStatusLabel(row.tools[0])}`

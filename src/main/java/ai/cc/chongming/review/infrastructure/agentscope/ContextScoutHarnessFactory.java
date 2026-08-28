@@ -200,7 +200,8 @@ public class ContextScoutHarnessFactory {
                 + "清单已经足以回答的信息不得再次检索。"
                 + "识别与需求有关的模块、入口文件、构建方式与风险边界。"
                 + "完成后仅用简体中文输出 JSON：summary、moduleRoots、entryPoints、constraints、risks、evidencePaths、roleScopes 七个字段；"
-                + "每项结论必须列出 INIT 清单或已读取的快照相对路径；信息不足时明确标记 unknown，不可继续循环检索。\n\n"
+                + "每项结论必须列出 INIT 清单或已读取的快照相对路径；信息不足时明确标记 unknown，不可继续循环检索。"
+                + "每完成一批工具调用后，用一行简体中文简述本批发现与下一步（不要长篇）。\n\n" // [AIREVIEW-PLAN-067#2]
                 + "## INIT 清单（服务器生成，可信的结构性输入）\n"
                 + overview.publicText(RoleType.PROJECT);
     }
