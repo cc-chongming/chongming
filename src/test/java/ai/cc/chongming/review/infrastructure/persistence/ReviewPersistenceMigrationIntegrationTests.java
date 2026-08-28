@@ -351,12 +351,13 @@ class ReviewPersistenceMigrationIntegrationTests {
         SqlSessionFactory sessionFactory = runtimeTraceSessionFactory(dataSource);
         try (SqlSession session = sessionFactory.openSession(true)) {
             RuntimeTracePersistenceMapper mapper = session.getMapper(RuntimeTracePersistenceMapper.class);
+            // createdAt stays null on insert: the column is DB-generated (DEFAULT CURRENT_TIMESTAMP(3)).
             mapper.append(new RuntimeTracePersistenceMapper.RuntimeTraceRow(
                     runtimeId, 1, "RUN_STARTED:run-1", "RUN_STARTED", "{\"type\":\"RUN_STARTED\",\"runId\":\"run-1\"}",
-                    reviewId, 1));
+                    reviewId, 1, null));
             mapper.append(new RuntimeTracePersistenceMapper.RuntimeTraceRow(
                     runtimeId, 2, "TEXT_MESSAGE_START:m-1", "TEXT_MESSAGE_START",
-                    "{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m-1\"}", reviewId, 1));
+                    "{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m-1\"}", reviewId, 1, null));
 
             assertThat(mapper.maxSequence(runtimeId)).isEqualTo(2L);
             assertThat(mapper.findAfter(runtimeId, 0, 10)).hasSize(2)
@@ -368,7 +369,7 @@ class ReviewPersistenceMigrationIntegrationTests {
             // Re-inserting the same (runtime_id, event_sequence) is idempotent via ON DUPLICATE KEY.
             mapper.append(new RuntimeTracePersistenceMapper.RuntimeTraceRow(
                     runtimeId, 2, "TEXT_MESSAGE_START:m-1", "TEXT_MESSAGE_START",
-                    "{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m-1\"}", reviewId, 1));
+                    "{\"type\":\"TEXT_MESSAGE_START\",\"messageId\":\"m-1\"}", reviewId, 1, null));
             assertThat(mapper.maxSequence(runtimeId)).isEqualTo(2L);
             assertThat(mapper.findAfter(runtimeId, 0, 10)).hasSize(2);
 

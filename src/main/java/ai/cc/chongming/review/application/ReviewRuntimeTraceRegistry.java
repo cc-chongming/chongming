@@ -4,10 +4,12 @@ import ai.cc.chongming.review.config.ReviewRuntimeTraceProperties;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RuntimeTraceStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.agentscope.core.agui.event.AguiEvent;
 import jakarta.annotation.PreDestroy;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -250,10 +252,12 @@ public class ReviewRuntimeTraceRegistry {
     private RuntimeTrace hydrate(String runtimeId) {
         try {
             long persistedMax = persistenceStore.maxSequence(runtimeId);
+            // [AIREVIEW-PLAN-068#1] Replay path maps the persisted row's created_at into the
+            // StampedEvent observedAt so hydrated traces carry a real observed timestamp.
             List<StampedEvent> persisted = persistenceStore
                     .findAfter(runtimeId, 0L, Integer.MAX_VALUE)
                     .stream()
-                    .map(row -> new StampedEvent(row.sequence(), deserialize(row.payloadJson())))
+                    .map(row -> new StampedEvent(row.sequence(), deserialize(row.payloadJson()), row.createdAt()))
                     .toList();
             List<StampedEvent> kept = persisted.size() > maxEvents
                     ? List.copyOf(persisted.subList(persisted.size() - maxEvents, persisted.size()))
@@ -385,7 +389,9 @@ public class ReviewRuntimeTraceRegistry {
             StampedEvent stamped;
             synchronized (this) {
                 // Allocation, buffer append, and subscription enqueue are one critical section so every subscriber sees 1, 2, 3.
-                stamped = new StampedEvent(sequence.incrementAndGet(), event);
+                // [AIREVIEW-PLAN-068#1] Live path captures observedAt with the clock; the replay path
+                // (hydrate) maps the persisted created_at into the same component.
+                stamped = new StampedEvent(sequence.incrementAndGet(), event, Instant.now());
                 events.add(stamped);
                 if (events.size() > maxEvents) {
                     events.removeFirst();
@@ -612,9 +618,14 @@ public class ReviewRuntimeTraceRegistry {
 
         private boolean deliver(Subscription subscription, StampedEvent stamped) {
             try {
+                // [AIREVIEW-PLAN-068#2] Both live and replayed deliveries serialize the event as a
+                // JSON object enriched with the observedAt timestamp, so every SSE data payload can
+                // be parsed back as Instant.
+                ObjectNode node = objectMapper.valueToTree(stamped.event());
+                node.put("createdAt", stamped.observedAt().toString());
                 subscription.emitter().send(SseEmitter.event()
                         .id(Long.toString(stamped.sequence()))
-                        .data(stamped.event()));
+                        .data(node.toString()));
                 synchronized (subscription) {
                     subscription.lastDeliveredSequence = stamped.sequence();
                 }
@@ -637,7 +648,17 @@ public class ReviewRuntimeTraceRegistry {
         }
     }
 
-    private record StampedEvent(long sequence, AguiEvent event) {
+    /**
+     * [AIREVIEW-PLAN-068#1] Sequence-numbered event stamped with the instant it was observed.
+     * Live publishes capture {@link Instant#now()}; replayed rows map the persisted
+     * {@code created_at} column. The two-argument form keeps pre-PLAN-068 call sites compatible
+     * and stamps the live clock.
+     */
+    private record StampedEvent(long sequence, AguiEvent event, Instant observedAt) {
+
+        private StampedEvent(long sequence, AguiEvent event) {
+            this(sequence, event, Instant.now());
+        }
     }
 
     private record ReviewRuntimeRef(UUID reviewId, int attemptNo) {

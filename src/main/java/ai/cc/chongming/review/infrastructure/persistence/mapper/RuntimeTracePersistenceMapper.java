@@ -1,5 +1,6 @@
 package ai.cc.chongming.review.infrastructure.persistence.mapper;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
@@ -27,7 +28,7 @@ public interface RuntimeTracePersistenceMapper {
     @Select("""
             SELECT runtime_id AS runtimeId, event_sequence AS sequence, event_id AS eventId,
                    event_type AS eventType, payload_json AS payloadJson, review_id AS reviewId,
-                   attempt_no AS attemptNo
+                   attempt_no AS attemptNo, created_at AS createdAt
             FROM runtime_trace_event
             WHERE runtime_id = #{runtimeId} AND event_sequence > #{afterSequence}
             ORDER BY event_sequence ASC
@@ -51,6 +52,8 @@ public interface RuntimeTracePersistenceMapper {
     /**
      * Full row for insert and reload. {@code runtimeId}/{@code reviewId}/{@code attemptNo} are
      * populated for inserts and also selected back on reads so the store can map to the domain row.
+     * {@code createdAt} is DB-generated ({@code DEFAULT CURRENT_TIMESTAMP(3)}) and therefore null
+     * for inserts, selected back on reads per [AIREVIEW-PLAN-068#2] for the SSE createdAt field.
      *
      * @author wangli
      */
@@ -61,6 +64,7 @@ public interface RuntimeTracePersistenceMapper {
             String eventType,
             String payloadJson,
             String reviewId,
-            int attemptNo) {
+            int attemptNo,
+            LocalDateTime createdAt) {
     }
 }

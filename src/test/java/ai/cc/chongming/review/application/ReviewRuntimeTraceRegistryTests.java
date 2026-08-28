@@ -6,9 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import ai.cc.chongming.review.config.ReviewRuntimeTraceProperties;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RuntimeTraceStore;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.agui.event.AguiEvent;
 
+import java.lang.reflect.Field;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +26,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * [AIREVIEW-PLAN-022#7.1][AIREVIEW-PLAN-023#8][AIREVIEW-PLAN-024#6] Verifies durable runtime trace persistence,
@@ -263,6 +269,61 @@ class ReviewRuntimeTraceRegistryTests {
         assertThat(restarted.replayHistory(runtimeId, 0)).hasSize(1);
     }
 
+    @Test
+    void liveSsePayloadCarriesParseableObservedAt() throws Exception {
+        FakeTraceStore store = new FakeTraceStore();
+        ReviewRuntimeTraceRegistry registry = registry(store, 1000);
+        String runtimeId = runtimeId(1);
+        ReviewRuntimeTraceRegistry.Subscription subscription = registry.subscribe(runtimeId, 0);
+        registry.activate(subscription);
+
+        registry.publish(runtimeId, text("m-1"));
+        registry.publish(runtimeId, custom("chongming.runtime-lifecycle.v1"));
+
+        // [AIREVIEW-PLAN-068#2] Live SSE payloads are the JSON event plus a parseable createdAt.
+        awaitTrue(() -> sseDataPayloads(subscription.emitter()).size() == 2);
+        List<String> payloads = sseDataPayloads(subscription.emitter());
+        assertThat(payloads).allSatisfy(payload -> {
+            try {
+                JsonNode node = new ObjectMapper().readTree(payload);
+                assertThat(node.has("createdAt")).isTrue();
+                assertThat(Instant.parse(node.get("createdAt").asText())).isAfter(Instant.EPOCH);
+            } catch (Exception exception) {
+                throw new AssertionError("SSE payload is not JSON with a parseable createdAt: " + payload,
+                        exception);
+            }
+        });
+    }
+
+    @Test
+    void replayedSsePayloadCarriesParseableObservedAt() throws Exception {
+        FakeTraceStore store = new FakeTraceStore();
+        ReviewRuntimeTraceRegistry first = registry(store, 1000);
+        String runtimeId = runtimeId(1);
+        first.publish(runtimeId, start());
+        first.publish(runtimeId, text("m-1"));
+        awaitTrue(() -> store.maxSequence(runtimeId) == 2);
+
+        // A fresh registry hydrates the persisted trace on subscribe, so the replayed history hits
+        // the same SSE serialization path with the stored created_at mapped into observedAt.
+        ReviewRuntimeTraceRegistry restarted = registry(store, 1000);
+        ReviewRuntimeTraceRegistry.Subscription subscription = restarted.subscribe(runtimeId, 0);
+        restarted.activate(subscription);
+
+        awaitTrue(() -> sseDataPayloads(subscription.emitter()).size() == 2);
+        List<String> payloads = sseDataPayloads(subscription.emitter());
+        assertThat(payloads).allSatisfy(payload -> {
+            try {
+                JsonNode node = new ObjectMapper().readTree(payload);
+                assertThat(node.has("createdAt")).isTrue();
+                assertThat(Instant.parse(node.get("createdAt").asText())).isAfter(Instant.EPOCH);
+            } catch (Exception exception) {
+                throw new AssertionError("SSE payload is not JSON with a parseable createdAt: " + payload,
+                        exception);
+            }
+        });
+    }
+
     private static ReviewRuntimeTraceRegistry registry(FakeTraceStore store, int maxEvents) {
         return new ReviewRuntimeTraceRegistry(
                 new ObjectMapper(), store, new ReviewRuntimeTraceProperties(true, maxEvents));
@@ -282,6 +343,29 @@ class ReviewRuntimeTraceRegistryTests {
 
     private static AguiEvent.Custom custom(String name) {
         return new AguiEvent.Custom("thread-1", "run-1", name, Map.of("agentId", "DIRECTOR", "lifecycle", name));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-068#2] Reads the SSE frames SseEmitter buffered before a container handler
+     * was attached (unit tests never initialize one), returning the JSON event data payloads.
+     */
+    private static List<String> sseDataPayloads(SseEmitter emitter) {
+        try {
+            Field earlySendAttempts = ResponseBodyEmitter.class.getDeclaredField("earlySendAttempts");
+            earlySendAttempts.setAccessible(true);
+            Set<?> attempts = (Set<?>) earlySendAttempts.get(emitter);
+            List<String> payloads = new ArrayList<>();
+            for (Object attempt : attempts) {
+                if (attempt instanceof ResponseBodyEmitter.DataWithMediaType item
+                        && item.getData() instanceof String text
+                        && text.startsWith("{")) {
+                    payloads.add(text);
+                }
+            }
+            return payloads;
+        } catch (Exception exception) {
+            throw new AssertionError("could not read SseEmitter early send attempts", exception);
+        }
     }
 
     private static void awaitTrue(BooleanSupplier condition) {
@@ -338,7 +422,7 @@ class ReviewRuntimeTraceRegistryTests {
                         return;
                     }
                     rowsByRuntime.computeIfAbsent(runtimeId, ignored -> new TreeMap<>())
-                            .put(sequence, new RuntimeTraceRow(sequence, eventId, eventType, payloadJson));
+                            .put(sequence, new RuntimeTraceRow(sequence, eventId, eventType, payloadJson, Instant.now()));
                 }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();

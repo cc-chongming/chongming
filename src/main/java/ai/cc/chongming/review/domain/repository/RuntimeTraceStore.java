@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.domain.repository;
 
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -39,7 +40,10 @@ public interface RuntimeTraceStore {
 
     /**
      * Read-only persisted trace row. {@code payloadJson} is the Jackson-serialized AG-UI event.
+     * {@code createdAt} is the DB-generated {@code created_at} column (server local wall clock,
+     * Asia/Shanghai) restored to an {@link Instant} by the persistence implementation per
+     * [AIREVIEW-PLAN-068#2] / LRN-20260820-001; the registry maps it into replayed SSE payloads.
      */
-    record RuntimeTraceRow(long sequence, String eventId, String eventType, String payloadJson) {
+    record RuntimeTraceRow(long sequence, String eventId, String eventType, String payloadJson, Instant createdAt) {
     }
 }
