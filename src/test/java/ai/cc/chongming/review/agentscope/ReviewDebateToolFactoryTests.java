@@ -8,10 +8,17 @@ import static org.mockito.Mockito.when;
 
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.IntakeCancellation;
+import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
+import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
+import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
+import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
+import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStore;
 import ai.cc.chongming.review.domain.repository.ReviewDebateStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewDebateToolFactory;
@@ -122,6 +129,47 @@ class ReviewDebateToolFactoryTests {
                             .as("tool %s must demand a dispatch commandId", tool.getName())
                             .contains("commandId");
                 });
+    }
+
+    /** [AIREVIEW-PLAN-059#7] 串行闸：非焦点议题的 dispatch 被排队提示拒绝；焦点议题正常签发。 */
+    @Test
+    void serialGateRejectsNonFocusDispatchAndAllowsTheFocusTopic() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Review review = Review.restore(reviewId, ReviewStage.DEBATE, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true)), Map.of());
+        ReviewRegistry registry = mock(ReviewRegistry.class);
+        when(registry.find(reviewId)).thenReturn(Optional.of(review));
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        TopicId first = new TopicId(UUID.randomUUID());
+        TopicId second = new TopicId(UUID.randomUUID());
+        if (first.value().compareTo(second.value()) > 0) {
+            TopicId swap = first; first = second; second = swap;
+        }
+        store.saveTopic(new DebateTopic(first, reviewId, "focus.topic", List.of()));
+        store.saveTopic(new DebateTopic(second, reviewId, "queued.topic", List.of()));
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchService dispatchService = new ReviewDispatchService(dispatchStore, store, draft -> { });
+        ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
+                registry, mock(DebateTools.class), mock(DebateService.class), store, dispatchService);
+        ReviewRuntimeContext context = new ReviewRuntimeContext(
+                reviewId, 1, "test-user", "test-trace", IntakeCancellation.neverCancelled());
+        io.agentscope.core.tool.AgentTool dispatchTool = factory.directorTools(context).stream()
+                .filter(tool -> tool.getName().equals("dispatch_debate_action"))
+                .findFirst().orElseThrow();
+
+        Map<String, Object> queued = Map.of("recipientRole", "PRODUCT", "allowedAction", "DEFENSE",
+                "topicId", second.value().toString());
+        dispatchTool.callAsync(ToolCallParam.builder()
+                .toolUseBlock(new ToolUseBlock("call-queued", "dispatch_debate_action", queued))
+                .input(queued).build()).block();
+        assertThat(dispatchStore.findByReview(reviewId, 1)).isEmpty();
+
+        Map<String, Object> focus = Map.of("recipientRole", "PRODUCT", "allowedAction", "DEFENSE",
+                "topicId", first.value().toString());
+        dispatchTool.callAsync(ToolCallParam.builder()
+                .toolUseBlock(new ToolUseBlock("call-focus", "dispatch_debate_action", focus))
+                .input(focus).build()).block();
+        assertThat(dispatchStore.findByReview(reviewId, 1)).hasSize(1);
     }
 
     @Test

@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
@@ -82,7 +83,9 @@ class ReviewWorkflowDispatcherTests {
     void setUp() {
         ObjectProvider<AgentRuntimeAdapter> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(adapter);
-        dispatcher = new ReviewWorkflowDispatcher(provider, registry, dispatchService, debateStore);
+        // [AIREVIEW-PLAN-059#7] 旧用例保持并行语义：显式关闭串行闸（默认开启）。
+        dispatcher = new ReviewWorkflowDispatcher(provider, registry, dispatchService, debateStore, null,
+                serialProperties(false));
         dispatcherRef.set(dispatcher);
         when(adapter.send(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
         when(adapter.deliverDispatchCommand(anyString(), anyString(), anyString(), any())).thenReturn(Mono.empty());
@@ -110,6 +113,102 @@ class ReviewWorkflowDispatcherTests {
         openTopic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "api.contract",
                 List.of(claim.claimId()));
         debateStore.saveTopic(openTopic);
+    }
+
+    /** [AIREVIEW-PLAN-059#7] 串行闸 properties 构造缝：serial 开关可显式控制。 */
+    private static AgentScopeProperties serialProperties(boolean serial) {
+        return new AgentScopeProperties(false, "state", 48, 12, 16, java.time.Duration.ofSeconds(150),
+                24, java.time.Duration.ofMinutes(20), java.time.Duration.ofMinutes(6), serial);
+    }
+
+    private ReviewWorkflowDispatcher serialDispatcher(boolean serial) {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<AgentRuntimeAdapter> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(adapter);
+        return new ReviewWorkflowDispatcher(provider, registry, dispatchService, debateStore, null,
+                serialProperties(serial));
+    }
+
+    /** 两个 UUID 升序排列，保证 store 列表序（topic_id 序）可预测：first 即焦点。 */
+    private static TopicId[] orderedTopicIds() {
+        TopicId a = new TopicId(UUID.randomUUID());
+        TopicId b = new TopicId(UUID.randomUUID());
+        return a.value().compareTo(b.value()) < 0 ? new TopicId[] {a, b} : new TopicId[] {b, a};
+    }
+
+    /** [AIREVIEW-PLAN-059#7] 串行开启：非焦点议题的 challenge 不签发答辩信封。 */
+    @Test
+    void serialGateSkipsRebuttalEnvelopeForNonFocusTopic() {
+        TopicId[] ids = orderedTopicIds();
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry serialRegistry = new InMemoryReviewRegistry();
+        Review serialReview = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                Map.of());
+        serialRegistry.register(serialReview);
+        Claim oppose = new Claim(new ClaimId(UUID.randomUUID()), serialReview.id(), RoleType.BACKEND,
+                "api.contract", ClaimSeverity.P1, ClaimPosition.OPPOSE, "接口契约与需求冲突", "字段定义不一致", List.of());
+        store.saveClaim(oppose);
+        DebateTurn nonFocusChallenge = new DebateTurn(new TurnId(UUID.randomUUID()), ids[1], 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.CHALLENGE, oppose.claimId(), null,
+                "质疑接口契约", List.of(), null, null, Instant.now());
+        store.saveTopic(DebateTopic.restore(ids[0], serialReview.id(), "focus.topic", List.of(oppose.claimId()),
+                DebateTopicStatus.OPEN, 1, List.of(), null, null));
+        store.saveTopic(DebateTopic.restore(ids[1], serialReview.id(), "queued.topic", List.of(oppose.claimId()),
+                DebateTopicStatus.CHALLENGED, 1, List.of(nonFocusChallenge), null, null));
+        store.saveTurn(serialReview.id(), nonFocusChallenge);
+        InMemoryReviewDispatchStore serialDispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchService serialDispatch = new ReviewDispatchService(serialDispatchStore, store, draft -> { });
+        ReviewWorkflowDispatcher serial = new ReviewWorkflowDispatcher(
+                mockProvider(), serialRegistry, serialDispatch, store, null, serialProperties(true));
+
+        serial.onCommitted(eventFor(serialReview, ReviewEventType.CHALLENGE_SUBMITTED,
+                nonFocusChallenge.turnId(), nonFocusChallenge.topicId()));
+
+        assertThat(serialDispatchStore.findByReview(serialReview.id(), serialReview.attemptNo())).isEmpty();
+    }
+
+    /** [AIREVIEW-PLAN-059#7] 焦点终态后前进：同一 challenge 在其成为焦点后正常签发答辩信封。 */
+    @Test
+    void serialFocusAdvanceUnblocksTheQueuedTopicRebuttal() {
+        TopicId[] ids = orderedTopicIds();
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry serialRegistry = new InMemoryReviewRegistry();
+        Review serialReview = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                Map.of());
+        serialRegistry.register(serialReview);
+        Claim oppose = new Claim(new ClaimId(UUID.randomUUID()), serialReview.id(), RoleType.BACKEND,
+                "api.contract", ClaimSeverity.P1, ClaimPosition.OPPOSE, "接口契约与需求冲突", "字段定义不一致", List.of());
+        store.saveClaim(oppose);
+        DebateTurn queuedChallenge = new DebateTurn(new TurnId(UUID.randomUUID()), ids[1], 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.CHALLENGE, oppose.claimId(), null,
+                "质疑接口契约", List.of(), null, null, Instant.now());
+        store.saveTopic(DebateTopic.restore(ids[0], serialReview.id(), "focus.topic", List.of(oppose.claimId()),
+                DebateTopicStatus.RESOLVED, 1, List.of(), "已决议", Instant.now()));
+        store.saveTopic(DebateTopic.restore(ids[1], serialReview.id(), "queued.topic", List.of(oppose.claimId()),
+                DebateTopicStatus.CHALLENGED, 1, List.of(queuedChallenge), null, null));
+        store.saveTurn(serialReview.id(), queuedChallenge);
+        InMemoryReviewDispatchStore serialDispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchService serialDispatch = new ReviewDispatchService(serialDispatchStore, store, draft -> { });
+        ReviewWorkflowDispatcher serial = new ReviewWorkflowDispatcher(
+                mockProvider(), serialRegistry, serialDispatch, store, null, serialProperties(true));
+
+        serial.onCommitted(eventFor(serialReview, ReviewEventType.CHALLENGE_SUBMITTED,
+                queuedChallenge.turnId(), queuedChallenge.topicId()));
+
+        List<ReviewDispatchCommand> commands = serialDispatchStore.findByReview(serialReview.id(), serialReview.attemptNo());
+        assertThat(commands).hasSize(1);
+        assertThat(commands.getFirst().allowedAction()).isEqualTo(DispatchedAction.REBUTTAL);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ObjectProvider<AgentRuntimeAdapter> mockProvider() {
+        ObjectProvider<AgentRuntimeAdapter> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(adapter);
+        return provider;
     }
 
     @Test
@@ -455,6 +554,13 @@ class ReviewWorkflowDispatcherTests {
     private boolean roleLabel(String label) {
         return label != null && (label.endsWith("-product") || label.endsWith("-backend")
                 || label.endsWith("-frontend") || label.endsWith("-project"));
+    }
+
+    /** [AIREVIEW-PLAN-059#7] 绑定任意 review 的事件构造缝（串行用例独立 review）。 */
+    private ReviewEvent eventFor(Review owner, ReviewEventType type, TurnId turnId, TopicId eventTopicId) {
+        return new ReviewEvent(UUID.randomUUID(), 1L, owner.id(), owner.attemptNo(), type, type.category(),
+                owner.stage(), null, null, eventTopicId, null, turnId, 1, null,
+                Instant.now(), 1, Map.of());
     }
 
     private ReviewEvent event(ReviewEventType type, TurnId turnId, Map<String, String> payload) {

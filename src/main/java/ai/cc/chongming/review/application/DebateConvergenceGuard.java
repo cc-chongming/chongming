@@ -82,8 +82,11 @@ public class DebateConvergenceGuard {
         state.lastWakeAt = Instant.now();
         int wakes = state.wakes.incrementAndGet();
         Duration elapsed = Duration.between(state.firstWakeAt, Instant.now());
-        if (wakes < properties.debateMaxDirectorWakes()
-                && elapsed.compareTo(properties.debateConvergenceTimeout()) < 0) {
+        // [AIREVIEW-PLAN-059#6] 串行辩论按议题数缩放预算：wakes 上限与墙钟 ×n，
+        // 给 n 个议题串行走完足够预算；no-progress/expired-dispatch 两路快速救援不变。
+        int topicScale = topicScale(reviewId);
+        if (wakes < properties.debateMaxDirectorWakes() * topicScale
+                && elapsed.compareTo(properties.debateConvergenceTimeout().multipliedBy(topicScale)) < 0) {
             return;
         }
         // Drop the state before converging so events published by the convergence itself never
@@ -110,18 +113,27 @@ public class DebateConvergenceGuard {
             WakeState state = entry.getValue();
             Duration elapsed = Duration.between(state.firstWakeAt, now);
             Duration idle = Duration.between(state.lastWakeAt, now);
+            // [AIREVIEW-PLAN-059#6] 墙钟预算按议题数缩放；no-progress 与 expired-dispatch 不缩放。
+            String[] parts = entry.getKey().split(":");
+            int topicScale = 1;
+            if (parts.length == 2) {
+                try {
+                    topicScale = topicScale(new ReviewId(UUID.fromString(parts[0])));
+                } catch (IllegalArgumentException ignored) {
+                    //  malformed key: keep the unscaled budget; the parse below skips it anyway.
+                }
+            }
             String reason;
             if (hasExpiredPending(entry.getKey(), now)) {
                 reason = "expired-dispatch";
             } else if (idle.compareTo(properties.debateNoProgressTimeout()) >= 0) {
                 reason = "no-progress";
-            } else if (elapsed.compareTo(properties.debateConvergenceTimeout()) >= 0) {
+            } else if (elapsed.compareTo(properties.debateConvergenceTimeout().multipliedBy(topicScale)) >= 0) {
                 reason = "wall-clock";
             } else {
                 continue;
             }
             states.remove(entry.getKey());
-            String[] parts = entry.getKey().split(":");
             if (parts.length != 2) {
                 continue;
             }
@@ -183,6 +195,18 @@ public class DebateConvergenceGuard {
             debateService.beginJudging(review);
             log.warn("DEBATE_FORCED_CONVERGENCE reviewId={} attemptNo={} directorWakes={} elapsed={} reason={} escalatedTopics={}",
                     reviewId.value(), attemptNo, wakes, elapsed, reason, openTopics.size());
+        }
+    }
+
+    /** [AIREVIEW-PLAN-059#6] 预算缩放系数 = max(1, 已登记议题数)；串行关闭或 store 异常时回退 1。 */
+    private int topicScale(ReviewId reviewId) {
+        if (!properties.debateSerialTopics()) {
+            return 1;
+        }
+        try {
+            return Math.max(1, debateStore.findTopics(reviewId).size());
+        } catch (RuntimeException exception) {
+            return 1;
         }
     }
 

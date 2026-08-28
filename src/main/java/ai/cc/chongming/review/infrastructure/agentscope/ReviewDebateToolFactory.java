@@ -1,11 +1,14 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.ConflictDetectionService;
+import ai.cc.chongming.review.application.DebateFocusResolver;
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.model.Claim;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
@@ -25,6 +28,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -56,13 +60,14 @@ public class ReviewDebateToolFactory {
     private final ReviewDebateStore debateStore;
     private final ReviewDispatchService dispatchService;
     private final ConflictDetectionService conflictDetectionService;
+    private final AgentScopeProperties properties;
 
     public ReviewDebateToolFactory(
             ReviewRegistry reviewRegistry,
             DebateTools debateTools,
             DebateService debateService,
             ReviewDebateStore debateStore) {
-        this(reviewRegistry, debateTools, debateService, debateStore, null, null);
+        this(reviewRegistry, debateTools, debateService, debateStore, null, null, null);
     }
 
     public ReviewDebateToolFactory(
@@ -71,7 +76,7 @@ public class ReviewDebateToolFactory {
             DebateService debateService,
             ReviewDebateStore debateStore,
             ReviewDispatchService dispatchService) {
-        this(reviewRegistry, debateTools, debateService, debateStore, dispatchService, null);
+        this(reviewRegistry, debateTools, debateService, debateStore, dispatchService, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -81,13 +86,30 @@ public class ReviewDebateToolFactory {
             DebateService debateService,
             ReviewDebateStore debateStore,
             ReviewDispatchService dispatchService,
-            ConflictDetectionService conflictDetectionService) {
+            ConflictDetectionService conflictDetectionService,
+            AgentScopeProperties properties) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.debateTools = Objects.requireNonNull(debateTools, "debateTools must not be null");
         this.debateService = Objects.requireNonNull(debateService, "debateService must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.dispatchService = dispatchService;
         this.conflictDetectionService = conflictDetectionService;
+        this.properties = properties;
+    }
+
+    /** [AIREVIEW-PLAN-059#3] properties 缺失（旧构造/测试缝）时按配置默认值视为串行开启。 */
+    private boolean serialDebateEnabled() {
+        return properties == null || properties.debateSerialTopics();
+    }
+
+    /** [AIREVIEW-PLAN-059#3] 非焦点议题返回排队提示；焦点匹配或无焦点时返回 null 放行。 */
+    private String serialFocusRejection(Review review, TopicId requestedTopicId) {
+        Optional<DebateTopic> focus = DebateFocusResolver.focus(debateStore, review.id());
+        if (focus.isEmpty() || focus.get().id().equals(requestedTopicId)) {
+            return null;
+        }
+        return "SERIAL_DEBATE: 当前焦点议题为 " + focus.get().id().value()
+                + "；议题串行辩论，请先完成焦点议题；其余议题排队，焦点终态后自动前进。";
     }
 
     public List<AgentTool> directorTools(ReviewRuntimeContext context) {
@@ -447,6 +469,15 @@ public class ReviewDebateToolFactory {
                     ? number.longValue() : DISPATCH_DEFAULT_TTL_SECONDS;
             ttlSeconds = Math.max(DISPATCH_MIN_TTL_SECONDS, Math.min(DISPATCH_MAX_TTL_SECONDS, ttlSeconds));
             TopicId dispatchTopicId = topicId(input);
+            // [AIREVIEW-PLAN-059#3] 串行闸：非焦点议题返回排队提示，不签发信封。
+            if (serialDebateEnabled()) {
+                String rejection = serialFocusRejection(review, dispatchTopicId);
+                if (rejection != null) {
+                    LOGGER.info("DISPATCH_SERIAL_GATE reviewId={} requestedTopicId={}",
+                            review.id().value(), dispatchTopicId.value());
+                    return ToolResultBlock.text(rejection);
+                }
+            }
             // [AIREVIEW-PLAN-047#1] Round is per topic: a topic that began its own second round gets
             // round-two envelopes, everything else stays round one.
             int round = debateRoundFor(review, dispatchTopicId);
@@ -491,11 +522,21 @@ public class ReviewDebateToolFactory {
                 "topicId", stringSchema("Debate topic UUID to advance to its second round")),
                 List.of("topicId")); }
         @Override ToolResultBlock invoke(Review review, ReviewCommandMetadata metadata, Map<String, Object> input) {
+            // [AIREVIEW-PLAN-059#5] 串行闸：仅焦点议题可开第二轮，避免协调者提前驱动排队议题。
+            TopicId roundTopicId = topicId(input);
+            if (serialDebateEnabled()) {
+                String rejection = serialFocusRejection(review, roundTopicId);
+                if (rejection != null) {
+                    LOGGER.info("SECOND_ROUND_SERIAL_GATE reviewId={} requestedTopicId={}",
+                            review.id().value(), roundTopicId.value());
+                    return ToolResultBlock.text(rejection);
+                }
+            }
             // [AIREVIEW-PLAN-047#1] The service owns idempotency: the same callId replays, a topic
             // already on round two is treated as replayed (hard two-round cap), and the committed
             // DEBATE_ROUND_2_STARTED fact (with topicId) wakes the Director to issue directed
             // dispatch commands for that topic only.
-            DebateService.TopicRoundResult result = debateService.beginTopicSecondRound(review, metadata, topicId(input));
+            DebateService.TopicRoundResult result = debateService.beginTopicSecondRound(review, metadata, roundTopicId);
             return ToolResultBlock.text("topicId=" + result.topic().id().value()
                     + "; round=" + result.topic().currentRound()
                     + "; stage=" + review.stage()

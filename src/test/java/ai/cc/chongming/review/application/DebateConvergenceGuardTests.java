@@ -125,6 +125,20 @@ class DebateConvergenceGuardTests {
         assertThat(fixture.review.stage()).isEqualTo(ReviewStage.JUDGING);
     }
 
+    /** [AIREVIEW-PLAN-059#6] 串行开启时 wake 预算按议题数（夹具 2 个）缩放：2→4 次才收敛。 */
+    @Test
+    void serialDebateScalesTheWakeBudgetByTopicCount() {
+        Fixture fixture = fixture(2, Duration.ofMinutes(20), Duration.ofMinutes(20), ReviewStage.DEBATE, true);
+
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        assertThat(fixture.review.stage()).isEqualTo(ReviewStage.DEBATE);
+
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        assertThat(fixture.review.stage()).isEqualTo(ReviewStage.JUDGING);
+    }
+
     @Test
     void clearResetsTheWakeBudget() {
         Fixture fixture = fixture(3, Duration.ofMinutes(20));
@@ -151,6 +165,10 @@ class DebateConvergenceGuardTests {
     }
 
     private Fixture fixture(int maxWakes, Duration timeout, Duration noProgress, ReviewStage stage) {
+        return fixture(maxWakes, timeout, noProgress, stage, false);
+    }
+
+    private Fixture fixture(int maxWakes, Duration timeout, Duration noProgress, ReviewStage stage, boolean serial) {
         InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
         InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
         Review review = Review.restore(new ReviewId(UUID.randomUUID()), stage, 1, 0,
@@ -160,7 +178,7 @@ class DebateConvergenceGuardTests {
         store.saveTopic(new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "cache.read_your_writes", List.of()));
         DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
         AgentScopeProperties properties = new AgentScopeProperties(
-                false, "state", 48, 12, 16, Duration.ofSeconds(150), maxWakes, timeout, noProgress);
+                false, "state", 48, 12, 16, Duration.ofSeconds(150), maxWakes, timeout, noProgress, serial);
         return new Fixture(new DebateConvergenceGuard(registry, debateService, store, properties), store, review);
     }
 

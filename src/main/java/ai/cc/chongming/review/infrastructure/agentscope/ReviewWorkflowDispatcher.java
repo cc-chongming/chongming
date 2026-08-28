@@ -1,9 +1,11 @@
 package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.DebateConvergenceGuard;
+import ai.cc.chongming.review.application.DebateFocusResolver;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewEventListener;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
@@ -28,6 +30,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -67,15 +70,19 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     /** [AIREVIEW-PLAN-046#1] Server challenge after a defence SUPPORT claim completed both sides. */
     private static final String SERVER_CHALLENGE_AFTER_DEFENSE = "SERVER_CHALLENGE_AFTER_DEFENSE";
 
+    /** [AIREVIEW-PLAN-059#4] Server challenge re-armed when the serial focus advances to a two-sided never-challenged topic. */
+    private static final String SERVER_CHALLENGE_ON_FOCUS_ADVANCE = "SERVER_CHALLENGE_ON_FOCUS_ADVANCE";
+
     private final ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider;
     private final ReviewRegistry reviewRegistry;
     private final ReviewDispatchService dispatchService;
     private final ReviewDebateStore debateStore;
     private final ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider;
+    private final AgentScopeProperties properties;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
 
     public ReviewWorkflowDispatcher(ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider) {
-        this(runtimeAdapterProvider, null, null, null, null);
+        this(runtimeAdapterProvider, null, null, null, null, null);
     }
 
     public ReviewWorkflowDispatcher(
@@ -83,7 +90,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             ReviewRegistry reviewRegistry,
             ReviewDispatchService dispatchService,
             ReviewDebateStore debateStore) {
-        this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, null);
+        this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, null, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -92,12 +99,28 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             ReviewRegistry reviewRegistry,
             ReviewDispatchService dispatchService,
             ReviewDebateStore debateStore,
-            ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider) {
+            ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider,
+            AgentScopeProperties properties) {
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
         this.reviewRegistry = reviewRegistry;
         this.dispatchService = dispatchService;
         this.debateStore = debateStore;
         this.convergenceGuardProvider = convergenceGuardProvider;
+        this.properties = properties;
+    }
+
+    /** [AIREVIEW-PLAN-059#4] properties 缺失（旧构造/测试缝）时按配置默认值视为串行开启。 */
+    private boolean serialEnabled() {
+        return properties == null || properties.debateSerialTopics();
+    }
+
+    /** [AIREVIEW-PLAN-059#4] 当前焦点议题 id 文本；无焦点或 store 缺失时为 "-"。 */
+    private String focusIdOf(ReviewEvent event) {
+        if (debateStore == null) {
+            return "-";
+        }
+        return DebateFocusResolver.focus(debateStore, event.reviewId())
+                .map(topic -> topic.id().value().toString()).orElse("-");
     }
 
     @Override
@@ -117,7 +140,10 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             // [AIREVIEW-PLAN-046#1] Opening a two-sided topic is the first server-side challenge
             // trigger; the Director wake below states that challenges are server-issued.
             issueChallengeDispatches(event, event.topicId(), SERVER_CHALLENGE_AFTER_OPPOSITION);
-            wakeDirector(event, "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command. challenges are server-issued; do not dispatch CHALLENGE yourself.");
+            // [AIREVIEW-PLAN-059#4] 串行辩论：唤醒附当前焦点，协调者仅驱动焦点议题。
+            wakeDirector(event, "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command. challenges are server-issued; do not dispatch CHALLENGE yourself."
+                    + " （串行辩论）当前焦点议题=" + focusIdOf(event)
+                    + "：仅为焦点议题签发 DEFENSE 等调度命令；其余议题服务端排队，焦点终态后自动前进。");
         } else if (event.type() == ReviewEventType.CLAIM_SUBMITTED) {
             // [AIREVIEW-PLAN-046#1] A SUPPORT claim committed during a debate round can complete the
             // defence side of an objector-only topic; the server then issues the CHALLENGE envelopes.
@@ -132,7 +158,15 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                     + "topic with the matching targets, or close it with close_debate_topic and converge with "
                     + "begin_judging when nothing further is required. Do not run an empty round.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {
-            wakeDirector(event, "A debate topic was closed. If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
+            // [AIREVIEW-PLAN-059#4] 焦点前进：唤醒附下一焦点议题；新焦点双方齐备但从未质询时补发质询。
+            Optional<DebateTopic> nextFocus = debateStore == null
+                    ? Optional.empty() : DebateFocusResolver.focus(debateStore, event.reviewId());
+            String focusText = nextFocus.map(topic -> "下一焦点议题=" + topic.id().value()
+                    + "，请围绕它继续辩论（为它签发 DEFENSE 等调度）；其余议题保持排队。 ")
+                    .orElse("所有议题已终态，使用 begin_judging。 ");
+            wakeDirector(event, "A debate topic was closed. " + focusText
+                    + "If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
+            nextFocus.ifPresent(topic -> issueChallengeDispatches(event, topic.id(), SERVER_CHALLENGE_ON_FOCUS_ADVANCE));
         } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
             issueRebuttalDispatch(event);
             wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
@@ -210,6 +244,15 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             LOGGER.warn("REBUTTAL_DISPATCH_SKIPPED reviewId={} turnId={} reason=CHALLENGE_TURN_NOT_FOUND",
                     event.reviewId().value(), event.turnId().value());
             return;
+        }
+        // [AIREVIEW-PLAN-059#4] 串行闸：非焦点议题不签发答辩信封。
+        if (serialEnabled()) {
+            Optional<DebateTopic> focus = DebateFocusResolver.focus(debateStore, review.id());
+            if (focus.isPresent() && !focus.get().id().equals(challenge.topicId())) {
+                LOGGER.info("REBUTTAL_DISPATCH_SKIPPED reviewId={} turnId={} reason=SERIAL_NOT_FOCUS focusTopicId={}",
+                        event.reviewId().value(), event.turnId().value(), focus.get().id().value());
+                return;
+            }
         }
         try {
             synchronized (review) {
@@ -320,6 +363,15 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=TOPIC_TERMINAL status={}",
                     event.reviewId().value(), topicId.value(), topic.status());
             return;
+        }
+        // [AIREVIEW-PLAN-059#4] 串行闸：仅焦点议题签发质询信封；非焦点议题排队等待焦点前进。
+        if (serialEnabled()) {
+            Optional<DebateTopic> focus = DebateFocusResolver.focus(debateStore, review.id());
+            if (focus.isPresent() && !focus.get().id().equals(topic.id())) {
+                LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=SERIAL_NOT_FOCUS focusTopicId={}",
+                        review.id().value(), topicId.value(), focus.get().id().value());
+                return;
+            }
         }
         // A topic the coordinator already drove into a challenge round (manual dispatch or legacy
         // flow) must never be re-armed: the next envelope is the rebuttal, not another challenge.
