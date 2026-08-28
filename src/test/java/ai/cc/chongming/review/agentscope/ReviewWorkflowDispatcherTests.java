@@ -118,7 +118,8 @@ class ReviewWorkflowDispatcherTests {
     /** [AIREVIEW-PLAN-059#7] 串行闸 properties 构造缝：serial 开关可显式控制。 */
     private static AgentScopeProperties serialProperties(boolean serial) {
         return new AgentScopeProperties(false, "state", 48, 12, 16, java.time.Duration.ofSeconds(150),
-                24, java.time.Duration.ofMinutes(20), java.time.Duration.ofMinutes(6), serial);
+                24, java.time.Duration.ofMinutes(20), java.time.Duration.ofMinutes(6), serial,
+                java.time.Duration.ofSeconds(90), 3);
     }
 
     private ReviewWorkflowDispatcher serialDispatcher(boolean serial) {

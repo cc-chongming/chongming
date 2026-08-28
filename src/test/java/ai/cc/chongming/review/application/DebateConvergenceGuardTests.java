@@ -178,7 +178,8 @@ class DebateConvergenceGuardTests {
         store.saveTopic(new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "cache.read_your_writes", List.of()));
         DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
         AgentScopeProperties properties = new AgentScopeProperties(
-                false, "state", 48, 12, 16, Duration.ofSeconds(150), maxWakes, timeout, noProgress, serial);
+                false, "state", 48, 12, 16, Duration.ofSeconds(150), maxWakes, timeout, noProgress, serial,
+                Duration.ofSeconds(90), 3);
         return new Fixture(new DebateConvergenceGuard(registry, debateService, store, properties), store, review);
     }
 

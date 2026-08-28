@@ -179,6 +179,35 @@ public class ReviewCommandService {
     }
 
     /**
+     * [AIREVIEW-PLAN-060#3] Application-boundary FAILED escape used by the liveness guard. Mirrors the
+     * {@link #recordStartupFailure(Review, ReviewRuntimeContext, Throwable)} pattern (line ~263): the
+     * state machine decides whether INITIAL_REVIEW may fail, the aggregate owns the transition, and
+     * the REVIEW_FAILED fact is published with the deterministic liveness reason.
+     */
+    public boolean failReview(Review review, String reason) {
+        Objects.requireNonNull(review, "review must not be null");
+        requireText(reason, "reason");
+        synchronized (review) {
+            if (review.stage().isTerminal() || !stateMachine.canTransition(review.stage(), ReviewStage.FAILED)) {
+                return false;
+            }
+            review.transitionTo(stateMachine, ReviewStage.FAILED);
+            eventPublisher.publish(ReviewEventDrafts.completedCommand(
+                    review,
+                    ReviewEventType.REVIEW_FAILED,
+                    RoleType.DIRECTOR,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    Map.of("failureType", "LIVENESS_TIMEOUT", "reason", reason)));
+            return true;
+        }
+    }
+
+    /**
      * Establishes the immutable snapshot for a pending attempt before an isolated Scout preview.
      * Once an attempt leaves {@link ReviewStage#PENDING}, this method may only reuse its existing
      * reference and never replaces it with a newer worktree state.

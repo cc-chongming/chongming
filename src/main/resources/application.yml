@@ -82,6 +82,11 @@ review:
     # Debate convergence fallback: force-escalate open topics and begin judging when the Director
     # wakes too often or the debate exceeds the wall-clock budget.
     debate-max-director-wakes: ${REVIEW_AGENTSCOPE_DEBATE_MAX_DIRECTOR_WAKES:24}
+    # [AIREVIEW-PLAN-060#2,#4] Stage liveness heartbeat: re-wake an idle staged review after the
+    # idle window, then deterministically close it once the server-side re-wake budget is exhausted.
+    liveness-scan-interval: ${REVIEW_AGENTSCOPE_LIVENESS_SCAN_INTERVAL:PT60S}
+    liveness-rewake-idle: ${REVIEW_AGENTSCOPE_LIVENESS_REWAKE_IDLE:PT90S}
+    liveness-max-rewakes: ${REVIEW_AGENTSCOPE_LIVENESS_MAX_REWAKES:3}
     debate-convergence-timeout: ${REVIEW_AGENTSCOPE_DEBATE_CONVERGENCE_TIMEOUT:PT20M}
   model-gateway:
     enabled: ${REVIEW_MODEL_GATEWAY_ENABLED:false}
