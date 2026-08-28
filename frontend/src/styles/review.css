@@ -346,9 +346,10 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-topic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .flow-topic-status { flex: 0 0 auto; padding: .12rem .42rem; border-radius: 99px; font-size: .6rem; font-weight: 800; white-space: nowrap; color: #79e6b6; background: rgba(52, 211, 153, .16); }
 .flow-topic-status.adjudicated { color: #b9c3db; background: var(--flow-surface-3); }
-.flow-debate-court { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr); min-height: 16rem; overflow: hidden; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
-.flow-debate-side { padding: .95rem; overflow: auto; }.flow-debate-side.pro { border-right: 1px solid var(--flow-border); }.flow-debate-side.con { border-left: 1px solid var(--flow-border); }
-.flow-debate-label { margin: 0 0 .7rem; padding-bottom: .5rem; border-bottom: 1px solid var(--flow-border); font-size: .7rem; font-weight: 800; letter-spacing: .08em; }.flow-debate-side.pro .flow-debate-label { color: var(--flow-green); }.flow-debate-side.con .flow-debate-label { color: var(--flow-red); }
+/* [AIREVIEW-PLAN-050#3] 法庭/列去掉 overflow（sticky 陷阱），标签随看板滚动钉在顶部。 */
+.flow-debate-court { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr); min-height: 16rem; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
+.flow-debate-side { padding: .95rem; }.flow-debate-side.pro { border-right: 1px solid var(--flow-border); }.flow-debate-side.con { border-left: 1px solid var(--flow-border); }
+.flow-debate-label { position: sticky; top: 0; z-index: 2; margin: 0 0 .7rem; padding-bottom: .5rem; border-bottom: 1px solid var(--flow-border); font-size: .7rem; font-weight: 800; letter-spacing: .08em; background: var(--flow-surface); }.flow-debate-side.pro .flow-debate-label { color: var(--flow-green); }.flow-debate-side.con .flow-debate-label { color: var(--flow-red); }
 /* [AIREVIEW-PLAN-050#1] Claim 卡可点击：正文三行截断，悬浮 title 与点击弹框均展示完整正文。 */
 .flow-debate-claim { margin-bottom: .55rem; padding: .6rem .7rem; color: #d3d9e8; background: var(--flow-surface-2); border-radius: .5rem; font-size: .72rem; line-height: 1.55; cursor: pointer; }
 .flow-debate-claim p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }.flow-debate-claim header { display: flex; align-items: center; gap: .4rem; margin-bottom: .3rem; }.flow-debate-claim header .flow-agent-avatar { width: 1.35rem; height: 1.35rem; font-size: .58rem; }.flow-debate-claim header strong { flex: 1; color: #e7ebf7; font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -706,6 +707,8 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-conflict-card p, .flow-conflict-director-body p, .flow-dialogue-list p { color: #44403c; }
 .flow-conflict-heading { color: #44403c; }.flow-dialogue-list li header strong { color: #1c1917; }
 .flow-empty, .flow-empty strong { color: #44403c; }
+/* [AIREVIEW-PLAN-050#3] 浅色主题下 sticky 标签背景与法庭白底一致，滚动时盖住下方内容。 */
+.flow-debate-label { background: #fff; }
 .flow-debate-side.pro .flow-debate-label { color: #047857; }.flow-debate-side.con .flow-debate-label { color: #b91c1c; }.flow-debate-claim header strong { color: #1c1917; }
 .flow-debate-claim > p { margin: 0; color: #292524; font-size: .74rem; line-height: 1.55; }.flow-debate-claim > small { display: block; margin-top: .3rem; color: #a8a29e; font-size: .63rem; }
 .flow-neutral-claims { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .55rem; margin-top: .75rem; padding: .8rem; background: #fff; border: 1px solid #d6d3d1; border-radius: .55rem; }.flow-neutral-claims > .flow-debate-label { grid-column: 1 / -1; color: #57534e; }
