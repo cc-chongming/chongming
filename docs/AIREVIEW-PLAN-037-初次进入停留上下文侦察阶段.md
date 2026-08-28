@@ -80,3 +80,4 @@
 - 2026-08-27：段 1 完成。`review-phase-presenter.js` 提供 `PHASE_INDEX_BY_STAGE`/`isScoutConcluded`/`resolvePhaseLanding`，SFC 删除内联 `phaseIndexByStage`；`scoutComplete` 重写为 `scoutConcluded || activePhaseIndex >= 2`，消除计算环。vitest 138 全绿；构建产物已同步到运行服务。实际与计划无偏差。
 - 2026-08-27：新增并完成段 2。用户反馈对话窗超出页面很多；`.review-flow-layout` 锁定视口高度 + flex 收缩链补 `min-height: 0`，运行流面板内部滚动。根因是既有拉伸规则（#604-609）缺收缩前提。
 - 2026-08-27：新增并完成段 3（用户批注“最外层竖向滚动条不想要，适配浏览器 100% 显示”）。根因：观察抽屉列无高度约束，grid 隐式行被内容撑高溢出视口。修复：行轨道 `minmax(0, 1fr)`、抽屉改弹性列（全部对话/评审事实/运行调试各自内滚，新增 `flow-drawer-panel` 容器类），≥1121px 作用域；≤1120px 沿用底部区块 + max-height 口径。页面 100% 缩放无外层滚动条。
+- 2026-08-27：追加段 4（用户批注“新开 live 一开始进去还是评审规划”）。根因：PENDING 落位条件要求已有 Scout 运行记录才去侦察，新开/刚启动（首个事件未到达）时落在评审规划。修复：PENDING 一律落位第一阶段上下文侦察（启动面板任何阶段都显示，不受影响）；测试同步 3 处断言。

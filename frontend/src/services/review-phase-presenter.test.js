@@ -28,18 +28,20 @@ describe('review phase landing', () => {
         expect(resolvePhaseLanding({ stage: 'SOMETHING_NEW', runtimeItems: [], scoutConcluded: true })).toBe(1);
     });
 
-    it('treats PENDING as scout-landing only when scout runtime items exist', () => {
+    it('treats PENDING as scout-landing regardless of runtime items', () => {
+        // [AIREVIEW-PLAN-037#4] 新开/刚启动（首个事件未到达）也落在第一阶段上下文侦察。
         expect(resolvePhaseLanding({ stage: 'PENDING', runtimeItems: [{ role: 'CONTEXT_SCOUT' }], scoutConcluded: false })).toBe(0);
-        expect(resolvePhaseLanding({ stage: 'PENDING', runtimeItems: [], scoutConcluded: false })).toBe(1);
+        expect(resolvePhaseLanding({ stage: 'PENDING', runtimeItems: [], scoutConcluded: false })).toBe(0);
     });
 
     it('treats missing stage as PENDING', () => {
-        expect(resolvePhaseLanding({ stage: null, runtimeItems: [], scoutConcluded: false })).toBe(1);
+        // [AIREVIEW-PLAN-037#4] PENDING 默认落位上下文侦察（第一阶段）。
+        expect(resolvePhaseLanding({ stage: null, runtimeItems: [], scoutConcluded: false })).toBe(0);
         expect(resolvePhaseLanding({ runtimeItems: [{ role: 'CONTEXT_SCOUT' }] })).toBe(0);
     });
 
     it('ignores malformed runtime items', () => {
-        expect(resolvePhaseLanding({ stage: 'PENDING', runtimeItems: [null, undefined, {}], scoutConcluded: false })).toBe(1);
+        expect(resolvePhaseLanding({ stage: 'PENDING', runtimeItems: [null, undefined, {}], scoutConcluded: false })).toBe(0);
     });
 });
 

@@ -36,8 +36,10 @@ export function isScoutConcluded({ contextScout = null, scoutRunFinished = false
  */
 export function resolvePhaseLanding({ stage, runtimeItems = [], scoutConcluded = false } = {}) {
     const effectiveStage = stage ?? 'PENDING';
+    // [AIREVIEW-PLAN-037#4] PENDING（新开/刚启动、首个事件未到达）一律落在第一阶段上下文侦察：
+    // 用户预期进入即见流程起点；启动面板在任何阶段都显示，不受落位影响。
     if (effectiveStage === 'PENDING') {
-        return runtimeItems.some((item) => item?.role === 'CONTEXT_SCOUT') ? 0 : 1;
+        return 0;
     }
     const byStage = PHASE_INDEX_BY_STAGE[effectiveStage] ?? 1;
     if (byStage === 1 && !scoutConcluded) return 0;
