@@ -669,8 +669,9 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-debate-board > .flow-neutral-claims { margin-top: 0; }
 .flow-debate-split > .flow-debate-dialogue { flex: 1 1 auto; min-height: 0; margin-top: 0; }
 .flow-content > .flow-judgement-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-/* [AIREVIEW-PLAN-043#3] 上下文侦察：收集结论卡同样定高内滚，运行流面板与结论卡分享剩余高度。 */
-.flow-content > .scout-conclusion-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* [AIREVIEW-PLAN-043#3][AIREVIEW-PLAN-052#1] 上下文侦察：运行流面板与结论卡分享剩余高度；052 起面板改为弹性列，
+   标题区固定，仅 .scout-conclusion-body 内滚。 */
+.flow-content > .scout-conclusion-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
 /* [AIREVIEW-PLAN-037#3] 视口框定收口：行轨道禁止被内容撑高，观察抽屉改为弹性列，
    对话/事实/调试各自内部滚动——页面在浏览器 100% 缩放下无外层滚动条。
    ≤1120px 抽屉变为底部区块，沿用原 max-height 口径，不在本规则内。 */
@@ -766,9 +767,11 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 
 /* [AIREVIEW-PLAN-023#5.2][AIREVIEW-PLAN-023#6.2] Readable Scout and Claim attachments. */
 .scout-conclusion-panel { margin-top: 1rem; overflow: hidden; background: #fff; border: 1px solid #d6d3d1; border-radius: .65rem; box-shadow: 0 1px 2px rgba(28, 25, 23, .04); }
-.scout-conclusion-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem 1rem; background: #fafaf9; border-bottom: 1px solid #e7e5e4; }
+/* [AIREVIEW-PLAN-052#1] 标题区固定，不随结论内容滚动。 */
+.scout-conclusion-panel > header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem 1rem; background: #fafaf9; border-bottom: 1px solid #e7e5e4; }
 .scout-conclusion-panel > header p { margin: 0 0 .15rem; color: #78716c; font-size: .68rem; }.scout-conclusion-panel > header h2 { margin: 0; color: #1c1917; font-size: 1rem; }.scout-conclusion-panel > header span { color: #1d4ed8; font-size: .72rem; font-weight: 700; }
-.scout-conclusion-body { display: grid; gap: .9rem; padding: 1rem; }.scout-summary { padding: .8rem .9rem; color: #292524; background: #eff6ff; border-left: 3px solid #3b82f6; border-radius: .3rem; }
+/* [AIREVIEW-PLAN-052#1] 结论内容区成为唯一滚动容器，标题固定；grid 布局与内边距沿用既有规则。 */
+.scout-conclusion-body { display: grid; flex: 1 1 auto; gap: .9rem; min-height: 0; overflow-y: auto; padding: 1rem; }.scout-summary { padding: .8rem .9rem; color: #292524; background: #eff6ff; border-left: 3px solid #3b82f6; border-radius: .3rem; }
 .scout-conclusion-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }.scout-conclusion-grid section { padding: .75rem; background: #fafaf9; border: 1px solid #e7e5e4; border-radius: .45rem; }
 .scout-conclusion-grid h3, .scout-role-scopes h3, .scout-full-context h3 { margin: 0 0 .45rem; color: #44403c; font-size: .75rem; }.scout-conclusion-grid ul, .scout-full-context ul { margin: 0; padding-left: 1.15rem; color: #44403c; font-size: .74rem; line-height: 1.65; }.scout-conclusion-grid p { margin: 0; color: #a8a29e; font-size: .72rem; }
 .scout-role-scopes dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .35rem .7rem; margin: 0; font-size: .74rem; }.scout-role-scopes dt { color: #1d4ed8; font-weight: 700; }.scout-role-scopes dd { margin: 0; color: #44403c; }
