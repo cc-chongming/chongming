@@ -377,18 +377,20 @@ const reviewCards = computed(() => reviewRoleCodes.value.map((role) => {
         items
     };
 }));
-// The /plans projection also carries scout/initial-review milestones; only plan events render as
-// plan cards, otherwise non-plan rows appear as empty "v—" cards.
-const planCards = computed(() => (store.state.plans ?? []).filter((plan) => plan.type === 'PLAN_CREATED' || plan.type === 'PLAN_REVISED'));
+// [AIREVIEW-PLAN-053#1] The /plans projection also carries scout/initial-review milestones; only plan events render as
+// plan cards, otherwise non-plan rows appear as empty "v—" cards. PLAN_CREATED is the fixed template plan shared by every
+// review (no information); only real coordinator revisions (PLAN_REVISED: version/task list/change reason) render as cards.
+const planCards = computed(() => (store.state.plans ?? []).filter((plan) => plan.type === 'PLAN_REVISED'));
 // [AIREVIEW-PLAN-038#2] 子代理启用决策：由事实流（ROLE_ACTIVATED/ROLE_STARTED/ROLE_COMPLETED）投影各角色启用状态。
 const activationRows = computed(() => buildActivationRows(store.events.value));
 const streamEmpty = computed(() => {
     if (liveRunState.value.emptyState) return liveRunState.value.emptyState;
     // [AIREVIEW-PLAN-038#2] Director 阶段空态聚焦编排通知；子代理启用决策由下方启用卡片呈现。
+    // [AIREVIEW-PLAN-053#1] 模板计划不再以卡展示：协调者修订评审计划后，下方才显示包含版本、任务清单与修订原因的修订卡。
     if (activePhase.value === 'director') {
         return {
             title: '协调者编排通知将实时出现在这里',
-            message: '创建评审、决策启用哪些子代理、调用派发子代理的过程由编排层以协调者通知形式广播；评审计划与任务清单见下方计划卡。'
+            message: '创建评审、决策启用哪些子代理、调用派发子代理的过程由编排层以协调者通知形式广播；协调者修订评审计划后，下方会显示包含版本、任务清单与修订原因的修订卡。'
         };
     }
     if (activePhase.value === 'judge') {
