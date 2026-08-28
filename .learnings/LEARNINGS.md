@@ -1032,3 +1032,26 @@ Context Scout 在阶段机进入 PLANNING 后仍持续流式输出（Scout 运�
 - Tags: process, delegation, subagent, async-dispatch
 
 ---
+
+## [LRN-20260828-001] 异步派发子代理是铁律：触碰 src/ 的改动一律派发，父级只保留成与审查
+
+**Logged**: 2026-08-28T10:30:00+08:00
+**Priority**: high
+**Status**: open
+**Area**: process, delegation
+
+### Summary
+
+用户两次提醒“要记得异步派发给子 agent 工作”。本会话两次违规：PLAN-039 口径修订以内联完成（可辩护为微调）、PLAN-051 围栏修复直接写码后才回滚重派（明确违规）。固化为铁律：一切触碰 src/ 的实现工作必须 subagent(run_in_background: true) 派发；父级职责收敛为——批注确认（Annotation N 格式）、计划先行（AIREVIEW-PLAN 文档）、派发与契约编写、独立审查（专抓编译/测试测不出的运行时缺陷，已多次抓到：漏声明/选择器失配/吞字符）、全量回归、集成发布（构建同步+提交推送+重启提醒）、收尾记录。
+
+### Suggested Action
+
+接到批注先写计划文档再派发；多条批注零冲突并行派发、冲突串行；子代理运行期间做独立工作不空等；交付后必做独立审查与全量回归再发布。误内联立即回滚重派并在计划文档登记。完整八步流程已入 Hindsight 记忆（标题：工作流程铁律）。
+
+### Metadata
+
+- Source: user reminders during PLAN-039/051 session
+- Related Files: .codex/rules/plan-driven-development.md, docs/AIREVIEW-PLAN-051-围栏语言标签未换行修复.md
+- Tags: process, delegation, subagent, async-dispatch
+
+---
