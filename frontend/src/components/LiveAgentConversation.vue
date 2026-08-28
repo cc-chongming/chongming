@@ -22,12 +22,35 @@ const conversation = computed(() => props.items.length ? props.items : buildRunt
 // [AIREVIEW-PLAN-023#7.1] Consecutive tool calls collapse into one Codex-style group row.
 const TOOL_TERMINAL = new Set(['SUCCESS', 'COMPLETED', 'ERROR', 'FAILED', 'DENIED', 'INTERRUPTED']);
 const TOOL_FAILED = new Set(['ERROR', 'FAILED', 'DENIED', 'INTERRUPTED']);
+// [AIREVIEW-PLAN-054#1] 单工具也折叠成组：摘要复用 AgUiToolCallMessage 的中文工具名与状态口径。
+const TOOL_LABELS = {
+    list_files: '列出文件', glob_files: '按模式查找文件', grep_files: '检索文件内容',
+    read_file: '读取文件', search_text: '检索代码', open_debate_topic: '创建辩论议题'
+};
+const TOOL_STATUS_LABEL = {
+    RUNNING: '进行中', STREAMING: '进行中', SUCCESS: '已完成', COMPLETED: '已完成',
+    ERROR: '失败', FAILED: '失败', DENIED: '已拒绝', INTERRUPTED: '已中断'
+};
+function toolLabel(tool) {
+    return TOOL_LABELS[tool.toolName] ?? tool.toolName ?? '未知工具';
+}
+function toolEffectiveStatus(tool) {
+    // 与 AgUiToolCallMessage.effectiveStatus 同口径：终态 status 优先于生命周期 phase；phase/output 失败系归 ERROR。
+    const status = String(tool.status ?? 'RUNNING').toUpperCase();
+    if (status === 'SUCCESS') return 'SUCCESS';
+    const phase = String(tool.phase ?? '').toUpperCase();
+    const outputState = String(tool.output?.state ?? tool.output?.status ?? tool.output?.resultState ?? '').toUpperCase();
+    if (['FAILED', 'ERROR'].includes(phase) || ['FAILED', 'ERROR', 'DENIED', 'INTERRUPTED'].includes(outputState)) return 'ERROR';
+    return status;
+}
+function toolStatusLabel(tool) {
+    return TOOL_STATUS_LABEL[toolEffectiveStatus(tool)] ?? toolEffectiveStatus(tool) ?? '未知状态';
+}
 const rows = computed(() => {
     const out = [];
     let buffer = [];
     const flush = () => {
-        if (buffer.length === 1) out.push(buffer[0]);
-        else if (buffer.length > 1) out.push({ kind: 'tool-group', id: `tool-group:${buffer[0].id}`, tools: [...buffer] });
+        if (buffer.length) out.push({ kind: 'tool-group', id: `tool-group:${buffer[0].id}`, tools: [...buffer] });
         buffer = [];
     };
     for (const item of conversation.value) {
@@ -125,6 +148,7 @@ onUnmounted(() => globalThis.clearTimeout(scrollGuardTimer));
                             <SafeMarkdown class="agent-answer" :content="row.content" />
                         </article>
                     </template>
+                    <!-- [AIREVIEW-PLAN-054#1] 防御分支：rows 已不再产出单工具直通行，保留以防历史事件流直接携带 kind=tool。 -->
                     <template v-else-if="row.kind === 'tool'">
                         <span class="agent-entry-spacer" aria-hidden="true"></span>
                         <AgUiToolCallMessage :item="row" />
@@ -132,10 +156,15 @@ onUnmounted(() => globalThis.clearTimeout(scrollGuardTimer));
                     <template v-else-if="row.kind === 'tool-group'">
                         <span class="agent-entry-spacer" aria-hidden="true"></span>
                         <details class="tool-group">
-                            <summary :aria-label="`共 ${row.tools.length} 个工具调用，${groupStatusLabel(row)}`">
+                            <!-- [AIREVIEW-PLAN-054#1] 单工具组摘要：{工具中文名} · {状态文案}；多工具保持“N 个工具调用 + groupStatusLabel”。 -->
+                            <summary :aria-label="row.tools.length === 1
+                                ? `${toolLabel(row.tools[0])}，${toolStatusLabel(row.tools[0])}`
+                                : `共 ${row.tools.length} 个工具调用，${groupStatusLabel(row)}`">
                                 <span class="tool-call-symbol" aria-hidden="true"><svg class="tool-call-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.75"/><path d="M4.75 6.25 6.75 8l-2 1.75"/><path d="M8.25 10.25h3"/></svg></span>
-                                <strong>{{ row.tools.length }} 个工具调用</strong>
-                                <span class="tool-call-status">{{ groupStatusLabel(row) }}</span>
+                                <strong>{{ row.tools.length === 1
+                                    ? `${toolLabel(row.tools[0])} · ${toolStatusLabel(row.tools[0])}`
+                                    : `${row.tools.length} 个工具调用` }}</strong>
+                                <span v-if="row.tools.length > 1" class="tool-call-status">{{ groupStatusLabel(row) }}</span>
                                 <span class="tool-group-caret" aria-hidden="true"></span>
                             </summary>
                             <div class="tool-group-items">
