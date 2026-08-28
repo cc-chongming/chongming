@@ -184,12 +184,13 @@ function phaseForRole(role) {
 
 // [AIREVIEW-PLAN-037#1] 初次进入停留在上下文侦察：PLANNING 窗口内 Scout 仍在流式输出，
 // 只有它结束（scoutConcluded）后被动观看才切换到评审规划；手动点选阶段不受影响。
+// [AIREVIEW-PLAN-057#1] INITIAL_REVIEW 窗口内至少一个审查角色被创建后才落位独立审查，否则停留评审规划。
 const activePhaseIndex = computed(() => {
     if (stage.value === 'FAILED') {
         const lastItem = runtimeItems.value.at(-1);
         return lastItem ? phaseForRole(lastItem.role) : 1;
     }
-    return resolvePhaseLanding({ stage: stage.value, runtimeItems: runtimeItems.value, scoutConcluded: scoutConcluded.value });
+    return resolvePhaseLanding({ stage: stage.value, runtimeItems: runtimeItems.value, scoutConcluded: scoutConcluded.value, reviewStarted: reviewRoleCodes.value.length > 0 });
 });
 const activePhase = computed(() => selectedPhase.value ?? phases[activePhaseIndex.value].id);
 const activePhaseDefinition = computed(() => phases.find((phase) => phase.id === activePhase.value) ?? phases[activePhaseIndex.value]);

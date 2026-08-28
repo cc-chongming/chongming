@@ -14,7 +14,7 @@ describe('review phase landing', () => {
 
     it('keeps stage-based landing outside the PLANNING window', () => {
         expect(resolvePhaseLanding({ stage: 'SNAPSHOTTING', runtimeItems: [], scoutConcluded: false })).toBe(0);
-        expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: false })).toBe(2);
+        expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: false, reviewStarted: true })).toBe(2);
         expect(resolvePhaseLanding({ stage: 'CONFLICT_DETECTION', runtimeItems: [], scoutConcluded: false })).toBe(3);
         // [AIREVIEW-PLAN-047#3] 单一 DEBATE 阶段与旧轮次值同样落位辩论。
         expect(resolvePhaseLanding({ stage: 'DEBATE', runtimeItems: [], scoutConcluded: false })).toBe(4);
@@ -22,6 +22,15 @@ describe('review phase landing', () => {
         expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_2', runtimeItems: [], scoutConcluded: false })).toBe(4);
         expect(resolvePhaseLanding({ stage: 'JUDGING', runtimeItems: [], scoutConcluded: false })).toBe(5);
         expect(resolvePhaseLanding({ stage: 'WAITING_HUMAN', runtimeItems: [], scoutConcluded: false })).toBe(6);
+    });
+
+    it('holds on director while INITIAL_REVIEW has no review role created yet', () => {
+        // [AIREVIEW-PLAN-057#1] 阶段机先于角色激活进入 INITIAL_REVIEW；落位停留评审规划。
+        expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: true, reviewStarted: false })).toBe(1);
+    });
+
+    it('jumps to independent review once at least one review role exists', () => {
+        expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: true, reviewStarted: true })).toBe(2);
     });
 
     it('falls back to director planning for unknown stages', () => {
