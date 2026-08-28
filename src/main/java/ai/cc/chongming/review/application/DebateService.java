@@ -23,6 +23,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,8 @@ public class DebateService {
     private final ReviewProtocolGuard protocolGuard;
     private final ReviewEventPublisher eventPublisher;
     private final ConflictDetectionService conflictDetectionService;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(DebateService.class);
 
     /**
      * [AIREVIEW-PLAN-024#方案4] Monotonic turn clock: wall-clock instants may repeat within one
@@ -379,6 +383,13 @@ public class DebateService {
     /** Enters judging only when every opened topic reached a terminal resolution or escalation. */
     public void beginJudging(Review review) {
         Objects.requireNonNull(review, "review must not be null");
+        // [AIREVIEW-PLAN-064#1] Idempotent replay guard: once judging (or a later stage) is reached,
+        // a replayed begin_judging must not touch state or publish a second JUDGING_STARTED fact.
+        if (review.stage() == ReviewStage.JUDGING || review.stage() == ReviewStage.WAITING_HUMAN
+                || review.stage() == ReviewStage.NOTIFYING || review.stage() == ReviewStage.COMPLETED) {
+            LOGGER.info("BEGIN_JUDGING_REPLAYED reviewId={} stage={}", review.id().value(), review.stage());
+            return;
+        }
         validateBeginJudging(review);
         review.transitionTo(new ai.cc.chongming.review.domain.protocol.ReviewStateMachine(), ReviewStage.JUDGING);
         // Public transition fact so the live page leaves the debate phase immediately instead of

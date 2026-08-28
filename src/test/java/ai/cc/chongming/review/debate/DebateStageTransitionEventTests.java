@@ -30,6 +30,7 @@ import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -114,6 +115,29 @@ class DebateStageTransitionEventTests {
         assertThat(draft.stage()).isEqualTo(ReviewStage.JUDGING);
     }
 
+    /** [AIREVIEW-PLAN-064#1] A replayed begin_judging on an already-JUDGING review is a no-op. */
+    @Test
+    void beginJudgingReplayedOnJudgingReviewDoesNotPublishSecondJudgingStarted() {
+        RecordingPublisher publisher = new RecordingPublisher();
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        DebateService service = new DebateService(
+                store, new EvidenceLedgerService(), new DebateStateMachine(),
+                new ReviewProtocolGuard(), publisher);
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.JUDGING, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product-agent", true),
+                        new RoleActivation(RoleType.BACKEND, "backend-agent", true)),
+                Map.of());
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "authentication",
+                List.of(claimId()));
+        topic.close(new DebateStateMachine(), DebateTopicStatus.ESCALATED, "未收敛，交由 Judge 裁决", Instant.now());
+        store.saveTopic(topic);
+
+        service.beginJudging(review);
+
+        assertThat(review.stage()).isEqualTo(ReviewStage.JUDGING);
+        assertThat(publisher.drafts(ReviewEventType.JUDGING_STARTED)).isEmpty();
+    }
+
     /** A CHALLENGED topic with an unanswered round-one challenge keeps a valid open action. */
     private DebateTopic challengedRoundOneTopic(ReviewId reviewId) {
         DebateTopic topic = new DebateTopic(
@@ -158,6 +182,10 @@ class DebateStageTransitionEventTests {
         @Override
         public void publish(ReviewEventDraft draft) {
             drafts.add(draft);
+        }
+
+        List<ReviewEventDraft> drafts(ReviewEventType type) {
+            return drafts.stream().filter(draft -> draft.type() == type).toList();
         }
 
         ReviewEventDraft only(ReviewEventType type) {

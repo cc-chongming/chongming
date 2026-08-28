@@ -457,6 +457,38 @@ class ReviewWorkflowDispatcherTests {
         assertThat(dispatchStore.findByReview(judging.id(), judging.attemptNo())).isEmpty();
     }
 
+    /** [AIREVIEW-PLAN-064#2] Review already in JUDGING: a late DEBATE_TOPIC_CLOSED must only make the
+     * Director stand down — no debate wake text, no focus-advance challenge re-issue. */
+    @Test
+    void closedTopicAfterConvergenceToJudgingWakesDirectorToStandDown() {
+        Review judging = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.JUDGING, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                Map.of());
+        registry.register(judging);
+        DebateTopic closed = new DebateTopic(new TopicId(UUID.randomUUID()), judging.id(), "api.contract",
+                List.of(claim(judging, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT).claimId()));
+        closed.close(new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                DebateTopicStatus.ESCALATED, "已收敛", Instant.now());
+        debateStore.saveTopic(closed);
+        // 焦点前进语义下本应成为下一焦点的未终态议题：若旧的补发逻辑仍在运行会签发质询信封。
+        Claim defend = claim(judging, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(judging, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic nextFocus = new DebateTopic(new TopicId(UUID.randomUUID()), judging.id(), "next.topic",
+                List.of(defend.claimId(), oppose.claimId()));
+        debateStore.saveTopic(nextFocus);
+
+        dispatcher.onCommitted(eventFor(judging, ReviewEventType.DEBATE_TOPIC_CLOSED, null, closed.id()));
+
+        String judgingRuntime = ReviewRuntimeContext.runtimeIdFor(judging.id(), judging.attemptNo());
+        verify(adapter, timeout(3000)).send(eq(judgingRuntime), eq(judgingRuntime + "-director"),
+                argThat((String message) -> message != null
+                        && message.contains("无需任何动作")
+                        && !message.contains("所有议题已终态")
+                        && !message.contains("下一焦点议题")));
+        assertThat(dispatchStore.findByReview(judging.id(), judging.attemptNo())).isEmpty();
+    }
+
     @Test
     void secondSupportClaimDoesNotReArmServerChallenges() {
         Review defending = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);

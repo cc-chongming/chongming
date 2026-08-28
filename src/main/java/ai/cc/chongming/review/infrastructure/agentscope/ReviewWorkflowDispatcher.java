@@ -158,15 +158,25 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                     + "topic with the matching targets, or close it with close_debate_topic and converge with "
                     + "begin_judging when nothing further is required. Do not run an empty round.");
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_CLOSED) {
-            // [AIREVIEW-PLAN-059#4] 焦点前进：唤醒附下一焦点议题；新焦点双方齐备但从未质询时补发质询。
-            Optional<DebateTopic> nextFocus = debateStore == null
-                    ? Optional.empty() : DebateFocusResolver.focus(debateStore, event.reviewId());
-            String focusText = nextFocus.map(topic -> "下一焦点议题=" + topic.id().value()
-                    + "，请围绕它继续辩论（为它签发 DEFENSE 等调度）；其余议题保持排队。 ")
-                    .orElse("所有议题已终态，使用 begin_judging。 ");
-            wakeDirector(event, "A debate topic was closed. " + focusText
-                    + "If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
-            nextFocus.ifPresent(topic -> issueChallengeDispatches(event, topic.id(), SERVER_CHALLENGE_ON_FOCUS_ADVANCE));
+            // [AIREVIEW-PLAN-064#2] 服务端收敛可能已先行把评审推进到裁决阶段；此时迟到的议题关闭事件
+            // 不应再唤醒辩论动作（原文案/焦点前进/质询补发全部跳过），只通知 Director 收手。
+            Review current = reviewRegistry == null ? null
+                    : reviewRegistry.find(event.reviewId())
+                            .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                            .orElse(null);
+            if (current != null && !isDebateStage(current.stage())) {
+                wakeDirector(event, "评审已进入裁决阶段（服务端收敛先行完成），本轮无需任何动作，不要再次调用 begin_judging。");
+            } else {
+                // [AIREVIEW-PLAN-059#4] 焦点前进：唤醒附下一焦点议题；新焦点双方齐备但从未质询时补发质询。
+                Optional<DebateTopic> nextFocus = debateStore == null
+                        ? Optional.empty() : DebateFocusResolver.focus(debateStore, event.reviewId());
+                String focusText = nextFocus.map(topic -> "下一焦点议题=" + topic.id().value()
+                        + "，请围绕它继续辩论（为它签发 DEFENSE 等调度）；其余议题保持排队。 ")
+                        .orElse("所有议题已终态，使用 begin_judging。 ");
+                wakeDirector(event, "A debate topic was closed. " + focusText
+                        + "If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
+                nextFocus.ifPresent(topic -> issueChallengeDispatches(event, topic.id(), SERVER_CHALLENGE_ON_FOCUS_ADVANCE));
+            }
         } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
             issueRebuttalDispatch(event);
             wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
