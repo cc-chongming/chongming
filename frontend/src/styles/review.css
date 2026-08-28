@@ -215,6 +215,13 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .agent-dialogue-header { display: flex; align-items: baseline; gap: .55rem; margin: .16rem 0 .38rem; color: #243b5a; }
 .agent-dialogue-header strong { font-size: .9rem; }
 .agent-dialogue-header span { color: #7b8998; font-size: .78rem; }
+/* [AIREVIEW-PLAN-066#2] 发言时间 hover 浮现：深色小气泡，不占布局 */
+.agent-avatar, .agent-dialogue-header strong { position: relative; }
+.agent-avatar[data-tip]:hover::after, .agent-dialogue-header strong[data-tip]:hover::after {
+    content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 4px); z-index: 6;
+    padding: 2px 8px; background: #1c1917; color: #fafaf9; font-size: .68rem; font-weight: 400;
+    border-radius: .3rem; white-space: nowrap; pointer-events: none; box-shadow: 0 1px 3px rgba(28, 25, 23, .25);
+}
 .agent-answer { padding: .15rem 0 0; color: #292524; background: transparent; border: 0; border-radius: 0; white-space: normal; overflow-wrap: anywhere; font-size: .925rem; line-height: 1.75; }
 .agent-thinking { color: #5a687a; }
 .agent-thinking summary { cursor: pointer; list-style: none; font-size: .88rem; overflow-wrap: anywhere; }

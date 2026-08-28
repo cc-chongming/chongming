@@ -137,12 +137,12 @@ onUnmounted(() => globalThis.clearTimeout(scrollGuardTimer));
                 <li v-for="row in rows" :key="row.id" :class="['live-agent-entry', row.kind === 'tool-group' ? 'is-tool-group' : `is-${row.kind}`]">
                     <template v-if="row.kind === 'message'">
                         <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容（省略占位行保持“…”不变） -->
-                        <div class="agent-avatar" :data-role="row.role" aria-hidden="true"><RoleAvatar :role="row.role" /></div>
+                        <!-- [AIREVIEW-PLAN-066#1] 发言时间改为名称/头像 hover 浮现 -->
+                        <div class="agent-avatar" :data-tip="row.createdAt ? '发言于 ' + displayTime(row.createdAt) : undefined" :data-role="row.role" aria-hidden="true"><RoleAvatar :role="row.role" /></div>
                         <article class="agent-dialogue">
                             <header class="agent-dialogue-header">
-                                <strong>{{ roleTitle(row.role) }}</strong>
+                                <strong :data-tip="row.createdAt ? '发言于 ' + displayTime(row.createdAt) : undefined">{{ roleTitle(row.role) }}</strong>
                                 <span v-if="row.phase">{{ row.phase }}</span>
-                                <time v-if="row.createdAt">{{ displayTime(row.createdAt) }}</time>
                                 <span v-if="row.status === 'streaming'" class="agent-streaming">输出中</span>
                             </header>
                             <SafeMarkdown class="agent-answer" :content="row.content" />
