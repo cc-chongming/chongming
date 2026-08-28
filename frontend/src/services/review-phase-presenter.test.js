@@ -17,9 +17,9 @@ describe('review phase landing', () => {
         expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: false, reviewStarted: true })).toBe(2);
         expect(resolvePhaseLanding({ stage: 'CONFLICT_DETECTION', runtimeItems: [], scoutConcluded: false })).toBe(3);
         // [AIREVIEW-PLAN-047#3] 单一 DEBATE 阶段与旧轮次值同样落位辩论。
-        expect(resolvePhaseLanding({ stage: 'DEBATE', runtimeItems: [], scoutConcluded: false })).toBe(4);
-        expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_1', runtimeItems: [], scoutConcluded: false })).toBe(4);
-        expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_2', runtimeItems: [], scoutConcluded: false })).toBe(4);
+        expect(resolvePhaseLanding({ stage: 'DEBATE', runtimeItems: [], scoutConcluded: false, debateStarted: true })).toBe(4);
+        expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_1', runtimeItems: [], scoutConcluded: false, debateStarted: true })).toBe(4);
+        expect(resolvePhaseLanding({ stage: 'DEBATE_ROUND_2', runtimeItems: [], scoutConcluded: false, debateStarted: true })).toBe(4);
         expect(resolvePhaseLanding({ stage: 'JUDGING', runtimeItems: [], scoutConcluded: false })).toBe(5);
         expect(resolvePhaseLanding({ stage: 'WAITING_HUMAN', runtimeItems: [], scoutConcluded: false })).toBe(6);
     });
@@ -31,6 +31,20 @@ describe('review phase landing', () => {
 
     it('jumps to independent review once at least one review role exists', () => {
         expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: true, reviewStarted: true })).toBe(2);
+    });
+
+    it('advances to conflict detection once topics registered even if stage lags on INITIAL_REVIEW', () => {
+        // [AIREVIEW-PLAN-058#1] 议题登记可见；阶段机滞后但落位前跳。
+        expect(resolvePhaseLanding({ stage: 'INITIAL_REVIEW', runtimeItems: [], scoutConcluded: true, reviewStarted: true, conflictStarted: true })).toBe(3);
+    });
+
+    it('holds on conflict detection while DEBATE has no public debate content yet', () => {
+        // [AIREVIEW-PLAN-058#2] 辩论空窗停留冲突检测。
+        expect(resolvePhaseLanding({ stage: 'DEBATE', runtimeItems: [], scoutConcluded: true, debateStarted: false })).toBe(3);
+    });
+
+    it('lands on debate once claims or turns exist', () => {
+        expect(resolvePhaseLanding({ stage: 'DEBATE', runtimeItems: [], scoutConcluded: true, debateStarted: true })).toBe(4);
     });
 
     it('falls back to director planning for unknown stages', () => {

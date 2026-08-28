@@ -1055,3 +1055,31 @@ Context Scout 在阶段机进入 PLANNING 后仍持续流式输出（Scout 运�
 - Tags: process, delegation, subagent, async-dispatch
 
 ---
+
+## [LRN-20260828-002] 子代理继承已删除的会话默认 provider 时静默失败：零输出、无 closing message
+
+**Logged**: 2026-08-28T15:00:00+08:00
+**Priority**: high
+**Status**: open
+**Area**: process, delegation, dsh-runtime
+
+### Summary
+
+用户删除 qorder provider 后，本会话派发的子代理连续 6 次（PLAN-055/056/057/058）以“failed before it finished, no closing message、零写入”失败：子代理继承会话默认 provider（已删除的 qorder），模型无法启动；显式传 provider/model（company-gateway/qwen3.8-max）也被当前运行时 subagent 工具忽略，仍走会话默认。
+
+### Details
+
+症状：subagent 通知 failed + 无 closing message + git 零改动；子代理 session.jsonl.zstd 仅 1 行头部（无对话记录），死在模型启动阶段。settings.yaml 的 agent-default-model（company-gateway/deepseek-v4-flash-0731）健康，但会话级默认优先；会话默认存于 GUI 侧，磁盘不可读不可修。
+
+### Suggested Action
+
+子代理零输出连败时先怀疑会话默认 provider 有效性，而不是 prompt/任务本身；根治需用户在 GUI 会话模型选择框重选可用模型把会话默认写回有效 provider。修复前父代理按兜底纪律直接实施并在计划 changelog 登记；派发动作仍必须执行（铁律 LRN-20260828-001），但确认同因失败后不重复空转重试。
+
+### Metadata
+
+- Source: 本会话连续 6 次子代理失败 + 用户说明（qorder 已删除）
+- Related Files: docs/AIREVIEW-PLAN-055-README同步机制状态.md, docs/AIREVIEW-PLAN-056-侦察面板中宽视口推出视口修复.md, docs/AIREVIEW-PLAN-057-独立审查落位闸门.md, docs/AIREVIEW-PLAN-058-冲突检测停留窗口.md
+- Tags: process, delegation, subagent, provider, dsh-runtime
+
+---
+

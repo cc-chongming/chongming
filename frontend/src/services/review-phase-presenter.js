@@ -34,7 +34,7 @@ export function isScoutConcluded({ contextScout = null, scoutRunFinished = false
 /**
  * 返回初次进入应停留的阶段索引（与 ReviewLiveView 的 phases 数组对齐）。
  */
-export function resolvePhaseLanding({ stage, runtimeItems = [], scoutConcluded = false, reviewStarted = false } = {}) {
+export function resolvePhaseLanding({ stage, runtimeItems = [], scoutConcluded = false, reviewStarted = false, conflictStarted = false, debateStarted = false } = {}) {
     const effectiveStage = stage ?? 'PENDING';
     // [AIREVIEW-PLAN-037#4] PENDING（新开/刚启动、首个事件未到达）一律落在第一阶段上下文侦察：
     // 用户预期进入即见流程起点；启动面板在任何阶段都显示，不受落位影响。
@@ -46,5 +46,11 @@ export function resolvePhaseLanding({ stage, runtimeItems = [], scoutConcluded =
     // [AIREVIEW-PLAN-057#1] INITIAL_REVIEW 窗口内若尚无任何审查角色被创建/激活，继续停留评审规划：
     // 避免“独立审查 0/0”空窗跳 phase；至少一个角色可投影后才自动跳独立审查。
     if (byStage === 2 && !reviewStarted) return 1;
+    // [AIREVIEW-PLAN-058#1] 议题登记已可见：阶段机滞后在 INITIAL_REVIEW 时也前落位冲突检测，
+    // 避免初审完成后视图“停留一段时间”。
+    if (byStage === 2 && conflictStarted) return 3;
+    // [AIREVIEW-PLAN-058#2] DEBATE 窗口内若尚无公开辩论内容（claims/回合对话），继续停留冲突检测：
+    // 避免冲突检测一闪空跳多轮辩论；冲突汇总获得完整停留窗口。
+    if (byStage === 4 && !debateStarted) return 3;
     return byStage;
 }

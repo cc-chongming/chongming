@@ -185,12 +185,23 @@ function phaseForRole(role) {
 // [AIREVIEW-PLAN-037#1] 初次进入停留在上下文侦察：PLANNING 窗口内 Scout 仍在流式输出，
 // 只有它结束（scoutConcluded）后被动观看才切换到评审规划；手动点选阶段不受影响。
 // [AIREVIEW-PLAN-057#1] INITIAL_REVIEW 窗口内至少一个审查角色被创建后才落位独立审查，否则停留评审规划。
+// [AIREVIEW-PLAN-058#1#2] 议题登记即前落位冲突检测；DEBATE 空窗停留冲突检测，claims/对话出现才跳多轮辩论。
 const activePhaseIndex = computed(() => {
     if (stage.value === 'FAILED') {
         const lastItem = runtimeItems.value.at(-1);
         return lastItem ? phaseForRole(lastItem.role) : 1;
     }
-    return resolvePhaseLanding({ stage: stage.value, runtimeItems: runtimeItems.value, scoutConcluded: scoutConcluded.value, reviewStarted: reviewRoleCodes.value.length > 0 });
+    return resolvePhaseLanding({
+        stage: stage.value,
+        runtimeItems: runtimeItems.value,
+        scoutConcluded: scoutConcluded.value,
+        reviewStarted: reviewRoleCodes.value.length > 0,
+        // [AIREVIEW-PLAN-058#1#2] 内容驱动落位：议题登记即前落位冲突检测；claims/对话出现才进辩论。
+        conflictStarted: conflictTopics.value.length > 0,
+        debateStarted: allClaims.value.length > 0
+            || debateTopics.value.some((topic) => (topic.turns ?? []).length > 0)
+            || defenseTurns.value.length > 0
+    });
 });
 const activePhase = computed(() => selectedPhase.value ?? phases[activePhaseIndex.value].id);
 const activePhaseDefinition = computed(() => phases.find((phase) => phase.id === activePhase.value) ?? phases[activePhaseIndex.value]);
