@@ -19,7 +19,7 @@
 | 守在门户之前 | Gate 位于研发实施之前，把未收敛的风险交给人工处理，而不是静默放入下游 |
 | 鸟只照见，不替人裁决 | 重明负责照亮分歧；最终 Gate 仍由有责任主体的人作出 |
 
-因此，项目的口号是“**双睛照见，众议成明**”。产品、项目、前端、后端四个核心角色构成首轮视角；架构、测试、安全等按需角色可在必要时加入。它们的目标不是制造表面共识，而是让分歧、证据和决策路径清晰可见。
+因此，项目的口号是“**双睛照见，众议成明**”。产品、项目、前端、后端四个核心角色构成首轮视角；架构、测试、安全、性能等按需角色可在必要时加入。它们的目标不是制造表面共识，而是让分歧、证据和决策路径清晰可见。
 
 原文可见《[拾遗记·重明鸟](https://www.shidianguji.com/mid-page/7595700568979554313)》；上表是重明项目对该意象的产品化解释。
 
@@ -39,37 +39,56 @@
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| Markdown 受理与评审工作台 | 已可本地联调 | `POST /api/reviews` 创建评审，工作台入口为 `/review/` |
-| 需求全生命周期平台 | 代码已落地，待运行时验收 | Dashboard、需求 CRUD/生命周期、评审/报告列表及 MySQL 5.6 的 V11 迁移分别由 `/api/dashboard`、`/api/requirements/**`、`/api/reviews`、`/api/reports` 提供 |
+| Markdown 受理与评审工作台 | 已可本地联调 | `POST /api/reviews` 创建评审，工作台入口 `/review/`（登录态保护） |
+| 登录认证 | 已实现 | 用户名密码 + JWT；工作台内置预置 `admin` 账号（PLAN-025） |
+| 需求全生命周期平台 | 已实现 | Dashboard、需求 CRUD/生命周期、评审/报告列表，分别由 `/api/dashboard`、`/api/requirements/**`、`/api/reviews`、`/api/reports` 提供 |
 | 状态机、角色权限与幂等命令 | 已实现 | 非法阶段、越权角色和重复命令由服务端拒绝或安全重放 |
-| OpenAI 兼容模型网关 | 已实现 | 支持角色模型配置、超时/退避与 Tool Call；须填入实际可用模型名 |
+| OpenAI 兼容模型网关 | 已实现 | 支持角色模型配置、超时/退避与 Tool Call；运行时模型经环境变量配置；默认不启用推理/思考模式，供应商隐藏推理永不上公开流 |
 | 本地仓库读取 | 已接入 Role Harness | 角色只获得其快照授权范围内的不透明 `fileRef`；越权路径既不暴露，也不扣减读取预算 |
-| 首轮评审 | 已接入运行时 | 四个核心角色提交五态 Assessment 与 Claim，确定结论和风险结论都会进入后续汇总 |
-| 辩论、Judge 与 Gate 草案 | 已接入运行时 | Director 负责高层编排，服务端守卫校验定向命令；支持多冲突主题原子登记，并在无有效动作时跳过空第二轮 |
+| 上下文侦察（Context Scout） | 已接入运行时 | 快照先行的对话式工具流，持久化结论契约（摘要、模块根、入口点、约束、风险、证据路径、角色范围）；预算耗尽或模型失败时优雅降级 |
+| 首轮评审 | 已接入运行时 | 核心角色提交五态 Assessment 与 Claim；平衡初审义务要求每个角色在成立处提交 SUPPORT 主张；必填检查点强制 |
+| 需求答辩与派发协议 | 已接入运行时 | DEFENSE/CHALLENGE/REBUTTAL 定向信封；服务端校验角色、阶段、议题轮次与幂等；TTL + 去重；答辩人（PRODUCT 或就近激活角色）以 SUPPORT 主张回应质疑 |
+| 质询/答辩确定性派发 | 已实现（PLAN-046） | 立场对立议题开题、答辩 SUPPORT 落库时服务端自动派发 CHALLENGE；每次质询提交后自动签发 REBUTTAL 信封；协调者只负责推进与收敛 |
+| 辩论、Judge 与 Gate 草案 | 已接入运行时 | 议题级轮次（单一 DEBATE 阶段、每议题至多两轮）；全部议题终态后进裁决；Judge 逐题裁决并起草 Gate |
+| 计划修订闭环 | 已实现（PLAN-036） | 协调者写 `plans/PLAN.md`；服务端将每次内容变化提升为 `PLAN_REVISED` 事件、运行通知与修订卡 |
 | 领域事件与 SSE | 已实现 | 支持事件序号、历史回放、心跳及断线后的增量订阅 |
-| 人工审核、报告与通知 | 核心链路可用 | 外部通知 MCP 与生产持久化仍需真实契约联调 |
-| PLAN-024 确定性收敛 | 确定性套件已验证 | Maven 483 项运行且 0 失败/错误（11 项环境性跳过）、Vitest 55/55、Playwright 13/13；MySQL 5.6 与真实模型验收仍受环境/授权约束 |
-| MySQL 命令写入与多实例恢复 | 未完成 | 当前评审聚合与运行时调度仍包含进程内边界，不能宣称生产级恢复 |
+| 人工审核、报告与通知 | 核心链路可用 | 通知支持邮件目的地（PLAN-030）；外部 MCP 与生产契约仍需真实联调 |
+| MySQL 持久化 | 已实现 | 迁移至 V29，覆盖用户、需求生命周期、评审聚合/事件、议题/回合/裁决、派发命令与议题中文标题 |
+| 多实例恢复 | 未完成 | 运行时租约与启动扫描恢复仍为差距（CM-REQ-2026-001 跟踪）；聚合与调度器仍含进程内边界 |
 | 安全审计、评测与故障演练 | 未完成 | 属于生产发布门禁，不应以本地 Demo 结果替代 |
+| 回归基线 | 已验证 | 后端 `./mvnw.cmd test` → 783 项测试、0 失败/错误、30 项环境性跳过；前端 `vitest` → 159 通过 |
 
 ## 评审链路
 
 ```mermaid
 flowchart LR
     A["Markdown 需求"] --> B["创建 Review / 固化快照"]
-    B --> C["Director 制定计划"]
+    B --> S["上下文侦察探索快照"]
+    S --> C["Director 制定计划（PLAN.md）"]
     C --> D["核心角色五态 Assessment + Claim"]
-    D --> E["冲突检测"]
-    E --> F["受限辩论：质询 / 反驳 / 补证"]
-    F --> G["Judge 裁决与 Gate 草案"]
+    D --> E["冲突检测 / 登记议题"]
+    E --> F["议题辩论：答辩 / 质询 / 反驳"]
+    F --> G["Judge 逐题裁决 + Gate 草案"]
     G --> H["人工审核与版本化决定"]
 
-    D -. "正式领域事件" .-> I["SSE 事件流 / 工作台"]
-    F -. "提交后串行唤醒" .-> C
+    S -. "持久化结论" .-> I["SSE 事件流 / 工作台"]
+    D -. "正式领域事件" .-> I
+    F -. "服务端签发信封、串行唤醒" .-> C
     G -. "HUMAN_REQUIRED" .-> H
 ```
 
 运行时不依赖模型“自觉遵守流程”：模型只选择已下发的 Tool Schema；每个工具调用都会在服务端验证后再写入领域状态。`ReviewWorkflowDispatcher` 只监听已提交的正式事件，并在单个 review 内串行唤醒下一位 Agent，避免同一 Director 会话并发执行。
+
+## 机制要点
+
+评审协议已经历 PLAN-023 → PLAN-054 的演进。基础状态机之外的关键机制：
+
+- **上下文侦察契约。** 快照固化后，专职 Scout 代理在有界读取预算内探索仓库，并持久化结论契约——摘要、模块根、入口点、约束、风险、证据路径与角色范围。预算耗尽或模型失败时，Scout 优雅降级、评审继续。
+- **计划修订闭环。** 协调者在计划模式下把公开计划写入 `plans/PLAN.md`。服务端监听该文档，将每次内容变化提升为一条 `PLAN_REVISED` 事件，刷新工作台计划卡与运行流。启动时会创建一份模板初始计划但不展示；只有真实修订才渲染为卡片。
+- **需求答辩拓扑。** 只有反对意见的议题仍有隐含答辩人——需求本身。协调者向产品角色（或就近激活角色）派发 DEFENSE，后者必须以 SUPPORT 主张逐条回应异议。方向固定：质疑方质询，答辩人作答。
+- **质询/答辩确定性派发。** 质询不再依赖模型自觉。立场对立议题开题时，服务端自动向每个持有 OPPOSE 主张的角色派发 CHALLENGE；答辩 SUPPORT 落库时，服务端自动向质疑方派发 CHALLENGE；每次质询提交后，服务端向被质询方签发 REBUTTAL 信封。协调者只负责轮次推进与收敛。
+- **议题级辩论生命周期。** 轮次按议题而非全局。每个议题在单一 DEBATE 阶段内独立推进至多两轮；`begin_second_round(topicId)` 只为单个议题开启第二轮；全部议题终态后才进入裁决。
+- **工作台形态。** UI 采用简约去气泡设计：流式智能体回答、工具调用折叠成组（含单工具）、议题切换 Tab、Claim 全文弹框，以及整屏布局下各阶段定高内滚、无页面级滚动条。
 
 ## 架构
 
@@ -77,9 +96,9 @@ flowchart LR
 |---|---|---|
 | 交互层 | 工作台、受理、查询、SSE | Vue 3/Vite 静态资源 + Spring MVC |
 | 领域层 | Review 状态机、Guard、Claim、Debate、Judge、Gate | Java 21、Spring Boot、强类型命令 |
-| Agent 运行时 | Director/角色/Judge Harness、受限工具、运行态调度 | AgentScope Java Harness + 运行时上下文绑定 |
+| Agent 运行时 | Director/Scout/角色/Judge Harness、受限工具、运行态调度 | AgentScope Java Harness + 运行时上下文绑定 |
 | 模型适配层 | OpenAI 兼容请求、流式消息、Tool Call、重试 | Model Gateway Adapter |
-| 事件与存储 | sequence 事件、SSE 回放、可选 MyBatis event store | 内存默认实现；MySQL 写模型待完整接入 |
+| 事件与存储 | sequence 事件、SSE 回放、MyBatis event store | MySQL 写模型已落地（迁移 V1–V29）；本地演示保留内存回退 |
 
 ## 快速开始
 
@@ -124,7 +143,7 @@ repositories:
 .\mvnw.cmd spring-boot:run
 ```
 
-浏览器打开 [http://localhost:8080/review/](http://localhost:8080/review/)。默认进入需求 Dashboard；旧的直接创建评审表单仍保留在 `/review/#/create`。
+浏览器打开 [http://localhost:8080/review/](http://localhost:8080/review/)。工作台为登录态保护（PLAN-025）：使用预置 `admin` 账号登录（初始密码 `Admin@123`，首次登录请修改），或注册新用户。默认进入需求 Dashboard；旧的直接创建评审表单仍保留在 `/review/#/create`。
 
 前端源码位于 `frontend/`。修改前端后需要重新构建并提交同步后的 `src/main/resources/static/review/` 产物：
 
@@ -146,15 +165,15 @@ npm run build
 - `GET /api/reviews/{reviewId}`：评审聚合状态。
 - `GET /api/reviews/{reviewId}/plans`：计划快照。
 - `GET /api/reviews/{reviewId}/debates`：辩论状态与回合。
+- `GET /api/reviews/{reviewId}/claims`：已持久化的 Claim。
 - `GET /api/reviews/{reviewId}/events`：SSE 事件流。
 - `POST /api/reviews/{reviewId}/cancel`、`/retry`：生命周期命令。
 
 ## 生产化差距
 
-当前版本适合本地联调、演示和协议验证，**不适合作为多实例生产服务**。以下能力是发布前必须完成的门槛：
+当前版本适合本地联调、演示和协议验证，**不适合作为多实例生产服务**。MySQL 命令持久化与评审/事件写模型已落地（迁移至 V29），但发布前仍须完成：
 
-- 将 Claim、Debate、Judge、Gate 与领域事件纳入同一个 MySQL 事务。
-- 实现数据库 lease、启动扫描、可恢复 Agent 任务和失败转人工。
+- 实现跨实例数据库 lease、启动扫描、可恢复 Agent 任务与失败转人工（CM-REQ-2026-001 跟踪）。
 - 接入仓库快照/证据工具的真实只读 scope，并完成模型冒烟与权限审计。
 - 完成真实 MySQL 回放压测、安全审计、故障注入与评测基线。
 
@@ -166,6 +185,11 @@ npm run build
 - [领域事件、SSE 与恢复](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
 - [人工审核、报告与通知](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
 - [需求全生命周期平台](docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md)
+- [需求答辩人、平衡初审与冲突扩展](docs/AIREVIEW-PLAN-033-需求答辩人与平衡初审机制.md)
+- [协调者计划修订闭环](docs/AIREVIEW-PLAN-036-协调者计划修订闭环.md)
+- [辩题中文标题](docs/AIREVIEW-PLAN-044-辩题中文标题.md)
+- [质询确定性派发](docs/AIREVIEW-PLAN-046-质询确定性自动派发.md)
+- [议题级辩论生命周期](docs/AIREVIEW-PLAN-047-议题级辩论生命周期.md)
 - [需求平台验证记录](docs/验证记录/RequirementPlatformReport.md)
 - [开发约束](AGENTS.md)
 

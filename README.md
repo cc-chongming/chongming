@@ -19,7 +19,7 @@ That is a project metaphor, not a claim about mythology as system design:
 | Keeping harm from the doorway | A Gate sits before implementation: unresolved risk is surfaced for human review instead of silently passing downstream |
 | A bird, not a judge | Chongming illuminates disagreement. It does not replace the accountable human who makes the final Gate decision |
 
-This is why the project motto is **“See through ambiguity. Build consensus with evidence.”** Four core roles—product, project, frontend, and backend—form the initial set of perspectives. Optional architecture, test, and security roles can be activated when the review needs them. Their task is not to manufacture agreement; it is to make the disagreement, evidence, and decision path visible.
+This is why the project motto is **“See through ambiguity. Build consensus with evidence.”** Four core roles—product, project, frontend, and backend—form the initial set of perspectives. Optional architecture, test, security, and performance roles can be activated when the review needs them. Their task is not to manufacture agreement; it is to make the disagreement, evidence, and decision path visible.
 
 The source text is available in [*Shi Yi Ji*: “the Chongming bird”](https://www.shidianguji.com/mid-page/7595700568979554313). The mapping above is Chongming’s product interpretation.
 
@@ -39,37 +39,56 @@ The project draws from two production-oriented open-source directions: AgentScop
 
 | Capability | Status | Notes |
 |---|---|---|
-| Markdown intake and review workbench | Ready for local integration | Create a review with `POST /api/reviews`; UI entry is `/review/` |
-| Requirement lifecycle platform | Implementation ready; runtime acceptance pending | Dashboard, requirement CRUD/lifecycle, review/report lists, and the V11 MySQL 5.6 migration are available under `/api/dashboard`, `/api/requirements/**`, `/api/reviews`, and `/api/reports` |
+| Markdown intake and review workbench | Ready for local integration | Create a review with `POST /api/reviews`; UI entry is `/review/` (login-protected) |
+| Login authentication | Implemented | Username/password + JWT; a preset `admin` account ships with the workbench (PLAN-025) |
+| Requirement lifecycle platform | Implemented | Dashboard, requirement CRUD/lifecycle, and review/report lists under `/api/dashboard`, `/api/requirements/**`, `/api/reviews`, and `/api/reports` |
 | State machine, role authorization, idempotent commands | Implemented | Invalid stages, unauthorized roles, and replayed commands are rejected or safely replayed server-side |
-| OpenAI-compatible model gateway | Implemented | Per-role model profiles, timeouts/backoff, and Tool Calls; a real model ID is required |
+| OpenAI-compatible model gateway | Implemented | Per-role model profiles, timeouts/backoff, and Tool Calls; runtime model is set via environment config; reasoning/thinking is not enabled by default and provider hidden reasoning is never exposed on the public stream |
 | Local repository reads | Connected to role Harness | Roles only receive opaque `fileRef` values for their authorized snapshot scope; unauthorized paths are neither exposed nor charged against the read budget |
-| Initial review | Connected to runtime | Four core roles submit required five-state Assessments plus Claims, so both confirmed findings and risks remain visible |
-| Debate, Judge, and Gate draft | Connected to runtime | The Director orchestrates high-level actions while server guards validate targeted commands; multiple conflict topics can be registered atomically and converge without an empty second round |
-| Domain events and SSE | Implemented | Sequenced events, historical replay, heartbeat, and incremental reconnect are supported |
-| Human review, reports, notifications | Core flow available | External notification MCP and production persistence still need real-contract integration |
-| PLAN-024 deterministic convergence | Verified in deterministic suites | Maven 483 run with 0 failures/errors (11 environment skips), Vitest 55/55, Playwright 13/13; MySQL 5.6 and real-model runtime acceptance remain environment/authorization gated |
-| MySQL command writes and multi-instance recovery | Not complete | The review aggregate and runtime dispatcher still have in-process boundaries |
+| Context Scout | Connected to runtime | Snapshot-first conversational tool flow that persists a conclusion contract (summary, module roots, entry points, constraints, risks, evidence paths, role scopes); degrades gracefully on budget exhaustion or model failure |
+| Initial review | Connected to runtime | Core roles submit five-state Assessments plus Claims; a balanced-review obligation requires each role to record a SUPPORT claim where justified; required checkpoints are enforced |
+| Requirement defense and dispatch protocol | Connected to runtime | DEFENSE/CHALLENGE/REBUTTAL directed envelopes; server validates role, stage, topic round, and idempotency; TTL + dedup; the defender (PRODUCT or the nearest active role) answers objector challenges with a SUPPORT claim |
+| Deterministic challenge/rebuttal issuance | Implemented (PLAN-046) | The server auto-issues CHALLENGE when an opposed topic opens and when a defense SUPPORT commits, and issues the REBUTTAL envelope after every committed challenge; the coordinator steers convergence only |
+| Debate, Judge, and Gate draft | Connected to runtime | Topic-level rounds (each topic ≤ 2 rounds inside a single DEBATE stage); judging begins when every topic is terminal; the Judge rules per topic and drafts the Gate |
+| Plan revision closed loop | Implemented (PLAN-036) | The coordinator writes `plans/PLAN.md`; the server promotes each content change into a `PLAN_REVISED` event, runtime notice, and revision card |
+| Domain events and SSE | Implemented | Sequenced events, historical replay, heartbeat, and incremental reconnect |
+| Human review, reports, notifications | Core flow available | Notification supports a mail destination (PLAN-030); external MCP and production contracts still need real integration |
+| MySQL persistence | Implemented | Migrations through V29 cover users, requirement lifecycle, review aggregate/events, topics/turns/judgements, dispatch commands, and topic public titles |
+| Multi-instance recovery | Not complete | Runtime lease and startup-scan recovery remain gaps (tracked by CM-REQ-2026-001); the aggregate and dispatcher still have in-process boundaries |
 | Security audit, evaluation, fault injection | Not complete | These are release gates, not substitutes for a local demo |
+| Regression baseline | Verified | Backend `./mvnw.cmd test` → 783 tests, 0 failures/errors, 30 environment skips; frontend `vitest` → 159 passed |
 
 ## Review flow
 
 ```mermaid
 flowchart LR
     A["Markdown requirement"] --> B["Create review / freeze snapshot"]
-    B --> C["Director plans"]
+    B --> S["Context Scout explores the snapshot"]
+    S --> C["Director plans (PLAN.md)"]
     C --> D["Core-role Assessments + Claims"]
-    D --> E["Conflict detection"]
-    E --> F["Constrained debate: challenge / rebuttal / evidence"]
-    F --> G["Judge and Gate draft"]
-    G --> H["Human review and versioned decision"]
+    D --> E["Conflict detection / register topics"]
+    E --> F["Topic debate: defense / challenge / rebuttal"]
+    F --> G["Judge per topic + Gate draft"]
+    G --> H["Human review, versioned decision"]
 
-    D -. "committed business events" .-> I["SSE stream / workbench"]
-    F -. "serialized stage wake-up" .-> C
+    S -. "persisted conclusion" .-> I["SSE stream / workbench"]
+    D -. "committed business events" .-> I
+    F -. "server-issued envelopes, serialized wake-up" .-> C
     G -. "HUMAN_REQUIRED" .-> H
 ```
 
 The runtime does not rely on a model voluntarily following the process. A model can only select an exposed Tool Schema; every tool call is validated server-side before it changes domain state. `ReviewWorkflowDispatcher` listens only to committed business events and serializes the next Agent wake-up within a review, preventing concurrent execution of the same Director session.
+
+## Mechanism highlights
+
+The review protocol has evolved through PLAN-023 → PLAN-054. Key mechanisms beyond the base state machine:
+
+- **Context Scout contract.** After the snapshot is frozen, a dedicated Scout agent explores the repository within a bounded read budget and persists a conclusion contract—summary, module roots, entry points, constraints, risks, evidence paths, and per-role scopes. If the budget is exhausted or the model fails, the Scout degrades gracefully and the review continues.
+- **Plan revision closed loop.** The coordinator writes the public plan to `plans/PLAN.md` in plan mode. The server watches the document and promotes each content change into a single `PLAN_REVISED` event that refreshes the workbench plan card and runtime stream. A boilerplate initial plan is created at start but is not shown; only real revisions render as cards.
+- **Requirement defense topology.** A topic with only objections still has an implicit defender: the requirement itself. The coordinator dispatches DEFENSE to the product role (or the nearest active role), which must answer each objection with a SUPPORT claim. The direction is fixed—objectors interrogate, the defender answers.
+- **Deterministic challenge/rebuttal issuance.** Challenges are no longer left to model discretion. When an opposed topic opens, the server auto-issues CHALLENGE to every role holding an OPPOSE claim; when a defense SUPPORT commits, the server auto-issues CHALLENGE to the objectors; after each committed challenge the server issues the REBUTTAL envelope to the challenged role. The coordinator steers round progression and convergence only.
+- **Topic-level debate lifecycle.** Rounds are per-topic, not global. Each topic advances up to two rounds independently inside a single DEBATE stage; `begin_second_round(topicId)` opens a second round for one topic only; judging begins once every topic is terminal.
+- **Workbench form.** The UI follows a minimal, de-bubbled design: streaming agent answers, tool calls collapsed into groups (single calls included), topic tabs, a claim full-text modal, and per-phase fixed-height internal scrolling inside a full-viewport layout with no page-level scrollbar.
 
 ## Architecture
 
@@ -77,9 +96,9 @@ The runtime does not rely on a model voluntarily following the process. A model 
 |---|---|---|
 | Interaction | Workbench, intake, query APIs, SSE | Vue 3/Vite static assets + Spring MVC |
 | Domain | Review state machine, Guard, Claim, Debate, Judge, Gate | Java 21, Spring Boot, typed commands |
-| Agent runtime | Director/role/Judge Harness, restricted tools, runtime dispatch | AgentScope Java Harness + bound runtime context |
+| Agent runtime | Director/Scout/role/Judge Harness, restricted tools, runtime dispatch | AgentScope Java Harness + bound runtime context |
 | Model adapter | OpenAI-compatible calls, streaming, Tool Calls, retry | Model Gateway adapter |
-| Events and storage | Sequenced events, SSE replay, optional MyBatis event store | In-memory by default; complete MySQL write model is pending |
+| Events and storage | Sequenced events, SSE replay, MyBatis event store | MySQL write model in place (migrations V1–V29); in-memory fallback for local demo |
 
 ## Quick start
 
@@ -124,7 +143,7 @@ If a local configuration file was committed or shared, remove its credentials an
 .\mvnw.cmd spring-boot:run
 ```
 
-Open [http://localhost:8080/review/](http://localhost:8080/review/). The default page is the requirement Dashboard; the legacy direct-review form remains at `/review/#/create`.
+Open [http://localhost:8080/review/](http://localhost:8080/review/). The workbench is login-protected (PLAN-025): sign in with the preset `admin` account (initial password `Admin@123` — change it on first login) or register a new user. The default landing page is the requirement Dashboard; the legacy direct-review form remains at `/review/#/create`.
 
 Frontend sources are in `frontend/`. After frontend changes, rebuild and commit the matching assets under `src/main/resources/static/review/`:
 
@@ -146,15 +165,15 @@ Useful endpoints:
 - `GET /api/reviews/{reviewId}` — review aggregate state.
 - `GET /api/reviews/{reviewId}/plans` — plan snapshot.
 - `GET /api/reviews/{reviewId}/debates` — debate state and turns.
+- `GET /api/reviews/{reviewId}/claims` — persisted claims.
 - `GET /api/reviews/{reviewId}/events` — SSE event stream.
 - `POST /api/reviews/{reviewId}/cancel` and `/retry` — lifecycle commands.
 
 ## Production gaps
 
-The current version is suitable for local integration, demonstrations, and protocol validation. It is **not yet a multi-instance production service**. Before release, the following are required:
+The current version is suitable for local integration, demonstrations, and protocol validation. It is **not yet a multi-instance production service**. MySQL command persistence and the review/event write model are in place (migrations through V29), but before release the following are still required:
 
-- Commit Claim, Debate, Judge, Gate, and domain events in one MySQL transaction.
-- Implement database leases, startup scanning, resumable Agent work, and failure-to-human escalation.
+- Implement cross-instance database leases, startup scanning, resumable Agent work, and failure-to-human escalation (tracked by CM-REQ-2026-001).
 - Connect real read-only repository snapshot/evidence scopes and complete model smoke tests and authorization audit.
 - Complete MySQL replay load tests, security audit, fault injection, and evaluation baselines.
 
@@ -166,6 +185,11 @@ The current version is suitable for local integration, demonstrations, and proto
 - [Domain events, SSE, and recovery](docs/AIREVIEW-PLAN-010-领域事件SSE与恢复.md)
 - [Human review, reports, and notification](docs/AIREVIEW-PLAN-011-人工审核报告与通知.md)
 - [Requirement lifecycle platform](docs/AIREVIEW-PLAN-021-需求全生命周期管理平台.md)
+- [Requirement defender, balanced review, and conflict expansion](docs/AIREVIEW-PLAN-033-需求答辩人与平衡初审机制.md)
+- [Coordinator plan revision closed loop](docs/AIREVIEW-PLAN-036-协调者计划修订闭环.md)
+- [Chinese topic titles](docs/AIREVIEW-PLAN-044-辩题中文标题.md)
+- [Deterministic challenge issuance](docs/AIREVIEW-PLAN-046-质询确定性自动派发.md)
+- [Topic-level debate lifecycle](docs/AIREVIEW-PLAN-047-议题级辩论生命周期.md)
 - [Requirement platform verification record](docs/验证记录/RequirementPlatformReport.md)
 - [Development rules](AGENTS.md)
 
