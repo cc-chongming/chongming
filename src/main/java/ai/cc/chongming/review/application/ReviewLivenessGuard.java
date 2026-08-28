@@ -83,6 +83,9 @@ public class ReviewLivenessGuard implements ReviewEventListener {
     /** [AIREVIEW-PLAN-063#1] 每个 commandId 的补偿重投计数，跨扫描保留，上限复用 livenessMaxRewakes。 */
     private final ConcurrentMap<String, AtomicInteger> redeliveries = new ConcurrentHashMap<>();
 
+    /** [AIREVIEW-PLAN-069#5] redeliveries 无界保护：超过该容量时整体清空（终态清理同样会清）。 */
+    private static final int MAX_REDELIVERY_TRACKED = 10_000;
+
     /** [AIREVIEW-PLAN-063#1] 兼容旧构造：未注入 dispatch store 时补偿重投静默关闭（null 安全）。 */
     public ReviewLivenessGuard(
             ReviewRegistry reviewRegistry,
@@ -122,11 +125,14 @@ public class ReviewLivenessGuard implements ReviewEventListener {
     public void onCommitted(ReviewEvent event) {
         Objects.requireNonNull(event, "event must not be null");
         String key = key(event.reviewId(), event.attemptNo());
-        if (event.type() == ReviewEventType.REVIEW_CANCELLED || event.type() == ReviewEventType.REVIEW_FAILED) {
+        // [AIREVIEW-PLAN-069#5] 除 CANCELLED/FAILED 事件外，成功完成路径（stage COMPLETED 及其前置
+        // NOTIFYING）同样视为终态：立即移除守卫状态并清空补偿重投计数，避免成功评审永久驻留。
+        if (isTerminalEvent(event)) {
             if (states.remove(key) != null) {
-                LOGGER.info("LIVENESS_STATE_CLEARED reviewId={} attemptNo={} eventType={}",
-                        event.reviewId().value(), event.attemptNo(), event.type());
+                LOGGER.info("LIVENESS_STATE_CLEARED reviewId={} attemptNo={} eventType={} stage={}",
+                        event.reviewId().value(), event.attemptNo(), event.type(), event.stage());
             }
+            clearRedeliveries();
             return;
         }
         LivenessState state = states.computeIfAbsent(key, ignored -> new LivenessState());
@@ -146,6 +152,11 @@ public class ReviewLivenessGuard implements ReviewEventListener {
      */
     @Scheduled(fixedDelayString = "${review.agentscope.liveness-scan-interval:PT60S}")
     public void scan() {
+        // [AIREVIEW-PLAN-069#5] 容量上限兜底：即使终态清理被跳过，redeliveries 也不允许无界增长。
+        if (redeliveries.size() > MAX_REDELIVERY_TRACKED) {
+            LOGGER.warn("LIVENESS_REDELIVERY_CAP_RESET tracked={}", redeliveries.size());
+            redeliveries.clear();
+        }
         Instant now = Instant.now();
         for (Map.Entry<String, LivenessState> entry : states.entrySet()) {
             String key = entry.getKey();
@@ -231,7 +242,8 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                 continue;
             }
             send(adapter, runtimeId, roleLabel(runtimeId, activation.roleType()),
-                    "初审仍未完成，请尽快提交 Claim 并调用 complete_initial_review");
+                    "初审仍未完成，请尽快提交 Claim 并调用 complete_initial_review。"
+                            + "若你的初审已完成（initialReviewCompleted），不要重提交任何评估或主张，不要重贴结论，仅用一行确认状态。");
             sent = true;
         }
         return sent;
@@ -385,6 +397,39 @@ public class ReviewLivenessGuard implements ReviewEventListener {
         return stage == ReviewStage.INITIAL_REVIEW
                 || stage == ReviewStage.CONFLICT_DETECTION
                 || stage == ReviewStage.JUDGING;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#5] 终态判定：显式取消/失败事件，或成功完成路径的 COMPLETED/NOTIFYING 阶段事实。
+     */
+    private static boolean isTerminalEvent(ReviewEvent event) {
+        return event.type() == ReviewEventType.REVIEW_CANCELLED
+                || event.type() == ReviewEventType.REVIEW_FAILED
+                || event.stage() == ReviewStage.COMPLETED
+                || event.stage() == ReviewStage.NOTIFYING;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#5] 终态统一清理入口（dispatcher 的 COMPLETED 观测调用）：移除 attempt 活性
+     * 状态，同时清空补偿重投计数。幂等：已清理的 attempt 再次调用无副作用。
+     */
+    public void clear(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        String key = key(reviewId, attemptNo);
+        if (states.remove(key) != null) {
+            LOGGER.info("LIVENESS_STATE_CLEARED reviewId={} attemptNo={} eventType=TERMINAL_CLEANUP",
+                    reviewId.value(), attemptNo);
+        }
+        clearRedeliveries();
+    }
+
+    /** [AIREVIEW-PLAN-069#5] 终态/超限时整体清空补偿重投计数（commandId 为 UUID，无需按 attempt 归并）。 */
+    private void clearRedeliveries() {
+        if (redeliveries.isEmpty()) {
+            return;
+        }
+        LOGGER.info("LIVENESS_REDELIVERY_COUNTERS_CLEARED tracked={}", redeliveries.size());
+        redeliveries.clear();
     }
 
     private static String key(ReviewId reviewId, int attemptNo) {

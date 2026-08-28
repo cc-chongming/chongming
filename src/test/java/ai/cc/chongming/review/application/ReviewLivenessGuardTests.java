@@ -1,5 +1,6 @@
 package ai.cc.chongming.review.application;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -95,6 +97,27 @@ class ReviewLivenessGuardTests {
                 contains("初审仍未完成"));
         // A completed role is never re-woken.
         verify(adapter, never()).send(eq(runtimeId), eq(runtimeId + "-backend"), anyString());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-070#3][AIREVIEW-PLAN-070#4] The INITIAL_REVIEW re-wake copy must immunise a
+     * role that has already completed its initial review against re-submitting assessments/claims
+     * or re-pasting conclusions: it only needs to confirm its state in one line.
+     */
+    @Test
+    void initialReviewRewakeCarriesCompletedRoleSilenceGuidance() {
+        Review review = review(ReviewStage.INITIAL_REVIEW,
+                new RoleActivation(RoleType.PRODUCT, "product", false));
+        guard.onCommitted(event(review, ReviewEventType.ROLE_STARTED, ReviewStage.INITIAL_REVIEW));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+
+        guard.scan();
+
+        verify(adapter, times(1)).send(eq(runtimeId), eq(runtimeId + "-product"),
+                argThat(message -> message.contains("若你的初审已完成（initialReviewCompleted）")
+                        && message.contains("不要重提交任何评估或主张")
+                        && message.contains("不要重贴结论")
+                        && message.contains("仅用一行确认状态")));
     }
 
     @Test
@@ -303,6 +326,78 @@ class ReviewLivenessGuardTests {
     }
 
     // ------------------------------------------------------------------
+    // [AIREVIEW-PLAN-069#5] success-path terminal cleanup + redelivery eviction
+    // ------------------------------------------------------------------
+
+    @Test
+    void completedStageEventClearsTheTrackedAttempt() {
+        Review review = review(ReviewStage.INITIAL_REVIEW,
+                new RoleActivation(RoleType.PRODUCT, "product", false));
+        guard.onCommitted(event(review, ReviewEventType.ROLE_STARTED, ReviewStage.INITIAL_REVIEW));
+
+        // No REVIEW_COMPLETED event type exists: the success-path terminal fact is a
+        // COMPLETED-stage event (e.g. NOTIFICATION_SENT) and must forget the attempt too.
+        guard.onCommitted(new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(),
+                ReviewEventType.NOTIFICATION_SENT, ReviewEventType.NOTIFICATION_SENT.category(),
+                ReviewStage.COMPLETED, null, null, null, null, null, null, 100,
+                Instant.now(), 1, Map.of()));
+        guard.scan();
+
+        verify(adapter, never()).send(anyString(), anyString(), anyString());
+        verify(commandService, never()).failReview(any(), anyString());
+    }
+
+    @Test
+    void notifyingStageEventClearsTheTrackedAttempt() {
+        Review review = review(ReviewStage.INITIAL_REVIEW,
+                new RoleActivation(RoleType.PRODUCT, "product", false));
+        guard.onCommitted(event(review, ReviewEventType.ROLE_STARTED, ReviewStage.INITIAL_REVIEW));
+
+        guard.onCommitted(new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(),
+                ReviewEventType.NOTIFICATION_QUEUED, ReviewEventType.NOTIFICATION_QUEUED.category(),
+                ReviewStage.NOTIFYING, null, null, null, null, null, null, 96,
+                Instant.now(), 1, Map.of()));
+        guard.scan();
+
+        verify(adapter, never()).send(anyString(), anyString(), anyString());
+        verify(commandService, never()).failReview(any(), anyString());
+    }
+
+    @Test
+    void terminalEventClearsRedeliveryCounters() throws Exception {
+        Review review = debateReview();
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchCommand command = pendingDispatchCommand(review, RoleType.PRODUCT);
+        dispatchStore.save(command);
+        guard = guardWithStore(Duration.ZERO, 3, dispatchStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        guard.scan();
+        assertThat(redeliveriesOf(guard)).hasSize(1);
+
+        guard.onCommitted(new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(),
+                ReviewEventType.REVIEW_CANCELLED, ReviewEventType.REVIEW_CANCELLED.category(),
+                ReviewStage.CANCELLED, null, null, null, null, null, null, null,
+                Instant.now(), 1, Map.of()));
+
+        assertThat(redeliveriesOf(guard)).isEmpty();
+    }
+
+    @Test
+    void scanClearsRedeliveriesBeyondTheTrackedCap() throws Exception {
+        Review review = debateReview();
+        guard = guardWithStore(Duration.ZERO, 3, new InMemoryReviewDispatchStore());
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        Map<String, AtomicInteger> redeliveries = redeliveriesOf(guard);
+        for (int i = 0; i < 10_001; i++) {
+            redeliveries.put(UUID.randomUUID().toString(), new AtomicInteger(1));
+        }
+
+        guard.scan();
+
+        assertThat(redeliveriesOf(guard)).isEmpty();
+    }
+
+    // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
 
@@ -352,6 +447,14 @@ class ReviewLivenessGuardTests {
         return new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(), type,
                 type.category(), stage, null, null, null, null, null, null, null,
                 Instant.now(), 1, Map.of());
+    }
+
+    /** [AIREVIEW-PLAN-069#5] Reads the package-private compensation-redelivery counters for assertions. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, AtomicInteger> redeliveriesOf(ReviewLivenessGuard guard) throws Exception {
+        java.lang.reflect.Field field = ReviewLivenessGuard.class.getDeclaredField("redeliveries");
+        field.setAccessible(true);
+        return (Map<String, AtomicInteger>) field.get(guard);
     }
 
     private ReviewLivenessGuard guardWith(Duration idle, int maxRewakes) {

@@ -11,6 +11,10 @@ spring:
       # 1MB/10MB defaults so the business rule in DevTaskAttachmentService is the real gate.
       max-file-size: ${REVIEW_ATTACHMENT_MAX_FILE_SIZE:20MB}
       max-request-size: ${REVIEW_ATTACHMENT_MAX_REQUEST_SIZE:25MB}
+  lifecycle:
+    # [AIREVIEW-PLAN-069#3] Graceful shutdown is bounded per phase: even a leaked long-lived
+    # connection can only delay close by 10s instead of the Boot default 30s.
+    timeout-per-shutdown-phase: 10s
   mail:
     # QQ 邮箱 SMTP（SSL 465）；password 必须使用 QQ 邮箱授权码，通过环境变量注入，不入库不入仓。
     host: ${REVIEW_QQ_MAIL_HOST:smtp.qq.com}
@@ -26,6 +30,13 @@ spring:
           connectiontimeout: 10000
           timeout: 30000
           writetimeout: 30000
+
+management:
+  health:
+    # [AIREVIEW-PLAN-069#3] MailHealthIndicator opens a real SMTP connection on every health probe
+    # (local profile observed >8s hang); disable it so health checks never add shutdown latency.
+    mail:
+      enabled: false
 
 review:
   workspace-root: ${REVIEW_WORKSPACE_ROOT:.agentscope/workspace}

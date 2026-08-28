@@ -27,6 +27,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -334,8 +336,32 @@ public class ReviewRuntimeTraceRegistry {
         }
     }
 
+    /**
+     * [AIREVIEW-PLAN-069#2] Completes every live AG-UI emitter as soon as the context starts
+     * closing: {@code ContextClosedEvent} is published before the lifecycle phase running Tomcat's
+     * graceful shutdown, so the async request count hits zero before the graceful phase waits.
+     * Idempotent with the {@code @PreDestroy} close path.
+     */
+    @EventListener
+    void onContextClosed(ContextClosedEvent event) {
+        close();
+    }
+
     @PreDestroy
     void close() {
+        // [AIREVIEW-PLAN-069#2] Close every live AG-UI SSE emitter and drop the per-attempt traces
+        // so graceful shutdown never waits on stale async requests and completed runtimes release
+        // their buffered event history (up to maxEvents per attempt). Trace close is best-effort
+        // and idempotent with the per-subscription onCompletion removal.
+        for (RuntimeTrace trace : List.copyOf(traces.values())) {
+            try {
+                trace.close();
+            } catch (RuntimeException exception) {
+                LOGGER.warn("RUNTIME_TRACE_CLOSE_FAILED runtimeId={} error={}",
+                        trace.runtimeId, exception.getMessage());
+            }
+        }
+        traces.clear();
         emitterExecutor.close();
         persistExecutor.close();
     }
@@ -633,6 +659,11 @@ public class ReviewRuntimeTraceRegistry {
             } catch (IOException exception) {
                 remove(subscription);
                 subscription.emitter().completeWithError(exception);
+                return false;
+            } catch (RuntimeException exception) {
+                // [AIREVIEW-PLAN-069#2] Registry shutdown may complete an emitter while a drain
+                // task is mid-delivery; a completed emitter is a normal stop of this subscription.
+                remove(subscription);
                 return false;
             }
         }

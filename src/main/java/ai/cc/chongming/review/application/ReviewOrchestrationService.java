@@ -277,6 +277,28 @@ public class ReviewOrchestrationService {
     }
 
     /**
+     * [AIREVIEW-PLAN-069#4] Terminal cleanup: forgets every process-local orchestration observation
+     * (total plan history, ephemeral event list, sequence counters) of one runtime id.
+     */
+    public void forget(String runtimeId) {
+        Objects.requireNonNull(runtimeId, "runtimeId must not be null");
+        plansByRuntime.remove(runtimeId);
+        eventsByRuntime.remove(runtimeId);
+        eventSequences.remove(runtimeId);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4] Convenience overload deriving the attempt runtime id from the review identity.
+     */
+    public void forget(ReviewId reviewId, int attemptNo) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        if (attemptNo < 1) {
+            throw new IllegalArgumentException("attemptNo must be positive");
+        }
+        forget(ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo));
+    }
+
+    /**
      * Returns a defensive copy of ephemeral orchestration observations; durable events are added in PLAN-010.
      */
     public List<OrchestrationEvent> events(ReviewRuntimeContext context) {

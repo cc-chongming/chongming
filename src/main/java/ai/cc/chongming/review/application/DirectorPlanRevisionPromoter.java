@@ -19,6 +19,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /**
  * [AIREVIEW-PLAN-036#闭环] Promotes a Director-authored plan document from the attempt workspace
@@ -38,6 +41,7 @@ import org.slf4j.LoggerFactory;
  *
  * @author wangli
  */
+@Component
 public final class DirectorPlanRevisionPromoter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DirectorPlanRevisionPromoter.class);
@@ -53,12 +57,38 @@ public final class DirectorPlanRevisionPromoter {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern LIST_ITEM = Pattern.compile("^\\s*(?:[-*+]|\\d+[.)])\\s+(.+?)\\s*$");
 
-    private final ReviewOrchestrationService orchestrationService;
+    private final ObjectProvider<ReviewOrchestrationService> orchestrationProvider;
+    private volatile ReviewOrchestrationService orchestrationService;
     private final ConcurrentMap<String, PromoterState> states = new ConcurrentHashMap<>();
 
     public DirectorPlanRevisionPromoter(ReviewOrchestrationService orchestrationService) {
-        this.orchestrationService = Objects.requireNonNull(
-                orchestrationService, "orchestrationService must not be null");
+        Objects.requireNonNull(orchestrationService, "orchestrationService must not be null");
+        this.orchestrationService = orchestrationService;
+        this.orchestrationProvider = null;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4] Spring constructor. The orchestration service is resolved lazily so
+     * the adapter that owns this promoter and the orchestration service never form a hard cycle.
+     */
+    @Autowired
+    public DirectorPlanRevisionPromoter(ObjectProvider<ReviewOrchestrationService> orchestrationProvider) {
+        this.orchestrationProvider = Objects.requireNonNull(
+                orchestrationProvider, "orchestrationProvider must not be null");
+        this.orchestrationService = null;
+    }
+
+    private ReviewOrchestrationService orchestration() {
+        ReviewOrchestrationService resolved = orchestrationService;
+        if (resolved != null) {
+            return resolved;
+        }
+        resolved = orchestrationProvider.getIfAvailable();
+        if (resolved == null) {
+            throw new IllegalStateException("ReviewOrchestrationService is not available");
+        }
+        orchestrationService = resolved;
+        return resolved;
     }
 
     /**
@@ -103,7 +133,7 @@ public final class DirectorPlanRevisionPromoter {
             }
             try {
                 ReviewOrchestrationService.PlanRevision revision =
-                        orchestrationService.revisePlan(context, workspace, parsed.tasks(), parsed.reason());
+                        orchestration().revisePlan(context, workspace, parsed.tasks(), parsed.reason());
                 state.lastPromotedDigest = digest;
                 state.lastPromotedVersion = revision.plan().planVersion();
                 LOGGER.info("director_plan_promoted reviewId={} attemptNo={} version={}",
@@ -118,6 +148,15 @@ public final class DirectorPlanRevisionPromoter {
                 return Optional.empty();
             }
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4] Terminal cleanup: forgets the promotion watermark of one runtime so a
+     * completed attempt releases its small process-local state instead of accumulating forever.
+     */
+    public void clear(String runtimeId) {
+        Objects.requireNonNull(runtimeId, "runtimeId must not be null");
+        states.remove(runtimeId);
     }
 
     /**

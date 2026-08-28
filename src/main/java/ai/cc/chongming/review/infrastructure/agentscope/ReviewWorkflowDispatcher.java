@@ -2,9 +2,13 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.DebateConvergenceGuard;
 import ai.cc.chongming.review.application.DebateFocusResolver;
+import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewEventListener;
+import ai.cc.chongming.review.application.ReviewLivenessGuard;
+import ai.cc.chongming.review.application.ReviewOrchestrationService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.application.ReviewRuntimeTraceRegistry;
 import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
@@ -79,6 +83,10 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     private final ReviewDebateStore debateStore;
     private final ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider;
     private final AgentScopeProperties properties;
+    private final ObjectProvider<ReviewLivenessGuard> livenessGuardProvider;
+    private final ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider;
+    private final ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider;
+    private final ObjectProvider<ReviewOrchestrationService> orchestrationProvider;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
 
     public ReviewWorkflowDispatcher(ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider) {
@@ -93,7 +101,6 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, null, null);
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
     public ReviewWorkflowDispatcher(
             ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
             ReviewRegistry reviewRegistry,
@@ -101,12 +108,37 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             ReviewDebateStore debateStore,
             ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider,
             AgentScopeProperties properties) {
+        this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, convergenceGuardProvider,
+                properties, null, null, null, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4] Canonical Spring constructor. Terminal-state cleanup dependencies are
+     * injected as lazy {@link ObjectProvider}s so the dispatcher never hard-depends on beans that
+     * may themselves receive review events (no construction cycle).
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ReviewWorkflowDispatcher(
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ReviewRegistry reviewRegistry,
+            ReviewDispatchService dispatchService,
+            ReviewDebateStore debateStore,
+            ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider,
+            AgentScopeProperties properties,
+            ObjectProvider<ReviewLivenessGuard> livenessGuardProvider,
+            ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider,
+            ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider,
+            ObjectProvider<ReviewOrchestrationService> orchestrationProvider) {
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
         this.reviewRegistry = reviewRegistry;
         this.dispatchService = dispatchService;
         this.debateStore = debateStore;
         this.convergenceGuardProvider = convergenceGuardProvider;
         this.properties = properties;
+        this.livenessGuardProvider = livenessGuardProvider;
+        this.planPromoterProvider = planPromoterProvider;
+        this.traceRegistryProvider = traceRegistryProvider;
+        this.orchestrationProvider = orchestrationProvider;
     }
 
     /** [AIREVIEW-PLAN-059#4] properties 缺失（旧构造/测试缝）时按配置默认值视为串行开启。 */
@@ -125,13 +157,16 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
 
     @Override
     public void onCommitted(ReviewEvent event) {
+        // [AIREVIEW-PLAN-069#4] 成功完成路径没有 REVIEW_COMPLETED 事件类型（已核对枚举）；真实收口事实
+        // 是 stage 已进入 COMPLETED 的事件（如 NOTIFICATION_SENT：markDelivered 先 transitionTo(COMPLETED)
+        // 再发布）。该事件触发一次统一终态清理并结束分发，避免 per-attempt 的 sink/订阅/跟踪永久驻留。
+        if (event.stage() == ReviewStage.COMPLETED) {
+            cleanupTerminalAttempt(event, "COMPLETED");
+            return;
+        }
         if (event.type() == ReviewEventType.REVIEW_CANCELLED || event.type() == ReviewEventType.REVIEW_FAILED) {
-            clearGuard(event);
-            reactor.core.publisher.Sinks.Many<Dispatch> queue = queues.remove(runtimeId(event));
-            if (queue != null) {
-                queue.tryEmitComplete();
-            }
             rejectPendingCommands(event, "REVIEW_TERMINATED");
+            cleanupTerminalAttempt(event, event.type().name());
         } else if (event.type() == ReviewEventType.INITIAL_REVIEW_COMPLETED) {
             // [AIREVIEW-PLAN-024#方案4] Conflict detection is deterministic: recall candidates,
             // batch-register every chosen subject in one command, or skip when none remains.
@@ -555,6 +590,50 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         if (guard != null) {
             guard.clear(event.reviewId(), event.attemptNo());
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4] 统一终态清理：complete+remove 本 attempt 的调度队列、清空辩论收敛守卫，
+     * 并经懒 ObjectProvider 解析依次清 liveness 状态、plan 推广水印、runtime trace 与编排三张观测表，
+     * 最后尽力关闭运行体。每一步独立容错，任何一步失败都不阻断其余清理，且整体幂等。
+     */
+    private void cleanupTerminalAttempt(ReviewEvent event, String reason) {
+        String runtimeId = runtimeId(event);
+        reactor.core.publisher.Sinks.Many<Dispatch> queue = queues.remove(runtimeId);
+        if (queue != null) {
+            queue.tryEmitComplete();
+        }
+        clearGuard(event);
+        if (livenessGuardProvider != null) {
+            ReviewLivenessGuard livenessGuard = livenessGuardProvider.getIfAvailable();
+            if (livenessGuard != null) {
+                livenessGuard.clear(event.reviewId(), event.attemptNo());
+            }
+        }
+        if (planPromoterProvider != null) {
+            DirectorPlanRevisionPromoter promoter = planPromoterProvider.getIfAvailable();
+            if (promoter != null) {
+                promoter.clear(runtimeId);
+            }
+        }
+        if (traceRegistryProvider != null) {
+            ReviewRuntimeTraceRegistry traceRegistry = traceRegistryProvider.getIfAvailable();
+            if (traceRegistry != null) {
+                traceRegistry.remove(runtimeId);
+            }
+        }
+        if (orchestrationProvider != null) {
+            ReviewOrchestrationService orchestration = orchestrationProvider.getIfAvailable();
+            if (orchestration != null) {
+                orchestration.forget(runtimeId);
+                orchestration.releaseRuntime(event.reviewId(), event.attemptNo())
+                        .subscribe(null, failure -> LOGGER.warn(
+                                "REVIEW_TERMINAL_RUNTIME_RELEASE_FAILED runtimeId={} reason={} error={}",
+                                runtimeId, reason, failure.toString()));
+            }
+        }
+        LOGGER.info("REVIEW_TERMINAL_CLEANUP reviewId={} attemptNo={} reason={} runtimeId={}",
+                event.reviewId().value(), event.attemptNo(), reason, runtimeId);
     }
 
     private reactor.core.publisher.Sinks.Many<Dispatch> queue(String runtimeId) {

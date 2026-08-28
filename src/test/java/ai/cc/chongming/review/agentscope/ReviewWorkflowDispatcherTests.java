@@ -2,6 +2,7 @@ package ai.cc.chongming.review.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
@@ -12,8 +13,12 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
 import ai.cc.chongming.review.application.ReviewDispatchService;
+import ai.cc.chongming.review.application.ReviewLivenessGuard;
+import ai.cc.chongming.review.application.ReviewOrchestrationService;
 import ai.cc.chongming.review.application.ReviewRuntimeContext;
+import ai.cc.chongming.review.application.ReviewRuntimeTraceRegistry;
 import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventDraft;
@@ -308,6 +313,39 @@ class ReviewWorkflowDispatcherTests {
                 .get().extracting(ReviewDispatchCommand::status).isEqualTo(DispatchCommandStatus.REJECTED);
     }
 
+    // --- [AIREVIEW-PLAN-069#4] COMPLETED unified terminal cleanup -------------------------------
+
+    @Test
+    void completedStageCleansQueuesLivenessPromoterTraceAndOrchestration() throws Exception {
+        ReviewLivenessGuard livenessGuard = mock(ReviewLivenessGuard.class);
+        DirectorPlanRevisionPromoter promoter = mock(DirectorPlanRevisionPromoter.class);
+        ReviewRuntimeTraceRegistry traceRegistry = mock(ReviewRuntimeTraceRegistry.class);
+        ReviewOrchestrationService orchestration = mock(ReviewOrchestrationService.class);
+        when(orchestration.releaseRuntime(any(), anyInt())).thenReturn(Mono.empty());
+
+        dispatcher = new ReviewWorkflowDispatcher(mockProvider(), registry, dispatchService, debateStore, null,
+                serialProperties(false), providerOf(livenessGuard), providerOf(promoter),
+                providerOf(traceRegistry), providerOf(orchestration));
+        dispatcherRef.set(dispatcher);
+
+        // Seed one queue for the attempt: the director wake creates its sink synchronously.
+        dispatcher.onCommitted(event(ReviewEventType.DEBATE_TOPIC_OPENED, null, Map.of()));
+        assertThat(queuesOf(dispatcher)).hasSize(1);
+
+        // The success-path terminal fact is a COMPLETED-stage event (no REVIEW_COMPLETED type exists).
+        dispatcher.onCommitted(new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(),
+                ReviewEventType.NOTIFICATION_SENT, ReviewEventType.NOTIFICATION_SENT.category(),
+                ReviewStage.COMPLETED, null, null, null, null, null, null, 100,
+                Instant.now(), 1, Map.of()));
+
+        assertThat(queuesOf(dispatcher)).isEmpty();
+        verify(livenessGuard).clear(eq(review.id()), eq(review.attemptNo()));
+        verify(promoter).clear(eq(runtimeId));
+        verify(traceRegistry).remove(eq(runtimeId));
+        verify(orchestration).forget(eq(runtimeId));
+        verify(orchestration).releaseRuntime(eq(review.id()), eq(review.attemptNo()));
+    }
+
     @Test
     void droppedCommandWakesTheDirectorWithAReissueHint() {
         dispatcher.onCommitted(event(ReviewEventType.DISPATCH_COMMAND_EXPIRED, null,
@@ -587,6 +625,20 @@ class ReviewWorkflowDispatcherTests {
     private boolean roleLabel(String label) {
         return label != null && (label.endsWith("-product") || label.endsWith("-backend")
                 || label.endsWith("-frontend") || label.endsWith("-project"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> ObjectProvider<T> providerOf(T value) {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(value);
+        return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static java.util.Map<String, ?> queuesOf(ReviewWorkflowDispatcher dispatcher) throws Exception {
+        java.lang.reflect.Field field = ReviewWorkflowDispatcher.class.getDeclaredField("queues");
+        field.setAccessible(true);
+        return (java.util.Map<String, ?>) field.get(dispatcher);
     }
 
     /** [AIREVIEW-PLAN-059#7] 绑定任意 review 的事件构造缝（串行用例独立 review）。 */

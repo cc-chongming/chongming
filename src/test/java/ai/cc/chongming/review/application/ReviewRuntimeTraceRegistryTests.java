@@ -38,6 +38,49 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  */
 class ReviewRuntimeTraceRegistryTests {
 
+    /**
+     * [AIREVIEW-PLAN-069#2] The PreDestroy hook completes every live AG-UI emitter and clears all
+     * traces, so graceful shutdown never waits on stale async requests and completed runtimes
+     * release their buffered event history.
+     */
+    @Test
+    void closeCompletesSubscriptionsAndClearsTraces() {
+        // Persistence-disabled registry: nothing can rehydrate the cleared in-memory traces.
+        ReviewRuntimeTraceRegistry registry = new ReviewRuntimeTraceRegistry(
+                new ObjectMapper(), null, new ReviewRuntimeTraceProperties(false, 1000));
+        String runtimeId = runtimeId(1);
+        registry.publish(runtimeId, text("m-1"));
+        registry.publish(runtimeId, text("m-2"));
+        ReviewRuntimeTraceRegistry.Subscription subscription = registry.subscribe(runtimeId, 0);
+        registry.activate(subscription);
+        assertThat(registry.replayHistory(runtimeId, 0)).hasSize(2);
+
+        registry.close();
+        registry.close();
+
+        assertThat(registry.replayHistory(runtimeId, 0)).isEmpty();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#2] ContextClosedEvent fires before Tomcat's graceful-shutdown phase, so
+     * the listener must complete emitters and drop traces early enough to end the wait.
+     */
+    @Test
+    void contextClosedEventClearsTracesAndSubscriptions() {
+        ReviewRuntimeTraceRegistry registry = new ReviewRuntimeTraceRegistry(
+                new ObjectMapper(), null, new ReviewRuntimeTraceProperties(false, 1000));
+        String runtimeId = runtimeId(1);
+        registry.publish(runtimeId, text("m-1"));
+        registry.publish(runtimeId, text("m-2"));
+        ReviewRuntimeTraceRegistry.Subscription subscription = registry.subscribe(runtimeId, 0);
+        registry.activate(subscription);
+
+        registry.onContextClosed(new org.springframework.context.event.ContextClosedEvent(
+                org.mockito.Mockito.mock(org.springframework.context.ApplicationContext.class)));
+
+        assertThat(registry.replayHistory(runtimeId, 0)).isEmpty();
+    }
+
     @Test
     void persistsAndReplaysAfterNewInstance() {
         FakeTraceStore store = new FakeTraceStore();

@@ -2,6 +2,9 @@ package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import jakarta.annotation.PreDestroy;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -117,6 +120,38 @@ public class ReviewSseRegistry implements ReviewEventListener {
         return new SseMetrics(active, deliveredEvents.get(), failedDeliveries.get());
     }
 
+    /**
+     * [AIREVIEW-PLAN-069#1] Completes every emitter as soon as the context starts closing.
+     * {@code ContextClosedEvent} is published before the lifecycle phase that runs Tomcat's
+     * graceful shutdown, so active async SSE requests drop to zero before the graceful phase
+     * waits — the {@code @PreDestroy} hook alone would run only after that phase times out.
+     * Idempotent with {@link #close()}.
+     */
+    @EventListener
+    public void onContextClosed(ContextClosedEvent event) {
+        close();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#1] Shutdown hook: completes every buffered/live emitter and clears the
+     * registry so Tomcat's graceful shutdown never waits on stale SSE async requests. Completion
+     * triggers the per-subscription onCompletion callback (which removes the entry); the final
+     * {@code clear()} is idempotent with that removal, and each completion is best-effort.
+     */
+    @PreDestroy
+    public void close() {
+        for (Map<UUID, Subscription> subscriptions : subscriptionsByReview.values()) {
+            for (Subscription subscription : java.util.List.copyOf(subscriptions.values())) {
+                try {
+                    subscription.emitter().complete();
+                } catch (RuntimeException ignored) {
+                    // Shutdown-time best-effort: one unruly emitter must not block context close.
+                }
+            }
+        }
+        subscriptionsByReview.clear();
+    }
+
     private void deliver(Subscription subscription, ReviewEvent event) {
         if (event.sequence() <= subscription.lastDeliveredSequence()) {
             return;
@@ -132,6 +167,10 @@ public class ReviewSseRegistry implements ReviewEventListener {
             failedDeliveries.incrementAndGet();
             remove(subscription);
             subscription.emitter().completeWithError(exception);
+        } catch (RuntimeException exception) {
+            // [AIREVIEW-PLAN-069#1] Shutdown may complete the emitter while a heartbeat/delivery is
+            // in flight; a completed emitter is a normal end of this subscription.
+            remove(subscription);
         }
     }
 
@@ -189,6 +228,8 @@ public class ReviewSseRegistry implements ReviewEventListener {
                 failedDeliveries.incrementAndGet();
                 remove(subscription);
                 subscription.emitter().completeWithError(exception);
+            } catch (RuntimeException exception) {
+                remove(subscription);
             }
         }
     }
