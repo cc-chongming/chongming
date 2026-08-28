@@ -4,12 +4,14 @@ import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewCommandMetadata;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.repository.ReviewDispatchStore;
 import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
@@ -38,6 +40,11 @@ import org.springframework.stereotype.Service;
  * (reviewId:attemptNo), re-wakes the stalled stage after {@code livenessRewakeIdle}, and
  * deterministically converges the stage once the server-side re-wake budget
  * ({@code livenessMaxRewakes}) is exhausted. DEBATE and PLANNING keep their own watchdogs.
+ *
+ * <p>[AIREVIEW-PLAN-063#1] Idle attempts additionally compensate-redeliver still-PENDING dispatch
+ * envelopes (any stage, DEBATE included) up to the same per-commandId
+ * {@code livenessMaxRewakes} budget, so a rejected-once envelope is never permanently silent;
+ * redelivery does not change the envelope's PENDING status.
  *
  * @author wangli
  */
@@ -70,7 +77,24 @@ public class ReviewLivenessGuard implements ReviewEventListener {
     private final ObjectProvider<DebateService> debateServiceProvider;
     private final ObjectProvider<JudgeService> judgeServiceProvider;
     private final ObjectProvider<ReviewCommandService> reviewCommandServiceProvider;
+    private final ObjectProvider<ReviewDispatchStore> dispatchStoreProvider;
     private final ConcurrentMap<String, LivenessState> states = new ConcurrentHashMap<>();
+
+    /** [AIREVIEW-PLAN-063#1] 每个 commandId 的补偿重投计数，跨扫描保留，上限复用 livenessMaxRewakes。 */
+    private final ConcurrentMap<String, AtomicInteger> redeliveries = new ConcurrentHashMap<>();
+
+    /** [AIREVIEW-PLAN-063#1] 兼容旧构造：未注入 dispatch store 时补偿重投静默关闭（null 安全）。 */
+    public ReviewLivenessGuard(
+            ReviewRegistry reviewRegistry,
+            AgentScopeProperties properties,
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ObjectProvider<ConflictDetectionService> conflictDetectionServiceProvider,
+            ObjectProvider<DebateService> debateServiceProvider,
+            ObjectProvider<JudgeService> judgeServiceProvider,
+            ObjectProvider<ReviewCommandService> reviewCommandServiceProvider) {
+        this(reviewRegistry, properties, runtimeAdapterProvider, conflictDetectionServiceProvider,
+                debateServiceProvider, judgeServiceProvider, reviewCommandServiceProvider, null);
+    }
 
     @Autowired
     public ReviewLivenessGuard(
@@ -80,7 +104,8 @@ public class ReviewLivenessGuard implements ReviewEventListener {
             ObjectProvider<ConflictDetectionService> conflictDetectionServiceProvider,
             ObjectProvider<DebateService> debateServiceProvider,
             ObjectProvider<JudgeService> judgeServiceProvider,
-            ObjectProvider<ReviewCommandService> reviewCommandServiceProvider) {
+            ObjectProvider<ReviewCommandService> reviewCommandServiceProvider,
+            ObjectProvider<ReviewDispatchStore> dispatchStoreProvider) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
@@ -88,6 +113,8 @@ public class ReviewLivenessGuard implements ReviewEventListener {
         this.debateServiceProvider = debateServiceProvider;
         this.judgeServiceProvider = judgeServiceProvider;
         this.reviewCommandServiceProvider = reviewCommandServiceProvider;
+        // [AIREVIEW-PLAN-063#1] 可为 null（旧构造/测试缝）；redeliverPendingEnvelopes 内按 null 安全处理。
+        this.dispatchStoreProvider = dispatchStoreProvider;
     }
 
     /** [AIREVIEW-PLAN-060#1] committed events are the heartbeat feed; terminal events forget the attempt. */
@@ -141,9 +168,6 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                     continue;
                 }
                 ReviewStage stage = state.stage;
-                if (!isCoveredStage(stage)) {
-                    continue;
-                }
                 Review review = reviewRegistry.find(reviewId)
                         .filter(candidate -> candidate.attemptNo() == attemptNo
                                 && candidate.stage() == stage)
@@ -153,6 +177,12 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                 }
                 AgentRuntimeAdapter adapter = runtimeAdapterProvider.getIfAvailable();
                 if (adapter == null) {
+                    continue;
+                }
+                // [AIREVIEW-PLAN-063#1] PENDING 信封补偿重投对全部阶段生效（DEBATE 也在内），
+                // 位于阶段覆盖判断之前；每个 commandId 独立计数，上限复用 livenessMaxRewakes。
+                redeliverPendingEnvelopes(review, attemptNo, adapter);
+                if (!isCoveredStage(stage)) {
                     continue;
                 }
                 boolean rewoken = rewake(review, stage, adapter);
@@ -205,6 +235,41 @@ public class ReviewLivenessGuard implements ReviewEventListener {
             sent = true;
         }
         return sent;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-063#1] 补偿重投：把该 attempt 仍 PENDING 且未过期的调度信封重新注入对应角色
+     * （roleLabel/runtimeId 口径与 ReviewWorkflowDispatcher 一致，DEBATE 等未覆盖阶段同样生效）。
+     * 每次扫描每个 commandId 只计一次；超过 {@code livenessMaxRewakes} 后交还既有看门狗收敛路径。
+     * 重投不改变信封状态（仍 PENDING），消费/过期/拒绝语义不变。
+     */
+    private void redeliverPendingEnvelopes(Review review, int attemptNo, AgentRuntimeAdapter adapter) {
+        if (dispatchStoreProvider == null) {
+            return;
+        }
+        ReviewDispatchStore store = dispatchStoreProvider.getIfAvailable();
+        if (store == null) {
+            return;
+        }
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), attemptNo);
+        for (ReviewDispatchCommand command : store.findPending(review.id(), attemptNo)) {
+            if (command.isExpiredAt(Instant.now())) {
+                continue;
+            }
+            int count = redeliveries
+                    .computeIfAbsent(command.commandId().value().toString(), ignored -> new AtomicInteger())
+                    .incrementAndGet();
+            if (count > properties.livenessMaxRewakes()) {
+                continue;
+            }
+            String recipient = runtimeId + "-" + command.recipientRole().name().toLowerCase(Locale.ROOT);
+            adapter.deliverDispatchCommand(runtimeId, recipient,
+                            ReviewDispatchService.envelopeText(command), command)
+                    .subscribe();
+            LOGGER.info("LIVENESS_ENVELOPE_REDELIVERED reviewId={} attemptNo={} commandId={} recipient={} action={} count={}",
+                    review.id().value(), attemptNo, command.commandId().value(), recipient,
+                    command.allowedAction(), count);
+        }
     }
 
     /** [AIREVIEW-PLAN-060#3] 确定性收口入口；key 已在调用前从 states 移除。 */

@@ -16,13 +16,21 @@ import ai.cc.chongming.review.domain.debate.ConflictDetector;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchCommandStatus;
+import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
+import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
+import ai.cc.chongming.review.domain.repository.ReviewDispatchStore;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
+import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import java.time.Duration;
 import java.time.Instant;
@@ -41,6 +49,11 @@ import reactor.core.publisher.Mono;
  * events forget the attempt, and once the re-wake budget is exhausted each covered stage is
  * deterministically closed server-side.
  *
+ * <p>[AIREVIEW-PLAN-063#1,#3] Also verifies that an idle attempt compensate-redelivers every
+ * still-PENDING, unexpired dispatch envelope (DEBATE included) with the dispatcher-consistent
+ * runtime/role labels, honours a per-commandId redelivery budget of {@code livenessMaxRewakes},
+ * and never redelivers while the attempt is still active.
+ *
  * @author wangli
  */
 class ReviewLivenessGuardTests {
@@ -56,6 +69,8 @@ class ReviewLivenessGuardTests {
     @BeforeEach
     void setUp() {
         when(adapter.send(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
+        when(adapter.deliverDispatchCommand(anyString(), anyString(), anyString(), any()))
+                .thenReturn(Mono.empty());
         guard = guardWith(Duration.ZERO, 3);
     }
 
@@ -188,6 +203,69 @@ class ReviewLivenessGuardTests {
     }
 
     // ------------------------------------------------------------------
+    // [AIREVIEW-PLAN-063#1] PENDING envelope compensation redelivery
+    // ------------------------------------------------------------------
+
+    @Test
+    void idleDebateRedeliversPendingEnvelope() {
+        Review review = debateReview();
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchCommand command = pendingDispatchCommand(review, RoleType.PRODUCT);
+        dispatchStore.save(command);
+        guard = guardWithStore(Duration.ZERO, 3, dispatchStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+        String recipient = runtimeId + "-product";
+
+        guard.scan();
+
+        // The envelope is re-injected with the dispatcher-consistent runtime id and role label and
+        // carries the exact persisted command; DEBATE is outside the rewake-covered stages, so no
+        // plain send happens.
+        verify(adapter, times(1)).deliverDispatchCommand(eq(runtimeId), eq(recipient),
+                eq(ReviewDispatchService.envelopeText(command)), eq(command));
+        verify(adapter, never()).send(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void redeliveryCapRespected() {
+        Review review = debateReview();
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchCommand command = pendingDispatchCommand(review, RoleType.PRODUCT);
+        dispatchStore.save(command);
+        guard = guardWithStore(Duration.ZERO, 3, dispatchStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+        String recipient = runtimeId + "-product";
+
+        guard.scan();
+        guard.scan();
+        guard.scan();
+        guard.scan();
+
+        // The per-commandId budget of livenessMaxRewakes=3 is honoured: the 4th scan stops
+        // redelivering while the envelope itself stays PENDING.
+        verify(adapter, times(3)).deliverDispatchCommand(eq(runtimeId), eq(recipient),
+                anyString(), eq(command));
+    }
+
+    @Test
+    void activeAttemptDoesNotRedeliver() {
+        Review review = debateReview();
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchCommand command = pendingDispatchCommand(review, RoleType.PRODUCT);
+        dispatchStore.save(command);
+        guard = guardWithStore(Duration.ofMinutes(10), 3, dispatchStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+
+        guard.scan();
+
+        // A fresh lastActivityAt keeps the attempt below the idle threshold, so no envelope is
+        // redelivered at all.
+        verify(adapter, never()).deliverDispatchCommand(anyString(), anyString(), anyString(), any());
+    }
+
+    // ------------------------------------------------------------------
     // heartbeat reset and terminal cleanup
     // ------------------------------------------------------------------
 
@@ -237,6 +315,32 @@ class ReviewLivenessGuardTests {
                 new RoleActivation(RoleType.BACKEND, "backend", true));
     }
 
+    /** [AIREVIEW-PLAN-063#3] DEBATE 阶段评审（未覆盖阶段，验证补偿重投独立于 rewake 覆盖集合）。 */
+    private Review debateReview() {
+        return review(ReviewStage.DEBATE,
+                new RoleActivation(RoleType.PRODUCT, "product", true),
+                new RoleActivation(RoleType.BACKEND, "backend", true));
+    }
+
+    /** [AIREVIEW-PLAN-063#3] 直接构造一条 PENDING、未过期的调度信封（参照 ReviewDispatchServiceTests 手法）。 */
+    private ReviewDispatchCommand pendingDispatchCommand(Review review, RoleType recipientRole) {
+        return new ReviewDispatchCommand(
+                new CommandId(UUID.randomUUID()),
+                review.id(),
+                review.attemptNo(),
+                ReviewStage.DEBATE,
+                1,
+                recipientRole,
+                DispatchedAction.CHALLENGE,
+                new TopicId(UUID.randomUUID()),
+                new ClaimId(UUID.randomUUID()),
+                null,
+                Instant.now().plusSeconds(600),
+                DispatchCommandStatus.PENDING,
+                new IdempotencyKey("liveness-redelivery:" + UUID.randomUUID()),
+                Instant.now());
+    }
+
     private Review review(ReviewStage stage, RoleActivation... activations) {
         Review review = Review.restore(new ReviewId(UUID.randomUUID()), stage, 1, 0,
                 List.of(activations), Map.of());
@@ -251,9 +355,15 @@ class ReviewLivenessGuardTests {
     }
 
     private ReviewLivenessGuard guardWith(Duration idle, int maxRewakes) {
+        return guardWithStore(idle, maxRewakes, null);
+    }
+
+    /** [AIREVIEW-PLAN-063#3] dispatch store 为 null 时走旧构造，补偿重投静默关闭。 */
+    private ReviewLivenessGuard guardWithStore(Duration idle, int maxRewakes, ReviewDispatchStore dispatchStore) {
         return new ReviewLivenessGuard(registry, properties(idle, maxRewakes),
                 providerOf(adapter), providerOf(conflictDetectionService),
-                providerOf(debateService), providerOf(judgeService), providerOf(commandService));
+                providerOf(debateService), providerOf(judgeService), providerOf(commandService),
+                dispatchStore == null ? null : providerOf(dispatchStore));
     }
 
     private AgentScopeProperties properties(Duration idle, int maxRewakes) {
