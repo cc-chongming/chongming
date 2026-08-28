@@ -633,7 +633,8 @@ onUnmounted(() => loadQueue.dispose());
                 <!-- ── 流式阶段：Scout / Director / Judge ── -->
                 <template v-if="streamPhases.includes(activePhase)">
                     <!-- [AIREVIEW-PLAN-037#2] flow-stream-live：仅流式阶段面板参与视口拉伸与内部滚动，冲突阶段的协调者卡片不参与。 -->
-                    <section class="flow-stream-panel flow-stream-live" aria-label="当前阶段公开运行流">
+                    <!-- [AIREVIEW-PLAN-065#1] 裁决阶段流面板封顶修饰类 -->
+                    <section :class="['flow-stream-panel', 'flow-stream-live', { 'flow-stream-capped': activePhase === 'judge' }]" aria-label="当前阶段公开运行流">
                         <header>
                             <!-- [AIREVIEW-PLAN-049#1] 头像资产替换字符内容 -->
                             <div class="flow-agent-avatar" :data-role="streamOwner.role"><RoleAvatar :role="streamOwner.role" /></div>
