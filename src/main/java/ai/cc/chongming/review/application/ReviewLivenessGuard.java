@@ -241,6 +241,9 @@ public class ReviewLivenessGuard implements ReviewEventListener {
             if (activation.initialReviewCompleted()) {
                 continue;
             }
+            RoleType rt = activation.roleType();
+            // [AIREVIEW-PLAN-071#1] 裁决者/协调者不参与初审收尾，排除误唤醒（与 requireActiveInitialReviewer 同口径）
+            if (rt == RoleType.DIRECTOR || rt == RoleType.JUDGE) continue;
             send(adapter, runtimeId, roleLabel(runtimeId, activation.roleType()),
                     "初审仍未完成，请尽快提交 Claim 并调用 complete_initial_review。"
                             + "若你的初审已完成（initialReviewCompleted），不要重提交任何评估或主张，不要重贴结论，仅用一行确认状态。");

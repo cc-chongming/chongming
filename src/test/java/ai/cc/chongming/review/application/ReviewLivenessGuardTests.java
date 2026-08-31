@@ -99,6 +99,24 @@ class ReviewLivenessGuardTests {
         verify(adapter, never()).send(eq(runtimeId), eq(runtimeId + "-backend"), anyString());
     }
 
+    @Test
+    void idleInitialReviewSkipsDirectorAndJudgeRewake() {
+        Review review = review(ReviewStage.INITIAL_REVIEW,
+                new RoleActivation(RoleType.PRODUCT, "product", false),
+                new RoleActivation(RoleType.JUDGE, "judge", false),
+                new RoleActivation(RoleType.DIRECTOR, "director", false));
+        guard.onCommitted(event(review, ReviewEventType.ROLE_STARTED, ReviewStage.INITIAL_REVIEW));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+
+        guard.scan();
+
+        verify(adapter, times(1)).send(eq(runtimeId), eq(runtimeId + "-product"),
+                contains("初审仍未完成"));
+        // [AIREVIEW-PLAN-071#2] 裁决者/协调者不参与初审收尾，扫描不得误唤醒这两个标签。
+        verify(adapter, never()).send(eq(runtimeId), eq(runtimeId + "-judge"), anyString());
+        verify(adapter, never()).send(eq(runtimeId), eq(runtimeId + "-director"), anyString());
+    }
+
     /**
      * [AIREVIEW-PLAN-070#3][AIREVIEW-PLAN-070#4] The INITIAL_REVIEW re-wake copy must immunise a
      * role that has already completed its initial review against re-submitting assessments/claims
