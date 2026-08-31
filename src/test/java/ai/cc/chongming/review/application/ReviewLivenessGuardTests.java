@@ -16,19 +16,28 @@ import ai.cc.chongming.review.config.AgentScopeProperties;
 import ai.cc.chongming.review.domain.debate.ConflictDetector;
 import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
+import ai.cc.chongming.review.domain.model.Claim;
+import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.CommandId;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchCommandStatus;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchedAction;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTopicStatus;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
+import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurnType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.IdempotencyKey;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleActivation;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.TurnId;
 import ai.cc.chongming.review.domain.repository.ReviewDispatchStore;
+import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentRuntimeAdapter;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStore;
@@ -63,6 +72,7 @@ class ReviewLivenessGuardTests {
 
     private final InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
     private final AgentRuntimeAdapter adapter = mock(AgentRuntimeAdapter.class);
+    private final InMemoryReviewDebateStore debateStore = new InMemoryReviewDebateStore();
     private final ConflictDetectionService conflictDetectionService = mock(ConflictDetectionService.class);
     private final DebateService debateService = mock(DebateService.class);
     private final JudgeService judgeService = mock(JudgeService.class);
@@ -270,6 +280,25 @@ class ReviewLivenessGuardTests {
     }
 
     @Test
+    void redeliverySkippedWhenRecipientActiveSinceIssuance() {
+        Review review = debateReview();
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchCommand command = pendingDispatchCommand(review, RoleType.PRODUCT);
+        dispatchStore.save(command);
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+        // [AIREVIEW-PLAN-075#2] 接收方 runtime 从命令签发之后一直有 trace 活动：重投被跳过，
+        // 不会向一个仍活跃的接收方重复塞同一条信封。
+        ReviewRuntimeTraceRegistry traceRegistry = mock(ReviewRuntimeTraceRegistry.class);
+        when(traceRegistry.lastObservedAt(runtimeId)).thenReturn(Optional.of(command.createdAt().plusSeconds(30)));
+        guard = guardWithStoreAndTrace(Duration.ZERO, 3, dispatchStore, traceRegistry);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+
+        guard.scan();
+
+        verify(adapter, never()).deliverDispatchCommand(anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
     void redeliveryCapRespected() {
         Review review = debateReview();
         InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
@@ -305,6 +334,98 @@ class ReviewLivenessGuardTests {
         // A fresh lastActivityAt keeps the attempt below the idle threshold, so no envelope is
         // redelivered at all.
         verify(adapter, never()).deliverDispatchCommand(anyString(), anyString(), anyString(), any());
+    }
+
+    // ------------------------------------------------------------------
+    // [AIREVIEW-PLAN-076#3] DEBATE 焦点议题静默关题
+    // ------------------------------------------------------------------
+
+    @Test
+    void quiescentFocusTopicAutoClosesResolved() throws Exception {
+        Review review = debateReview();
+        Claim support = claim(review, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(review, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTurn challenge = new DebateTurn(new TurnId(UUID.randomUUID()), new TopicId(UUID.randomUUID()), 1,
+                RoleType.BACKEND, RoleType.PRODUCT, DebateTurnType.CHALLENGE, support.claimId(), null,
+                "后端质疑", List.of(), null, null, Instant.now());
+        DebateTurn rebuttal = new DebateTurn(new TurnId(UUID.randomUUID()), challenge.topicId(), 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.REBUTTAL, support.claimId(),
+                challenge.turnId(), "产品答辩", List.of(), null, null, Instant.now());
+        DebateTopic topic = DebateTopic.restore(challenge.topicId(), review.id(), "api.contract",
+                List.of(support.claimId(), oppose.claimId()), DebateTopicStatus.REBUTTED, 1,
+                List.of(challenge, rebuttal), null, null);
+        debateStore.saveTopic(topic);
+        debateStore.saveTurn(review.id(), challenge);
+        debateStore.saveTurn(review.id(), rebuttal);
+        guard = guardWithDebateStore(Duration.ZERO, 3, new InMemoryReviewDispatchStore(), debateStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        ageDebateSignals(guard, review.id(), review.attemptNo(), Instant.EPOCH);
+
+        guard.scan();
+
+        verify(debateService, times(1)).closeTopic(eq(review), argThat(command ->
+                command.topicId().equals(topic.id())
+                        && command.status() == DebateTopicStatus.RESOLVED
+                        && command.metadata().idempotencyKey().value()
+                                .equals("liveness-close:" + topic.id().value() + ":1")));
+        verify(debateService, never()).beginJudging(any());
+    }
+
+    @Test
+    void quiescentWithoutTurnsEscalates() throws Exception {
+        Review review = debateReview();
+        Claim oppose = claim(review, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "api.contract",
+                List.of(oppose.claimId()));
+        debateStore.saveTopic(topic);
+        guard = guardWithDebateStore(Duration.ZERO, 3, new InMemoryReviewDispatchStore(), debateStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        ageDebateSignals(guard, review.id(), review.attemptNo(), Instant.EPOCH);
+
+        guard.scan();
+
+        verify(debateService, times(1)).closeTopic(eq(review), argThat(command ->
+                command.topicId().equals(topic.id())
+                        && command.status() == DebateTopicStatus.ESCALATED
+                        && command.metadata().idempotencyKey().value()
+                                .equals("liveness-close:" + topic.id().value() + ":1")));
+        verify(debateService, never()).beginJudging(any());
+    }
+
+    @Test
+    void allTerminalAutoBeginsJudging() throws Exception {
+        Review review = debateReview();
+        Claim support = claim(review, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(review, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTurn challenge = new DebateTurn(new TurnId(UUID.randomUUID()), new TopicId(UUID.randomUUID()), 1,
+                RoleType.BACKEND, RoleType.PRODUCT, DebateTurnType.CHALLENGE, support.claimId(), null,
+                "后端质疑", List.of(), null, null, Instant.now());
+        DebateTurn rebuttal = new DebateTurn(new TurnId(UUID.randomUUID()), challenge.topicId(), 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.REBUTTAL, support.claimId(),
+                challenge.turnId(), "产品答辩", List.of(), null, null, Instant.now());
+        DebateTopic topic = DebateTopic.restore(challenge.topicId(), review.id(), "api.contract",
+                List.of(support.claimId(), oppose.claimId()), DebateTopicStatus.REBUTTED, 1,
+                List.of(challenge, rebuttal), null, null);
+        debateStore.saveTopic(topic);
+        debateStore.saveTurn(review.id(), challenge);
+        debateStore.saveTurn(review.id(), rebuttal);
+        // closeTopic mock 同步把持久化议题改为终态，模拟真实 DebateService 的收敛副作用。
+        when(debateService.closeTopic(eq(review), any())).thenAnswer(invocation -> {
+            DebateToolCommands.CloseTopic command = invocation.getArgument(1);
+            DebateTopic stored = debateStore.findTopic(review.id(), command.topicId()).orElseThrow();
+            stored.close(new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                    command.status(), command.publicResolution(), Instant.now());
+            debateStore.saveTopic(stored);
+            return new DebateService.TopicResult(stored, false);
+        });
+        guard = guardWithDebateStore(Duration.ZERO, 3, new InMemoryReviewDispatchStore(), debateStore);
+        guard.onCommitted(event(review, ReviewEventType.DEBATE_TOPIC_OPENED, ReviewStage.DEBATE));
+        ageDebateSignals(guard, review.id(), review.attemptNo(), Instant.EPOCH);
+
+        guard.scan();
+
+        verify(debateService, times(1)).closeTopic(eq(review), any());
+        verify(debateService, times(1)).beginJudging(review);
     }
 
     // ------------------------------------------------------------------
@@ -480,6 +601,14 @@ class ReviewLivenessGuardTests {
                 new RoleActivation(RoleType.BACKEND, "backend", true));
     }
 
+    /** [AIREVIEW-PLAN-076#3] 新建一条已持久化到 debateStore 的 Claim，供静默关题用例组装议题。 */
+    private Claim claim(Review owner, RoleType role, ClaimSeverity severity, ClaimPosition position) {
+        Claim created = new Claim(new ClaimId(UUID.randomUUID()), owner.id(), role,
+                "api.contract", severity, position, "命题-" + role, "理由-" + role, List.of());
+        debateStore.saveClaim(created);
+        return created;
+    }
+
     /** [AIREVIEW-PLAN-063#3] 直接构造一条 PENDING、未过期的调度信封（参照 ReviewDispatchServiceTests 手法）。 */
     private ReviewDispatchCommand pendingDispatchCommand(Review review, RoleType recipientRole) {
         return new ReviewDispatchCommand(
@@ -540,6 +669,27 @@ class ReviewLivenessGuardTests {
                 null, traceRegistry == null ? null : providerOf(traceRegistry));
     }
 
+    /** [AIREVIEW-PLAN-075#2] 同时注入 dispatch store 与 trace probe，供重投跳过用例使用。 */
+    private ReviewLivenessGuard guardWithStoreAndTrace(Duration idle, int maxRewakes,
+            ReviewDispatchStore dispatchStore, ReviewRuntimeTraceRegistry traceRegistry) {
+        return new ReviewLivenessGuard(registry, properties(idle, maxRewakes),
+                providerOf(adapter), providerOf(conflictDetectionService),
+                providerOf(debateService), providerOf(judgeService), providerOf(commandService),
+                dispatchStore == null ? null : providerOf(dispatchStore),
+                traceRegistry == null ? null : providerOf(traceRegistry));
+    }
+
+    /** [AIREVIEW-PLAN-076#3] 注入 dispatch store 与 debate store 供 DEBATE 静默关题用例使用。 */
+    private ReviewLivenessGuard guardWithDebateStore(Duration idle, int maxRewakes,
+            ReviewDispatchStore dispatchStore, InMemoryReviewDebateStore debateStore) {
+        return new ReviewLivenessGuard(registry, properties(idle, maxRewakes),
+                providerOf(adapter), providerOf(conflictDetectionService),
+                providerOf(debateService), providerOf(judgeService), providerOf(commandService),
+                dispatchStore == null ? null : providerOf(dispatchStore),
+                null,
+                providerOf(debateStore));
+    }
+
     /** [AIREVIEW-PLAN-072#4] 用反射把领域心跳拨回过去，跳过 Thread.sleep 的时序不确定性。 */
     @SuppressWarnings("unchecked")
     private static void ageState(ReviewLivenessGuard guard, ReviewId reviewId, int attemptNo, Instant at)
@@ -551,6 +701,22 @@ class ReviewLivenessGuardTests {
         java.lang.reflect.Field lastActivityField = state.getClass().getDeclaredField("lastActivityAt");
         lastActivityField.setAccessible(true);
         lastActivityField.set(state, at);
+    }
+
+    /** [AIREVIEW-PLAN-076#3] 用反射把辩论静默关题观察窗（回合/信封双时间）拨回过去。 */
+    @SuppressWarnings("unchecked")
+    private static void ageDebateSignals(ReviewLivenessGuard guard, ReviewId reviewId, int attemptNo, Instant at)
+            throws Exception {
+        java.lang.reflect.Field statesField = ReviewLivenessGuard.class.getDeclaredField("states");
+        statesField.setAccessible(true);
+        Map<String, Object> states = (Map<String, Object>) statesField.get(guard);
+        Object state = states.get(reviewId.value() + ":" + attemptNo);
+        java.lang.reflect.Field turnField = state.getClass().getDeclaredField("lastDebateTurnAt");
+        turnField.setAccessible(true);
+        turnField.set(state, at);
+        java.lang.reflect.Field envelopeField = state.getClass().getDeclaredField("lastEnvelopeAt");
+        envelopeField.setAccessible(true);
+        envelopeField.set(state, at);
     }
 
     private AgentScopeProperties properties(Duration idle, int maxRewakes) {

@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.config.AgentScopeProperties;
+import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
@@ -15,15 +16,18 @@ import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -38,17 +42,19 @@ import org.springframework.stereotype.Service;
  * @author wangli
  */
 @Service
-public class DebateConvergenceGuard {
+public class DebateConvergenceGuard implements ReviewEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(DebateConvergenceGuard.class);
 
     private final ReviewRegistry reviewRegistry;
-    private final DebateService debateService;
+    private final ObjectProvider<DebateService> debateServiceProvider;
     private final ReviewDebateStore debateStore;
     private final ReviewDispatchStore dispatchStore;
     private final AgentScopeProperties properties;
+    private final ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider;
     private final ConcurrentMap<String, WakeState> states = new ConcurrentHashMap<>();
 
+    // [AIREVIEW-PLAN-075#1] 旧构造兼容测试缝：直接注入 DebateService 实例。
     public DebateConvergenceGuard(
             ReviewRegistry reviewRegistry,
             DebateService debateService,
@@ -57,18 +63,60 @@ public class DebateConvergenceGuard {
         this(reviewRegistry, debateService, debateStore, null, properties);
     }
 
-    @Autowired
+    // [AIREVIEW-PLAN-075#1] 旧 5 参构造：不注入运行时 trace 探针，no-progress 判定退化为旧语义。
     public DebateConvergenceGuard(
             ReviewRegistry reviewRegistry,
             DebateService debateService,
             ReviewDebateStore debateStore,
             ReviewDispatchStore dispatchStore,
             AgentScopeProperties properties) {
+        this(reviewRegistry, debateService, debateStore, dispatchStore, properties, null);
+    }
+
+    // [AIREVIEW-PLAN-075#1] 旧 6 参构造（direct DebateService）：测试缝，保留既有调用签名。
+    public DebateConvergenceGuard(
+            ReviewRegistry reviewRegistry,
+            DebateService debateService,
+            ReviewDebateStore debateStore,
+            ReviewDispatchStore dispatchStore,
+            AgentScopeProperties properties,
+            ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider) {
+        this(reviewRegistry, fixedProvider(debateService), debateStore, dispatchStore, properties,
+                traceRegistryProvider);
+    }
+
+    // [AIREVIEW-PLAN-075#1] Spring 首选构造：DebateService 经 ObjectProvider 懒解析，
+    // 避免 ReviewEventService -> guard -> DebateService -> ReviewEventService 的 Bean 循环。
+    @Autowired
+    public DebateConvergenceGuard(
+            ReviewRegistry reviewRegistry,
+            ObjectProvider<DebateService> debateServiceProvider,
+            ReviewDebateStore debateStore,
+            ReviewDispatchStore dispatchStore,
+            AgentScopeProperties properties,
+            ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
-        this.debateService = Objects.requireNonNull(debateService, "debateService must not be null");
+        this.debateServiceProvider = Objects.requireNonNull(debateServiceProvider,
+                "debateServiceProvider must not be null");
         this.debateStore = Objects.requireNonNull(debateStore, "debateStore must not be null");
         this.dispatchStore = dispatchStore;
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.traceRegistryProvider = traceRegistryProvider;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-075#1] Every committed domain event refreshes the per-attempt activity clock.
+     * Only already-tracked attempts are updated, so this listener never keeps untracked reviews
+     * resident. Terminal cleanup continues to be driven by {@link #clear(ReviewId, int)}.
+     */
+    @Override
+    public void onCommitted(ReviewEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        WakeState state = states.get(key(event.reviewId(), event.attemptNo()));
+        if (state == null) {
+            return;
+        }
+        state.lastActivityAt = Instant.now();
     }
 
     /**
@@ -89,10 +137,14 @@ public class DebateConvergenceGuard {
                 && elapsed.compareTo(properties.debateConvergenceTimeout().multipliedBy(topicScale)) < 0) {
             return;
         }
+        // [AIREVIEW-PLAN-075#1] 记录收敛瞬间的领域活动与运行时活动，供强制收敛日志诊断。
+        Instant lastActivityAt = state.lastActivityAt;
+        Instant lastTraceActivity = lastTraceActivity(reviewId, attemptNo);
         // Drop the state before converging so events published by the convergence itself never
         // re-enter with a stale counter.
         states.remove(key);
-        forceConvergence(reviewId, attemptNo, wakes, elapsed, "wake-or-wall-clock");
+        forceConvergence(reviewId, attemptNo, wakes, elapsed, "wake-or-wall-clock", lastActivityAt,
+                lastTraceActivity);
     }
 
     /** Forgetting the attempt state on judging/terminal events keeps counters attempt-scoped. */
@@ -112,13 +164,16 @@ public class DebateConvergenceGuard {
         for (Map.Entry<String, WakeState> entry : states.entrySet()) {
             WakeState state = entry.getValue();
             Duration elapsed = Duration.between(state.firstWakeAt, now);
-            Duration idle = Duration.between(state.lastWakeAt, now);
             // [AIREVIEW-PLAN-059#6] 墙钟预算按议题数缩放；no-progress 与 expired-dispatch 不缩放。
             String[] parts = entry.getKey().split(":");
+            ReviewId parsedReviewId = null;
+            int parsedAttemptNo = -1;
             int topicScale = 1;
             if (parts.length == 2) {
                 try {
-                    topicScale = topicScale(new ReviewId(UUID.fromString(parts[0])));
+                    parsedReviewId = new ReviewId(UUID.fromString(parts[0]));
+                    parsedAttemptNo = Integer.parseInt(parts[1]);
+                    topicScale = topicScale(parsedReviewId);
                 } catch (IllegalArgumentException ignored) {
                     //  malformed key: keep the unscaled budget; the parse below skips it anyway.
                 }
@@ -126,20 +181,30 @@ public class DebateConvergenceGuard {
             String reason;
             if (hasExpiredPending(entry.getKey(), now)) {
                 reason = "expired-dispatch";
-            } else if (idle.compareTo(properties.debateNoProgressTimeout()) >= 0) {
-                reason = "no-progress";
-            } else if (elapsed.compareTo(properties.debateConvergenceTimeout().multipliedBy(topicScale)) >= 0) {
-                reason = "wall-clock";
             } else {
-                continue;
+                // [AIREVIEW-PLAN-075#1] no-progress 判定纳入领域事件活动与 runtime trace 最后观测时间；
+                // 三者取最新，任一通道有新活动都不算停摆。
+                Instant last = lastActivity(state, parsedReviewId, parsedAttemptNo);
+                Duration idle = Duration.between(last, now);
+                if (idle.compareTo(properties.debateNoProgressTimeout()) >= 0) {
+                    reason = "no-progress";
+                } else if (elapsed.compareTo(properties.debateConvergenceTimeout().multipliedBy(topicScale)) >= 0) {
+                    reason = "wall-clock";
+                } else {
+                    continue;
+                }
             }
+            // [AIREVIEW-PLAN-075#1] 记录收敛瞬间的领域活动与运行时活动，供强制收敛日志诊断。
+            Instant lastActivityAt = state.lastActivityAt;
+            Instant lastTraceActivity = parsedReviewId == null
+                    ? Instant.EPOCH : lastTraceActivity(parsedReviewId, parsedAttemptNo);
             states.remove(entry.getKey());
             if (parts.length != 2) {
                 continue;
             }
             try {
-                forceConvergence(new ReviewId(UUID.fromString(parts[0])), Integer.parseInt(parts[1]),
-                        state.wakes.get(), elapsed, reason);
+                forceConvergence(parsedReviewId, parsedAttemptNo,
+                        state.wakes.get(), elapsed, reason, lastActivityAt, lastTraceActivity);
             } catch (IllegalArgumentException ignored) {
                 // A malformed key can only come from programming error; never kill the scan.
             }
@@ -168,11 +233,20 @@ public class DebateConvergenceGuard {
         }
     }
 
-    private void forceConvergence(ReviewId reviewId, int attemptNo, int wakes, Duration elapsed, String reason) {
+    private void forceConvergence(ReviewId reviewId, int attemptNo, int wakes, Duration elapsed, String reason,
+            Instant lastActivity, Instant lastTraceActivity) {
         Review review = reviewRegistry.find(reviewId)
                 .filter(candidate -> candidate.attemptNo() == attemptNo)
                 .orElse(null);
         if (review == null) {
+            return;
+        }
+        // [AIREVIEW-PLAN-075#1] 懒解析 DebateService：既打破 Bean 循环，也避免测试或停机窗口
+        // 中缺少该服务时直接抛 NPE；此路径只是兜底收口，缺服务时明确跳过并告警。
+        DebateService debateService = debateServiceProvider.getIfAvailable();
+        if (debateService == null) {
+            log.warn("DEBATE_FORCED_CONVERGENCE_SKIPPED reviewId={} attemptNo={} reason=DEBATE_SERVICE_MISSING",
+                    reviewId.value(), attemptNo);
             return;
         }
         synchronized (review) {
@@ -193,9 +267,45 @@ public class DebateConvergenceGuard {
                         "服务端强制收敛：辩论编排超出预算，本议题未达成公开决议，升级给 Judge 裁决。"));
             }
             debateService.beginJudging(review);
-            log.warn("DEBATE_FORCED_CONVERGENCE reviewId={} attemptNo={} directorWakes={} elapsed={} reason={} escalatedTopics={}",
-                    reviewId.value(), attemptNo, wakes, elapsed, reason, openTopics.size());
+            // [AIREVIEW-PLAN-075#1] 扩展强制收敛日志：领域活动与运行时活动分别记录，便于判断
+            // 触发原因是模型停摆还是仅缺少可观测事件。
+            log.warn("DEBATE_FORCED_CONVERGENCE reviewId={} attemptNo={} directorWakes={} elapsed={} reason={} escalatedTopics={} lastActivity={} lastTraceActivity={}",
+                    reviewId.value(), attemptNo, wakes, elapsed, reason, openTopics.size(),
+                    lastActivity, lastTraceActivity);
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-075#1] no-progress 活性基准 = max(wake, committed event, runtime trace)；
+     * 任一通道有新活动都会推迟 no-progress 收敛。key 畸形时退回 wake/domain 两个通道。
+     */
+    private Instant lastActivity(WakeState state, ReviewId reviewId, int attemptNo) {
+        // [AIREVIEW-PLAN-075#1] EPOCH 哨兵值表示“该通道从未观测到活动”，必须排除在 max 之外，
+        // 否则会把无领域事件/无 trace 的旧语义污染成永远不 idle 或错误 idle。
+        Instant last = state.lastWakeAt;
+        Instant domainActivity = state.lastActivityAt;
+        if (!Instant.EPOCH.equals(domainActivity) && domainActivity.isAfter(last)) {
+            last = domainActivity;
+        }
+        if (reviewId == null) {
+            return last;
+        }
+        Instant traceActivity = lastTraceActivity(reviewId, attemptNo);
+        if (!Instant.EPOCH.equals(traceActivity) && traceActivity.isAfter(last)) {
+            last = traceActivity;
+        }
+        return last;
+    }
+
+    /** [AIREVIEW-PLAN-075#1] 未配置 probe 或 runtime 无 trace 时回退 epoch，保持旧 no-progress 语义。 */
+    private Instant lastTraceActivity(ReviewId reviewId, int attemptNo) {
+        ReviewRuntimeTraceRegistry traceRegistry = traceRegistryProvider == null
+                ? null : traceRegistryProvider.getIfAvailable();
+        if (traceRegistry == null) {
+            return Instant.EPOCH;
+        }
+        return traceRegistry.lastObservedAt(ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo))
+                .orElse(Instant.EPOCH);
     }
 
     /** [AIREVIEW-PLAN-059#6] 预算缩放系数 = max(1, 已登记议题数)；串行关闭或 store 异常时回退 1。 */
@@ -220,9 +330,42 @@ public class DebateConvergenceGuard {
         return reviewId.value() + ":" + attemptNo;
     }
 
+    /** [AIREVIEW-PLAN-075#1] 兼容旧构造签名的固定值 {@link ObjectProvider}，返回同一个实例。 */
+    private static <T> ObjectProvider<T> fixedProvider(T value) {
+        Objects.requireNonNull(value, "value must not be null");
+        return new ObjectProvider<>() {
+            @Override
+            public T getObject() {
+                return value;
+            }
+
+            @Override
+            public T getObject(Object... args) {
+                return value;
+            }
+
+            @Override
+            public T getIfAvailable() {
+                return value;
+            }
+
+            @Override
+            public T getIfUnique() {
+                return value;
+            }
+
+            @Override
+            public Iterator<T> iterator() {
+                return List.of(value).iterator();
+            }
+        };
+    }
+
     private static final class WakeState {
         private final Instant firstWakeAt = Instant.now();
         private final AtomicInteger wakes = new AtomicInteger();
         private volatile Instant lastWakeAt = Instant.now();
+        // [AIREVIEW-PLAN-075#1] 领域事件活动，默认 epoch 使旧 no-progress 语义（只看 lastWakeAt）不变。
+        private volatile Instant lastActivityAt = Instant.EPOCH;
     }
 }

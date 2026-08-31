@@ -77,6 +77,24 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     /** [AIREVIEW-PLAN-059#4] Server challenge re-armed when the serial focus advances to a two-sided never-challenged topic. */
     private static final String SERVER_CHALLENGE_ON_FOCUS_ADVANCE = "SERVER_CHALLENGE_ON_FOCUS_ADVANCE";
 
+    /** [AIREVIEW-PLAN-076#2] 质询队列在答辩提交后推进：完成一个 OPPOSE 角色的 REBUTTAL 即放行下一角色。 */
+    private static final String SERVER_CHALLENGE_AFTER_REBUTTAL = "SERVER_CHALLENGE_AFTER_REBUTTAL";
+
+    /** [AIREVIEW-PLAN-076#2] 信封被消费后立即推进同议题质询队列。 */
+    private static final String SERVER_CHALLENGE_AFTER_COMMAND_CONSUMED = "SERVER_CHALLENGE_AFTER_COMMAND_CONSUMED";
+
+    /** [AIREVIEW-PLAN-076#2] 信封过期后立即推进同议题质询队列。 */
+    private static final String SERVER_CHALLENGE_AFTER_COMMAND_EXPIRED = "SERVER_CHALLENGE_AFTER_COMMAND_EXPIRED";
+
+    /** [AIREVIEW-PLAN-076#2] 信封被拒绝后立即推进同议题质询队列。 */
+    private static final String SERVER_CHALLENGE_AFTER_COMMAND_REJECTED = "SERVER_CHALLENGE_AFTER_COMMAND_REJECTED";
+
+    /** [AIREVIEW-PLAN-076#2] 议题进入第二轮后为该轮放行首个尚未质询的 OPPOSE 角色。 */
+    private static final String SERVER_CHALLENGE_AFTER_ROUND_2_STARTED = "SERVER_CHALLENGE_AFTER_ROUND_2_STARTED";
+
+    /** [AIREVIEW-PLAN-075#3] DEBATE 阶段相同唤醒文案的重复 wakeDirector 冷却窗口。 */
+    private static final Duration COORDINATOR_WAKE_COOLDOWN = Duration.ofSeconds(60);
+
     private final ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider;
     private final ReviewRegistry reviewRegistry;
     private final ReviewDispatchService dispatchService;
@@ -88,6 +106,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     private final ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider;
     private final ObjectProvider<ReviewOrchestrationService> orchestrationProvider;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
+    // [AIREVIEW-PLAN-075#3] per-attempt wake 冷却状态：lastTurnEventAt / lastWakeAt / 上次文案 hash。
+    private final ConcurrentMap<String, WakeCooldownState> wakeCooldowns = new ConcurrentHashMap<>();
 
     public ReviewWorkflowDispatcher(ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider) {
         this(runtimeAdapterProvider, null, null, null, null, null);
@@ -157,6 +177,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
 
     @Override
     public void onCommitted(ReviewEvent event) {
+        // [AIREVIEW-PLAN-075#3] 记录 per-attempt 的辩论回合事件时间，供 DEBATE 阶段 wakeDirector 冷却判断。
+        recordTurnActivity(event);
         // [AIREVIEW-PLAN-069#4] 成功完成路径没有 REVIEW_COMPLETED 事件类型（已核对枚举）；真实收口事实
         // 是 stage 已进入 COMPLETED 的事件（如 NOTIFICATION_SENT：markDelivered 先 transitionTo(COMPLETED)
         // 再发布）。该事件触发一次统一终态清理并结束分发，避免 per-attempt 的 sink/订阅/跟踪永久驻留。
@@ -174,7 +196,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         } else if (event.type() == ReviewEventType.DEBATE_TOPIC_OPENED) {
             // [AIREVIEW-PLAN-046#1] Opening a two-sided topic is the first server-side challenge
             // trigger; the Director wake below states that challenges are server-issued.
-            issueChallengeDispatches(event, event.topicId(), SERVER_CHALLENGE_AFTER_OPPOSITION);
+            // [AIREVIEW-PLAN-076#2] 开题只放行队列中第一个尚未质询的 OPPOSE 角色。
+            advanceChallengeQueue(event, event.topicId(), SERVER_CHALLENGE_AFTER_OPPOSITION);
             // [AIREVIEW-PLAN-059#4] 串行辩论：唤醒附当前焦点，协调者仅驱动焦点议题。
             wakeDirector(event, "A debate topic opened. Direct the debate exclusively through dispatch_debate_action: issue one directed dispatch command per intended write action (recipientRole, allowedAction, topicId, and the target Claim or Turn). The server validates and delivers each envelope; never instruct roles with free text and never grant an action beyond one command. challenges are server-issued; do not dispatch CHALLENGE yourself."
                     + " （串行辩论）当前焦点议题=" + focusIdOf(event)
@@ -186,6 +209,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         } else if (event.type() == ReviewEventType.DEBATE_ROUND_2_STARTED) {
             // [AIREVIEW-PLAN-047#1] Round two is topic-level: only the named topic advances; the
             // review stays in the single DEBATE phase while every other topic keeps its own round.
+            // [AIREVIEW-PLAN-076#2] 议题进入第二轮后，放行该轮首个尚未质询的 OPPOSE 角色。
+            advanceChallengeQueue(event, event.topicId(), SERVER_CHALLENGE_AFTER_ROUND_2_STARTED);
             wakeDirector(event, "Debate round two started only for topic "
                     + (event.topicId() == null ? "-" : event.topicId().value())
                     + " (仅该议题进入第二轮，其余议题保持各自轮次，评审仍处于 DEBATE 阶段). "
@@ -210,19 +235,30 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                         .orElse("所有议题已终态，使用 begin_judging。 ");
                 wakeDirector(event, "A debate topic was closed. " + focusText
                         + "If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
-                nextFocus.ifPresent(topic -> issueChallengeDispatches(event, topic.id(), SERVER_CHALLENGE_ON_FOCUS_ADVANCE));
+                nextFocus.ifPresent(topic -> advanceChallengeQueue(event, topic.id(), SERVER_CHALLENGE_ON_FOCUS_ADVANCE));
             }
         } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
             issueRebuttalDispatch(event);
             wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
-        } else if (event.type() == ReviewEventType.REBUTTAL_SUBMITTED
-                || event.type() == ReviewEventType.POSITION_CHANGED
+        } else if (event.type() == ReviewEventType.REBUTTAL_SUBMITTED) {
+            // [AIREVIEW-PLAN-076#2] 一条答辩提交后，质询队列推进到下一位尚未质询的 OPPOSE 角色。
+            advanceChallengeQueue(event, event.topicId(), SERVER_CHALLENGE_AFTER_REBUTTAL);
+            wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
+        } else if (event.type() == ReviewEventType.POSITION_CHANGED
                 || event.type() == ReviewEventType.EVIDENCE_REQUESTED) {
             wakeDirector(event, "A debate turn was committed. Review the public context and decide whether to close the topic, begin_second_round(topicId) for that topic alone, or continue the bounded debate.");
         } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_ISSUED) {
             deliverDispatchEnvelope(event);
+        } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_CONSUMED) {
+            // [AIREVIEW-PLAN-076#2] 一条信封被消费后，其角色已完成本轮质询，推进到下一位角色。
+            advanceChallengeQueue(event, event.topicId(), SERVER_CHALLENGE_AFTER_COMMAND_CONSUMED);
         } else if (event.type() == ReviewEventType.DISPATCH_COMMAND_EXPIRED
                 || event.type() == ReviewEventType.DISPATCH_COMMAND_REJECTED) {
+            // [AIREVIEW-PLAN-076#2] 过期/拒绝的信封不再阻塞队列：下一触发点放行下一位角色。
+            advanceChallengeQueue(event, event.topicId(),
+                    event.type() == ReviewEventType.DISPATCH_COMMAND_EXPIRED
+                            ? SERVER_CHALLENGE_AFTER_COMMAND_EXPIRED
+                            : SERVER_CHALLENGE_AFTER_COMMAND_REJECTED);
             LOGGER.info("REVIEW_DISPATCH_COMMAND_DROPPED reviewId={} type={} commandId={} reason={}",
                     event.reviewId().value(), event.type(),
                     event.payload().getOrDefault("commandId", "-"),
@@ -326,7 +362,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
      * [AIREVIEW-PLAN-046#1] CLAIM_SUBMITTED trigger of the unified server-side challenge dispatch:
      * only a SUPPORT claim committed during a debate round that completes the support side of an
      * objector-only topic (its claim is mounted on exactly one topic that had no SUPPORT before)
-     * hands over to the shared {@link #issueChallengeDispatches} rule.
+     * hands over to the shared {@link #advanceChallengeQueue(ReviewEvent, TopicId, String)} rule.
      */
     private void issueChallengeAfterDefenseClaim(ReviewEvent event) {
         if (dispatchService == null || reviewRegistry == null || debateStore == null || event.claimId() == null) {
@@ -370,18 +406,15 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                     event.reviewId().value(), topicId.value(), event.claimId().value());
             return;
         }
-        issueChallengeDispatches(event, topicId, SERVER_CHALLENGE_AFTER_DEFENSE);
+        advanceChallengeQueue(event, topicId, SERVER_CHALLENGE_AFTER_DEFENSE);
     }
 
     /**
-     * [AIREVIEW-PLAN-046#1] Unified server-side challenge dispatch. When a debate-round topic holds
-     * at least one SUPPORT and one OPPOSE claim and no CHALLENGE turn has ever been committed, the
-     * server issues one CHALLENGE envelope per distinct OPPOSE role (never to the target SUPPORT's
-     * own role), targeting the topic's highest-severity SUPPORT claim (P0 most severe; ties resolved
-     * by mount order). One idempotency key per (topic, recipient role) keeps both triggers and any
-     * coordinator re-dispatch from stacking envelopes, and a single failing recipient is only logged.
+     * [AIREVIEW-PLAN-076#1,#2] 统一质询队列入口：从业务事件解析 review/topic，先做阶段、终态与
+     * 串行焦点闸门，再交给 {@link #advanceChallengeQueue(Review, DebateTopic, int, String)} 核心推进。
+     * 取代 PLAN-046 的全扇出语义——同一轮每个 OPPOSE 角色依次放行，不再一次性向所有角色签发。
      */
-    private void issueChallengeDispatches(ReviewEvent event, TopicId topicId, String reason) {
+    private void advanceChallengeQueue(ReviewEvent event, TopicId topicId, String reason) {
         if (dispatchService == null || reviewRegistry == null || debateStore == null || topicId == null) {
             return;
         }
@@ -389,23 +422,23 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 .filter(candidate -> candidate.attemptNo() == event.attemptNo())
                 .orElse(null);
         if (review == null) {
-            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=REVIEW_NOT_FOUND",
+            LOGGER.warn("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=REVIEW_NOT_FOUND",
                     event.reviewId().value(), topicId.value());
             return;
         }
         if (!isDebateStage(review.stage())) {
-            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=STAGE_NOT_DEBATE stage={}",
+            LOGGER.warn("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=STAGE_NOT_DEBATE stage={}",
                     event.reviewId().value(), topicId.value(), review.stage());
             return;
         }
         DebateTopic topic = debateStore.findTopic(review.id(), topicId).orElse(null);
         if (topic == null) {
-            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=TOPIC_NOT_FOUND",
+            LOGGER.warn("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=TOPIC_NOT_FOUND",
                     event.reviewId().value(), topicId.value());
             return;
         }
         if (topic.status().isTerminal()) {
-            LOGGER.warn("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=TOPIC_TERMINAL status={}",
+            LOGGER.warn("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=TOPIC_TERMINAL status={}",
                     event.reviewId().value(), topicId.value(), topic.status());
             return;
         }
@@ -413,30 +446,30 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         if (serialEnabled()) {
             Optional<DebateTopic> focus = DebateFocusResolver.focus(debateStore, review.id());
             if (focus.isPresent() && !focus.get().id().equals(topic.id())) {
-                LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=SERIAL_NOT_FOCUS focusTopicId={}",
+                LOGGER.info("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=SERIAL_NOT_FOCUS focusTopicId={}",
                         review.id().value(), topicId.value(), focus.get().id().value());
                 return;
             }
         }
-        // A topic the coordinator already drove into a challenge round (manual dispatch or legacy
-        // flow) must never be re-armed: the next envelope is the rebuttal, not another challenge.
-        boolean alreadyChallenged = debateStore.findTurns(review.id(), topicId).stream()
-                .anyMatch(turn -> turn.turnType() == DebateTurnType.CHALLENGE);
-        if (alreadyChallenged) {
-            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=CHALLENGE_TURN_EXISTS",
-                    event.reviewId().value(), topicId.value());
-            return;
-        }
         // [AIREVIEW-PLAN-047#1] The envelope round follows the topic's own round: a topic whose
         // second round began gets round-two challenge envelopes, everything else round one.
         int round = topic.currentRound() == 2 ? 2 : 1;
+        advanceChallengeQueue(review, topic, round, reason);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-076#1] 队列串行核心：按挂载序选择第一个满足“本轮尚无 CHALLENGE turn 且无 PENDING
+     * CHALLENGE 信封”的 OPPOSE 角色，为其签发一条 CHALLENGE 后立即返回；无满足者则不签发，
+     * 等待下一个触发点（REBUTTAL/信封消费/过期/拒绝/第二轮开始）或 liveness 确定性收口。
+     */
+    private void advanceChallengeQueue(Review review, DebateTopic topic, int round, String reason) {
         Claim target = highestSeveritySupportClaim(review.id(), topic);
         if (target == null) {
-            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=NO_SUPPORT_CLAIM",
-                    event.reviewId().value(), topicId.value());
+            LOGGER.info("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=NO_SUPPORT_CLAIM",
+                    review.id().value(), topic.id().value());
             return;
         }
-        List<RoleType> recipients = topic.claimIds().stream()
+        List<RoleType> queue = topic.claimIds().stream()
                 .map(claimId -> debateStore.findClaim(review.id(), claimId).orElse(null))
                 .filter(claim -> claim != null && claim.position() == ClaimPosition.OPPOSE
                         && claim.status() != ClaimStatus.WITHDRAWN)
@@ -444,34 +477,45 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 .distinct()
                 .filter(role -> role != target.roleType())
                 .toList();
-        if (recipients.isEmpty()) {
-            LOGGER.info("CHALLENGE_DISPATCH_SKIPPED reviewId={} topicId={} reason=NO_OPPOSE_ROLE",
-                    event.reviewId().value(), topicId.value());
-            return;
-        }
-        synchronized (review) {
-            for (RoleType recipient : recipients) {
-                try {
+        for (RoleType recipient : queue) {
+            boolean challengedThisRound = debateStore.findTurns(review.id(), topic.id()).stream()
+                    .anyMatch(turn -> turn.turnType() == DebateTurnType.CHALLENGE
+                            && turn.round() == round && turn.actorRole() == recipient);
+            if (challengedThisRound) {
+                continue;
+            }
+            boolean pendingChallenge = dispatchService.pendingFor(review.id(), review.attemptNo(), recipient)
+                    .stream()
+                    .anyMatch(command -> command.topicId() != null
+                            && command.topicId().equals(topic.id())
+                            && command.allowedAction() == DispatchedAction.CHALLENGE);
+            if (pendingChallenge) {
+                continue;
+            }
+            try {
+                synchronized (review) {
                     dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(
                             new ReviewCommandMetadata(review.id(), review.version(),
-                                    new IdempotencyKey("dispatch:challenge:" + topicId.value() + ":" + recipient)),
+                                    new IdempotencyKey("dispatch:challenge:" + topic.id().value() + ":" + recipient)),
                             recipient,
                             DispatchedAction.CHALLENGE,
                             round,
-                            topicId,
+                            topic.id(),
                             target.claimId(),
                             null,
                             Instant.now().plus(CHALLENGE_DISPATCH_TTL),
                             RoleType.DIRECTOR,
                             reason));
-                } catch (RuntimeException exception) {
-                    // A failed server challenge must not abort the remaining recipients or the event
-                    // delivery; the log names the reason and the Director wake keeps the debate moving.
-                    LOGGER.warn("CHALLENGE_DISPATCH_ISSUE_FAILED reviewId={} topicId={} recipient={} targetClaimId={}",
-                            review.id().value(), topicId.value(), recipient, target.claimId().value(), exception);
                 }
+            } catch (RuntimeException exception) {
+                // 单个角色签发失败不阻断本角色之后的队列推进机会；日志点名并停在当前触发点。
+                LOGGER.warn("CHALLENGE_QUEUE_ISSUE_FAILED reviewId={} topicId={} recipient={} targetClaimId={}",
+                        review.id().value(), topic.id().value(), recipient, target.claimId().value(), exception);
             }
+            return;
         }
+        LOGGER.info("CHALLENGE_QUEUE_SKIPPED reviewId={} topicId={} reason=NO_ELIGIBLE_OPPOSE_ROLE round={}",
+                review.id().value(), topic.id().value(), round);
     }
 
     /**
@@ -576,6 +620,23 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
      * convergence guard so a looping Director is deterministically force-converged server-side.
      */
     private void wakeDirector(ReviewEvent event, String message) {
+        // [AIREVIEW-PLAN-075#3] 仅单一 DEBATE 阶段启用冷却：同一文案在 60 秒内重复唤醒且期间无新回合
+        // 事件时直接丢弃；有进展或文案变化会立即放行，不影响 JUDGING_STARTED 等关键唤醒。
+        if (isSingleDebateReview(event)) {
+            String key = cooldownKey(event);
+            WakeCooldownState cooldown = wakeCooldowns.computeIfAbsent(key, ignored -> new WakeCooldownState());
+            Instant now = Instant.now();
+            if (Duration.between(cooldown.lastWakeAt, now).compareTo(COORDINATOR_WAKE_COOLDOWN) < 0
+                    && cooldown.lastWakeHash == message.hashCode()
+                    && !cooldown.lastTurnEventAt.isAfter(cooldown.lastWakeAt)) {
+                LOGGER.info("COORDINATOR_WAKE_COOLDOWN reviewId={} attemptNo={} lastWakeAt={} lastTurnEventAt={} messageHash={}",
+                        event.reviewId().value(), event.attemptNo(), cooldown.lastWakeAt,
+                        cooldown.lastTurnEventAt, cooldown.lastWakeHash);
+                return;
+            }
+            cooldown.lastWakeAt = now;
+            cooldown.lastWakeHash = message.hashCode();
+        }
         DebateConvergenceGuard guard = convergenceGuardProvider == null
                 ? null : convergenceGuardProvider.getIfAvailable();
         if (guard != null) {
@@ -593,6 +654,37 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     }
 
     /**
+     * [AIREVIEW-PLAN-075#3] 仅四个“真回合”事实刷新 lastTurnEventAt：新回合会立即解除同一文案的
+     * 重复 wakeDirector 冷却。CLAIM_SUBMITTED 也计入，因为在 DEBATE 阶段提交主张就是辩论进展。
+     */
+    private void recordTurnActivity(ReviewEvent event) {
+        ReviewEventType type = event.type();
+        if (type != ReviewEventType.CHALLENGE_SUBMITTED
+                && type != ReviewEventType.REBUTTAL_SUBMITTED
+                && type != ReviewEventType.CLAIM_SUBMITTED
+                && type != ReviewEventType.POSITION_CHANGED) {
+            return;
+        }
+        wakeCooldowns.computeIfAbsent(cooldownKey(event), ignored -> new WakeCooldownState())
+                .lastTurnEventAt = Instant.now();
+    }
+
+    /** [AIREVIEW-PLAN-075#3] 冷却只在评审当前处于单一 DEBATE 阶段时生效；旧轮次阶段与裁决阶段不走。 */
+    private boolean isSingleDebateReview(ReviewEvent event) {
+        if (reviewRegistry == null) {
+            return false;
+        }
+        Review current = reviewRegistry.find(event.reviewId())
+                .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                .orElse(null);
+        return current != null && current.stage() == ReviewStage.DEBATE;
+    }
+
+    private static String cooldownKey(ReviewEvent event) {
+        return event.reviewId().value() + ":" + event.attemptNo();
+    }
+
+    /**
      * [AIREVIEW-PLAN-069#4] 统一终态清理：complete+remove 本 attempt 的调度队列、清空辩论收敛守卫，
      * 并经懒 ObjectProvider 解析依次清 liveness 状态、plan 推广水印、runtime trace 与编排三张观测表，
      * 最后尽力关闭运行体。每一步独立容错，任何一步失败都不阻断其余清理，且整体幂等。
@@ -603,6 +695,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         if (queue != null) {
             queue.tryEmitComplete();
         }
+        // [AIREVIEW-PLAN-075#3] 终态清理同时移除 wake 冷却状态，避免成功评审 per-attempt 冷却永久驻留。
+        wakeCooldowns.remove(cooldownKey(event));
         clearGuard(event);
         if (livenessGuardProvider != null) {
             ReviewLivenessGuard livenessGuard = livenessGuardProvider.getIfAvailable();
@@ -674,6 +768,13 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
 
     private String roleLabel(String runtimeId, RoleType roleType) {
         return runtimeId + "-" + roleType.name().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** [AIREVIEW-PLAN-075#3] per-attempt wake 冷却状态；默认 epoch 保证首次唤醒永不被抑制。 */
+    private static final class WakeCooldownState {
+        private volatile Instant lastTurnEventAt = Instant.EPOCH;
+        private volatile Instant lastWakeAt = Instant.EPOCH;
+        private volatile int lastWakeHash;
     }
 
     /** @author wangli */

@@ -1,6 +1,8 @@
 package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.config.AgentScopeProperties;
+import ai.cc.chongming.review.domain.event.ReviewEvent;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.DebateTopic;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.protocol.DebateStateMachine;
@@ -9,13 +11,19 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
+import java.lang.reflect.Field;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * [AIREVIEW-PLAN-024#方案4 收口] Verifies the server-side debate convergence fallback: a looping
@@ -125,6 +133,45 @@ class DebateConvergenceGuardTests {
         assertThat(fixture.review.stage()).isEqualTo(ReviewStage.JUDGING);
     }
 
+    /**
+     * [AIREVIEW-PLAN-075#1] 领域事件活动与运行时 trace 都参与 no-progress 判定：lastWakeAt 已经很旧，
+     * 但 onCommitted 新事件（或 trace 新鲜）把活性基准拉回当前，scan 不得收敛。
+     */
+    @Test
+    void roleActivityPreventsNoProgressConvergence() throws Exception {
+        ReviewRuntimeTraceRegistry traceRegistry = mock(ReviewRuntimeTraceRegistry.class);
+        Fixture fixture = fixtureWithTrace(100, Duration.ofMinutes(20), Duration.ofMillis(1),
+                ReviewStage.DEBATE, traceRegistry);
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(fixture.review.id(), 1);
+        when(traceRegistry.lastObservedAt(runtimeId)).thenAnswer(ignored -> Optional.of(Instant.now()));
+
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        ageWakeState(fixture.guard, fixture.review.id(), 1, Instant.EPOCH, Instant.EPOCH);
+        fixture.guard.onCommitted(debateEvent(fixture.review, ReviewEventType.CHALLENGE_SUBMITTED));
+
+        fixture.guard.scanForStalledDebates();
+
+        assertThat(fixture.review.stage()).isEqualTo(ReviewStage.DEBATE);
+
+        // 再把领域活动也拨旧：仅凭 still-fresh 的 runtime trace 仍应阻止 no-progress 收敛。
+        ageWakeState(fixture.guard, fixture.review.id(), 1, Instant.EPOCH, Instant.EPOCH);
+        fixture.guard.scanForStalledDebates();
+        assertThat(fixture.review.stage()).isEqualTo(ReviewStage.DEBATE);
+    }
+
+    /** [AIREVIEW-PLAN-075#1] 两个通道都沉默时，no-progress 快速收敛语义保持不变。 */
+    @Test
+    void dualSilenceStillConverges() throws Exception {
+        Fixture fixture = fixture(100, Duration.ofMinutes(20), Duration.ofMillis(1), ReviewStage.DEBATE);
+
+        fixture.guard.noteDirectorWake(fixture.review.id(), 1);
+        ageWakeState(fixture.guard, fixture.review.id(), 1, Instant.EPOCH, Instant.EPOCH);
+
+        fixture.guard.scanForStalledDebates();
+
+        assertThat(fixture.review.stage()).isEqualTo(ReviewStage.JUDGING);
+    }
+
     /** [AIREVIEW-PLAN-059#6] 串行开启时 wake 预算按议题数（夹具 2 个）缩放：2→4 次才收敛。 */
     @Test
     void serialDebateScalesTheWakeBudgetByTopicCount() {
@@ -181,6 +228,51 @@ class DebateConvergenceGuardTests {
                 false, "state", 48, 12, 16, Duration.ofSeconds(150), maxWakes, timeout, noProgress, serial,
                 Duration.ofSeconds(90), 3);
         return new Fixture(new DebateConvergenceGuard(registry, debateService, store, properties), store, review);
+    }
+
+    private Fixture fixtureWithTrace(int maxWakes, Duration timeout, Duration noProgress, ReviewStage stage,
+            ReviewRuntimeTraceRegistry traceRegistry) {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry registry = new InMemoryReviewRegistry();
+        Review review = Review.restore(new ReviewId(UUID.randomUUID()), stage, 1, 0,
+                List.of(), Map.of());
+        registry.register(review);
+        store.saveTopic(new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "cache.default_enable", List.of()));
+        store.saveTopic(new DebateTopic(new TopicId(UUID.randomUUID()), review.id(), "cache.read_your_writes", List.of()));
+        DebateService debateService = new DebateService(store, new EvidenceLedgerService(), new DebateStateMachine());
+        AgentScopeProperties properties = new AgentScopeProperties(
+                false, "state", 48, 12, 16, Duration.ofSeconds(150), maxWakes, timeout, noProgress, false,
+                Duration.ofSeconds(90), 3);
+        return new Fixture(new DebateConvergenceGuard(registry, debateService, store, null, properties,
+                providerOf(traceRegistry)), store, review);
+    }
+
+    private static ReviewEvent debateEvent(Review review, ReviewEventType type) {
+        return new ReviewEvent(UUID.randomUUID(), 1L, review.id(), review.attemptNo(), type,
+                type.category(), review.stage(), null, null, null, null, null, null, null,
+                Instant.now(), 1, Map.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void ageWakeState(DebateConvergenceGuard guard, ReviewId reviewId, int attemptNo,
+            Instant lastWakeAt, Instant lastActivityAt) throws Exception {
+        Field statesField = DebateConvergenceGuard.class.getDeclaredField("states");
+        statesField.setAccessible(true);
+        Map<String, Object> states = (Map<String, Object>) statesField.get(guard);
+        Object state = states.get(reviewId.value() + ":" + attemptNo);
+        Field lastWakeField = state.getClass().getDeclaredField("lastWakeAt");
+        lastWakeField.setAccessible(true);
+        lastWakeField.set(state, lastWakeAt);
+        Field lastActivityField = state.getClass().getDeclaredField("lastActivityAt");
+        lastActivityField.setAccessible(true);
+        lastActivityField.set(state, lastActivityAt);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> ObjectProvider<T> providerOf(T value) {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(value);
+        return provider;
     }
 
     private record Fixture(DebateConvergenceGuard guard, InMemoryReviewDebateStore store, Review review) {

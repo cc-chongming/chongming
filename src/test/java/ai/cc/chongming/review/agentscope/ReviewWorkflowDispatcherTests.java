@@ -34,6 +34,7 @@ import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkflowDispatcher
 import ai.cc.chongming.review.infrastructure.debate.InMemoryReviewDebateStore;
 import ai.cc.chongming.review.infrastructure.dispatch.InMemoryReviewDispatchStore;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
+import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -254,6 +255,34 @@ class ReviewWorkflowDispatcherTests {
         verify(adapter, never()).deliverDispatchCommand(anyString(), anyString(), anyString(), any());
     }
 
+    /**
+     * [AIREVIEW-PLAN-075#3] DEBATE 阶段相同文案的重复 wakeDirector 在 60 秒冷却窗口内被丢弃；
+     * 无回合事件的 DEBATE_TOPIC_OPENED 连续两次只发出第一次唤醒。
+     */
+    @Test
+    void coordinatorWakeCooldownSuppressesDuplicateWake() {
+        dispatcher.onCommitted(event(ReviewEventType.DEBATE_TOPIC_OPENED, null, Map.of()));
+        dispatcher.onCommitted(event(ReviewEventType.DEBATE_TOPIC_OPENED, null, Map.of()));
+
+        verify(adapter, timeout(3000).times(1)).send(eq(runtimeId), eq(runtimeId + "-director"),
+                contains("dispatch_debate_action"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-075#3] 同一文案重复唤醒期间若出现新辩论回合事件，冷却被解除，随后的唤醒正常发出。
+     */
+    @Test
+    void newTurnLiftsCooldown() throws Exception {
+        dispatcher.onCommitted(event(ReviewEventType.REBUTTAL_SUBMITTED, null, Map.of()));
+        // 把上次唤醒拨回过去，模拟“冷却窗口内又来了一个新回合事件”的时间关系：
+        // recordTurnActivity 会把 lastTurnEventAt 更新到当前，从而解除同文案冷却。
+        ageCoordinatorWake(dispatcher, review, Instant.now().minusSeconds(30));
+        dispatcher.onCommitted(event(ReviewEventType.REBUTTAL_SUBMITTED, null, Map.of()));
+
+        verify(adapter, timeout(3000).times(2)).send(eq(runtimeId), eq(runtimeId + "-director"),
+                contains("A debate turn was committed"));
+    }
+
     @Test
     void issuedDispatchEventDeliversTheEnvelopeOnlyToTheRecipientRole() {
         ReviewDispatchCommand command = dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(
@@ -359,7 +388,7 @@ class ReviewWorkflowDispatcherTests {
     // --- [AIREVIEW-PLAN-046#1] server-side challenge dispatch -------------------------------
 
     @Test
-    void openedTopicWithBothSidesDispatchesOneChallengePerOpposeRoleAgainstHighestSeveritySupport() {
+    void openedTopicDispatchesFirstChallengeAgainstHighestSeveritySupport() {
         Review opposing = freshReview(
                 RoleType.PRODUCT, RoleType.ARCHITECTURE, RoleType.BACKEND, RoleType.FRONTEND);
         Claim supportLower = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P2, ClaimPosition.SUPPORT);
@@ -373,33 +402,110 @@ class ReviewWorkflowDispatcherTests {
 
         dispatcher.onCommitted(openedEvent(opposing, bothSides));
 
+        // [AIREVIEW-PLAN-076#1] 开题只放行队列首位 OPPOSE 角色，而非向所有角色一次性扇出。
         List<ReviewDispatchCommand> commands =
                 dispatchStore.findByReview(opposing.id(), opposing.attemptNo());
-        assertThat(commands).hasSize(2);
-        assertThat(commands).allSatisfy(command -> {
-            assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
-            assertThat(command.round()).isEqualTo(1);
-            assertThat(command.topicId()).isEqualTo(bothSides.id());
-            // Highest severity wins over mount order: the P0 SUPPORT is targeted, not the earlier P2.
-            assertThat(command.targetClaimId()).isEqualTo(supportHighest.claimId());
-            assertThat(command.idempotencyKey().value())
-                    .startsWith("dispatch:challenge:" + bothSides.id().value() + ":");
-        });
-        assertThat(commands).extracting(ReviewDispatchCommand::recipientRole)
-                .containsExactlyInAnyOrder(RoleType.BACKEND, RoleType.FRONTEND);
+        assertThat(commands).hasSize(1);
+        ReviewDispatchCommand command = commands.getFirst();
+        assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+        assertThat(command.round()).isEqualTo(1);
+        assertThat(command.topicId()).isEqualTo(bothSides.id());
+        assertThat(command.recipientRole()).isEqualTo(RoleType.BACKEND);
+        // Highest severity wins over mount order: the P0 SUPPORT is targeted, not the earlier P2.
+        assertThat(command.targetClaimId()).isEqualTo(supportHighest.claimId());
+        assertThat(command.idempotencyKey().value())
+                .startsWith("dispatch:challenge:" + bothSides.id().value() + ":");
 
-        // Each objector receives exactly its own envelope; the support side is never challenged.
+        // 后位 OPPOSE 角色等待队列推进；SUPPORT 自身角色永不被质询。
         String opposingRuntimeId = ReviewRuntimeContext.runtimeIdFor(opposing.id(), opposing.attemptNo());
         verify(adapter, timeout(3000)).deliverDispatchCommand(
                 eq(opposingRuntimeId), eq(opposingRuntimeId + "-backend"),
                 contains("allowedAction=CHALLENGE"), any());
-        verify(adapter, timeout(3000)).deliverDispatchCommand(
-                eq(opposingRuntimeId), eq(opposingRuntimeId + "-frontend"),
-                contains("allowedAction=CHALLENGE"), any());
+        verify(adapter, never()).deliverDispatchCommand(
+                eq(opposingRuntimeId), eq(opposingRuntimeId + "-frontend"), anyString(), any());
         verify(adapter, never()).deliverDispatchCommand(
                 eq(opposingRuntimeId), eq(opposingRuntimeId + "-product"), anyString(), any());
         verify(adapter, never()).deliverDispatchCommand(
                 eq(opposingRuntimeId), eq(opposingRuntimeId + "-architecture"), anyString(), any());
+    }
+
+    /** [AIREVIEW-PLAN-076#1] 两 OPPOSE 角色：开题仅首位收到 CHALLENGE；其 CHALLENGE+REBUTTAL 提交后
+     * 队列推进，第二位角色才收到 CHALLENGE，且顺序为挂载序。 */
+    @Test
+    void challengeQueueSerializesOpposeRoles() {
+        Review opposing = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
+        Claim support = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim opposeBackend = claim(opposing, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim opposeFrontend = claim(opposing, RoleType.FRONTEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic bothSides = new DebateTopic(new TopicId(UUID.randomUUID()), opposing.id(), "api.contract",
+                List.of(support.claimId(), opposeBackend.claimId(), opposeFrontend.claimId()));
+        debateStore.saveTopic(bothSides);
+
+        dispatcher.onCommitted(openedEvent(opposing, bothSides));
+
+        assertThat(challengeCommands(opposing)).hasSize(1);
+        assertThat(challengeCommands(opposing).getFirst().recipientRole()).isEqualTo(RoleType.BACKEND);
+
+        // 首位 OPPOSE 的 CHALLENGE 提交只产生答辩信封，不推进质询队列。
+        DebateTurn backendChallenge = new DebateTurn(new TurnId(UUID.randomUUID()), bothSides.id(), 1,
+                RoleType.BACKEND, RoleType.PRODUCT, DebateTurnType.CHALLENGE, support.claimId(), null,
+                "后端质疑接口契约", List.of(), null, null, Instant.now());
+        debateStore.saveTurn(opposing.id(), backendChallenge);
+        bothSides.addChallenge(new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                backendChallenge);
+        debateStore.saveTopic(bothSides);
+        dispatcher.onCommitted(eventFor(opposing, ReviewEventType.CHALLENGE_SUBMITTED,
+                backendChallenge.turnId(), bothSides.id()));
+        assertThat(challengeCommands(opposing)).hasSize(1);
+
+        // 答辩提交后队列放行下一位 OPPOSE 角色。
+        DebateTurn productRebuttal = new DebateTurn(new TurnId(UUID.randomUUID()), bothSides.id(), 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.REBUTTAL, support.claimId(),
+                backendChallenge.turnId(), "产品答辩接口契约", List.of(), null, null, Instant.now());
+        debateStore.saveTurn(opposing.id(), productRebuttal);
+        bothSides.addRebuttal(new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                productRebuttal);
+        debateStore.saveTopic(bothSides);
+        dispatcher.onCommitted(eventFor(opposing, ReviewEventType.REBUTTAL_SUBMITTED,
+                productRebuttal.turnId(), bothSides.id()));
+
+        assertThat(challengeCommands(opposing)).hasSize(2);
+        assertThat(challengeCommands(opposing)).extracting(ReviewDispatchCommand::recipientRole)
+                .containsExactly(RoleType.BACKEND, RoleType.FRONTEND);
+    }
+
+    /** [AIREVIEW-PLAN-076#2] 首位角色的 CHALLENGE 信封过期后，队列推进会跳过它并放行下一位角色。 */
+    @Test
+    void expiredEnvelopeAdvancesQueue() {
+        Review opposing = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
+        Claim support = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim opposeBackend = claim(opposing, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        Claim opposeFrontend = claim(opposing, RoleType.FRONTEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic bothSides = new DebateTopic(new TopicId(UUID.randomUUID()), opposing.id(), "api.contract",
+                List.of(support.claimId(), opposeBackend.claimId(), opposeFrontend.claimId()));
+        debateStore.saveTopic(bothSides);
+
+        dispatcher.onCommitted(openedEvent(opposing, bothSides));
+
+        List<ReviewDispatchCommand> first = challengeCommands(opposing);
+        assertThat(first).hasSize(1);
+        ReviewDispatchCommand firstCommand = first.getFirst();
+        assertThat(firstCommand.recipientRole()).isEqualTo(RoleType.BACKEND);
+
+        dispatcher.onCommitted(new ReviewEvent(UUID.randomUUID(), 1L, opposing.id(), opposing.attemptNo(),
+                ReviewEventType.DISPATCH_COMMAND_EXPIRED, ReviewEventType.DISPATCH_COMMAND_EXPIRED.category(),
+                opposing.stage(), null, firstCommand.recipientRole(), bothSides.id(),
+                firstCommand.targetClaimId(), null, firstCommand.round(), null,
+                Instant.now(), 1,
+                Map.of("commandId", firstCommand.commandId().value().toString(),
+                        "allowedAction", "CHALLENGE",
+                        "recipientRole", "BACKEND",
+                        "reason", "EXPIRED_BEFORE_USE")));
+
+        List<ReviewDispatchCommand> after = challengeCommands(opposing);
+        assertThat(after).hasSize(2);
+        assertThat(after).extracting(ReviewDispatchCommand::recipientRole)
+                .containsExactly(RoleType.BACKEND, RoleType.FRONTEND);
     }
 
     @Test
@@ -442,14 +548,14 @@ class ReviewWorkflowDispatcherTests {
 
         List<ReviewDispatchCommand> commands =
                 dispatchStore.findByReview(defending.id(), defending.attemptNo());
-        assertThat(commands).hasSize(2);
-        assertThat(commands).allSatisfy(command -> {
+        // [AIREVIEW-PLAN-076#1] 答辩 SUPPORT 落地后也只放行队列首位 OPPOSE 角色。
+        assertThat(commands).hasSize(1);
+        assertThat(commands.getFirst()).satisfies(command -> {
             assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
             assertThat(command.targetClaimId()).isEqualTo(defense.claimId());
             assertThat(command.round()).isEqualTo(1);
+            assertThat(command.recipientRole()).isEqualTo(RoleType.BACKEND);
         });
-        assertThat(commands).extracting(ReviewDispatchCommand::recipientRole)
-                .containsExactlyInAnyOrder(RoleType.BACKEND, RoleType.FRONTEND);
         assertThat(published)
                 .filteredOn(draft -> draft.type() == ReviewEventType.DISPATCH_COMMAND_ISSUED)
                 .extracting(ReviewEventDraft::payload)
@@ -541,14 +647,15 @@ class ReviewWorkflowDispatcherTests {
         dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE, support.claimId()));
         List<ReviewDispatchCommand> first =
                 dispatchStore.findByReview(defending.id(), defending.attemptNo());
-        assertThat(first).hasSize(2);
+        // [AIREVIEW-PLAN-076#1] 首次答辩 SUPPORT 只需为队列首位 OPPOSE 角色签发一条 CHALLENGE。
+        assertThat(first).hasSize(1);
 
         // A later SUPPORT claim on an already two-sided topic must not stack (nor re-arm) envelopes.
         Claim laterSupport = claim(defending, RoleType.PRODUCT, ClaimSeverity.P2, ClaimPosition.SUPPORT);
         topic.attachClaim(laterSupport.claimId());
         dispatcher.onCommitted(claimEvent(defending, ReviewStage.DEBATE, laterSupport.claimId()));
 
-        assertThat(dispatchStore.findByReview(defending.id(), defending.attemptNo())).hasSize(2);
+        assertThat(dispatchStore.findByReview(defending.id(), defending.attemptNo())).hasSize(1);
     }
 
     // --- [AIREVIEW-PLAN-047#1] topic-level round behaviour --------------------
@@ -569,13 +676,13 @@ class ReviewWorkflowDispatcherTests {
 
         List<ReviewDispatchCommand> commands =
                 dispatchStore.findByReview(opposing.id(), opposing.attemptNo());
-        assertThat(commands).hasSize(2);
-        assertThat(commands).allSatisfy(command -> {
-            assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
-            // [AIREVIEW-PLAN-047#1] The envelope round follows the topic's own currentRound.
-            assertThat(command.round()).isEqualTo(2);
-            assertThat(command.topicId()).isEqualTo(roundTwoTopic.id());
-        });
+        // [AIREVIEW-PLAN-076#1] 第二轮同样只放行队列首位角色；信封轮次跟随议题自身 currentRound。
+        assertThat(commands).hasSize(1);
+        ReviewDispatchCommand command = commands.getFirst();
+        assertThat(command.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+        assertThat(command.round()).isEqualTo(2);
+        assertThat(command.topicId()).isEqualTo(roundTwoTopic.id());
+        assertThat(command.recipientRole()).isEqualTo(RoleType.BACKEND);
     }
 
     @Test
@@ -589,6 +696,13 @@ class ReviewWorkflowDispatcherTests {
     }
 
     // --- helpers -------------------------------------------------------------
+
+    /** [AIREVIEW-PLAN-076#1] 过滤出该评审全部 CHALLENGE 调度信封，忽略 order 不稳定的答辩信封。 */
+    private List<ReviewDispatchCommand> challengeCommands(Review owner) {
+        return dispatchStore.findByReview(owner.id(), owner.attemptNo()).stream()
+                .filter(command -> command.allowedAction() == DispatchedAction.CHALLENGE)
+                .toList();
+    }
 
     private Review freshReview(RoleType... roles) {
         Review fresh = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
@@ -639,6 +753,19 @@ class ReviewWorkflowDispatcherTests {
         java.lang.reflect.Field field = ReviewWorkflowDispatcher.class.getDeclaredField("queues");
         field.setAccessible(true);
         return (java.util.Map<String, ?>) field.get(dispatcher);
+    }
+
+    /** [AIREVIEW-PLAN-075#3] 用反射拨回 per-attempt 冷却状态中的 lastWakeAt，避免时序测试依赖系统时钟。 */
+    @SuppressWarnings("unchecked")
+    private static void ageCoordinatorWake(ReviewWorkflowDispatcher dispatcher, Review owner, Instant lastWakeAt)
+            throws Exception {
+        Field field = ReviewWorkflowDispatcher.class.getDeclaredField("wakeCooldowns");
+        field.setAccessible(true);
+        Map<String, Object> cooldowns = (Map<String, Object>) field.get(dispatcher);
+        Object state = cooldowns.get(owner.id().value() + ":" + owner.attemptNo());
+        Field lastWakeField = state.getClass().getDeclaredField("lastWakeAt");
+        lastWakeField.setAccessible(true);
+        lastWakeField.set(state, lastWakeAt);
     }
 
     /** [AIREVIEW-PLAN-059#7] 绑定任意 review 的事件构造缝（串行用例独立 review）。 */
