@@ -168,7 +168,7 @@ class AgentScopeModelBridgeTests {
                 gateway, context(), RoleType.DIRECTOR, "scout", "Inspect", Set.of("list_files"));
         // [AIREVIEW-PLAN-089-followup] 单工具结果已被 4000 上限截断，需足够多条数才能触发全局 48000 上限。
         String largeOutput = "x".repeat(12_000);
-        List<ToolResultMessage> messages = new java.util.ArrayList<>();
+        List<Msg> messages = new java.util.ArrayList<>();
         for (int i = 1; i <= 4; i++) {
             messages.add(new ToolResultMessage("call-" + i, "list_files", largeOutput));
         }
