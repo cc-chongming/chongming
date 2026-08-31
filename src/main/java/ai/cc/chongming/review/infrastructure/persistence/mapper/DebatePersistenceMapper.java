@@ -51,10 +51,11 @@ public interface DebatePersistenceMapper {
     @Insert("""
             INSERT INTO review_debate_topic
                 (topic_id, review_id, subject_key, public_title, claim_ids_json, status, current_round,
-                 resolution, closed_at, created_at)
+                 resolution, closed_at, created_at, topic_seq)
             VALUES
                 (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.publicTitle}, #{row.claimIdsJson},
-                 #{row.status}, #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
+                 #{row.status}, #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt},
+                 #{row.topicSeq})
             ON DUPLICATE KEY UPDATE
                 subject_key = VALUES(subject_key),
                 public_title = VALUES(public_title),
@@ -70,11 +71,12 @@ public interface DebatePersistenceMapper {
             <script>
             INSERT INTO review_debate_topic
                 (topic_id, review_id, subject_key, public_title, claim_ids_json, status, current_round,
-                 resolution, closed_at, created_at)
+                 resolution, closed_at, created_at, topic_seq)
             VALUES
             <foreach collection="rows" item="row" separator=",">
                 (#{row.topicId}, #{row.reviewId}, #{row.subjectKey}, #{row.publicTitle}, #{row.claimIdsJson},
-                 #{row.status}, #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt})
+                 #{row.status}, #{row.currentRound}, #{row.resolution}, #{row.closedAt}, #{row.createdAt},
+                 #{row.topicSeq})
             </foreach>
             ON DUPLICATE KEY UPDATE
                 subject_key = VALUES(subject_key),
@@ -91,25 +93,46 @@ public interface DebatePersistenceMapper {
     /**
      * [AIREVIEW-PLAN-074#1] Topics are returned in registration/focus order instead of random UUID
      * order, so the first tab and first open focus match what the user registered first.
+     *
+     * [AIREVIEW-PLAN-078#2] topic_seq records the register_topics batch order; when several topics
+     * share the same DATETIME(3) created_at the read model no longer degenerates to random UUID order.
      */
     @Select("""
             SELECT topic_id AS topicId, review_id AS reviewId, subject_key AS subjectKey,
                    public_title AS publicTitle, claim_ids_json AS claimIdsJson, status,
-                   current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt
+                   current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt,
+                   topic_seq AS topicSeq
             FROM review_debate_topic
             WHERE review_id = #{reviewId}
-            ORDER BY created_at, topic_id
+            ORDER BY topic_seq, topic_id
             """)
     List<TopicRow> findTopics(@Param("reviewId") String reviewId);
 
+    /**
+     * [AIREVIEW-PLAN-078#2] Returns the persisted topic_seq too, so {@code saveTopics} can keep an
+     * existing topic's registration order instead of renumbering it on every snapshot update.
+     */
     @Select("""
             SELECT topic_id AS topicId, review_id AS reviewId, subject_key AS subjectKey,
                    public_title AS publicTitle, claim_ids_json AS claimIdsJson, status,
-                   current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt
+                   current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt,
+                   topic_seq AS topicSeq
             FROM review_debate_topic
             WHERE review_id = #{reviewId} AND topic_id = #{topicId}
             """)
     TopicRow findTopic(@Param("reviewId") String reviewId, @Param("topicId") String topicId);
+
+    /**
+     * [AIREVIEW-PLAN-078#3] Highest allocated registration sequence for a review. The schema has no
+     * attempt dimension on {@code review_debate_topic}, so this is review-scoped; when no row exists
+     * the COALESCE starts numbering at zero and the caller increments from there.
+     */
+    @Select("""
+            SELECT COALESCE(MAX(topic_seq), 0)
+            FROM review_debate_topic
+            WHERE review_id = #{reviewId}
+            """)
+    int maxTopicSeq(@Param("reviewId") String reviewId);
 
     @Insert("""
             INSERT IGNORE INTO review_debate_turn
@@ -247,7 +270,8 @@ public interface DebatePersistenceMapper {
             int currentRound,
             String resolution,
             LocalDateTime closedAt,
-            LocalDateTime createdAt) {
+            LocalDateTime createdAt,
+            Integer topicSeq) {
     }
 
     /**

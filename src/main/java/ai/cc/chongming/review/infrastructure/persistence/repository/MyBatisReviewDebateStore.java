@@ -8,6 +8,7 @@ import ai.cc.chongming.review.infrastructure.persistence.mapper.DebatePersistenc
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -105,12 +106,37 @@ public class MyBatisReviewDebateStore implements ReviewDebateStore {
         if (topics.isEmpty()) {
             return;
         }
-        mapper.upsertTopics(topics.stream()
-                .map(topic -> toTopicRow(Objects.requireNonNull(topic, "topic must not be null")))
-                .toList());
+        // [AIREVIEW-PLAN-078#3] Assign each brand-new row the next registration sequence in batch
+        // order; existing rows keep their original sequence so a snapshot re-save does not renumber.
+        String reviewId = topics.get(0).reviewId().value().toString();
+        Integer nextTopicSeq = null;
+        List<DebatePersistenceMapper.TopicRow> rows = new ArrayList<>();
+        for (DebateTopic topic : topics) {
+            Objects.requireNonNull(topic, "topic must not be null");
+            DebatePersistenceMapper.TopicRow existing =
+                    mapper.findTopic(reviewId, topic.id().value().toString());
+            int topicSeq;
+            if (existing != null) {
+                topicSeq = existing.topicSeq() == null ? 0 : existing.topicSeq();
+            } else {
+                if (nextTopicSeq == null) {
+                    nextTopicSeq = mapper.maxTopicSeq(reviewId);
+                }
+                nextTopicSeq = nextTopicSeq + 1;
+                topicSeq = nextTopicSeq;
+            }
+            rows.add(toTopicRow(topic, topicSeq));
+        }
+        mapper.upsertTopics(rows);
     }
 
     private DebatePersistenceMapper.TopicRow toTopicRow(DebateTopic topic) {
+        // [AIREVIEW-PLAN-078#2] Single-row snapshot updates never touch topic_seq in the
+        // ON DUPLICATE KEY UPDATE list, so the placeholder sequence is irrelevant for existing rows.
+        return toTopicRow(topic, 0);
+    }
+
+    private DebatePersistenceMapper.TopicRow toTopicRow(DebateTopic topic, int topicSeq) {
         return new DebatePersistenceMapper.TopicRow(
                 topic.id().value().toString(),
                 topic.reviewId().value().toString(),
@@ -121,7 +147,8 @@ public class MyBatisReviewDebateStore implements ReviewDebateStore {
                 topic.currentRound(),
                 topic.resolution(),
                 topic.closedAt() == null ? null : topic.closedAt().atOffset(ZoneOffset.UTC).toLocalDateTime(),
-                java.time.LocalDateTime.now(ZoneOffset.UTC));
+                java.time.LocalDateTime.now(ZoneOffset.UTC),
+                topicSeq);
     }
 
     @Override

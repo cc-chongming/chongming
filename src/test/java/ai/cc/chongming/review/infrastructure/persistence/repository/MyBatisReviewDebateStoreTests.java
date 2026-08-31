@@ -143,6 +143,36 @@ class MyBatisReviewDebateStoreTests {
     }
 
     @Test
+    void assignsRegistrationSequenceInBatchOrderAndPreservesExistingSequence() {
+        FakeDebatePersistenceMapper mapper = new FakeDebatePersistenceMapper();
+        MyBatisReviewDebateStore store = new MyBatisReviewDebateStore(mapper, new ObjectMapper());
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        DebateTopic existing = new DebateTopic(
+                new TopicId(UUID.randomUUID()), reviewId, "existing-topic", List.of());
+        DebateTopic firstNew = new DebateTopic(
+                new TopicId(UUID.randomUUID()), reviewId, "first-new-topic", List.of());
+        DebateTopic secondNew = new DebateTopic(
+                new TopicId(UUID.randomUUID()), reviewId, "second-new-topic", List.of());
+        store.saveTopic(existing);
+
+        store.saveTopics(List.of(firstNew, existing, secondNew));
+
+        assertThat(mapper.findTopic(reviewId.value().toString(), existing.id().value().toString()).topicSeq())
+                .isZero();
+        assertThat(mapper.findTopic(reviewId.value().toString(), firstNew.id().value().toString()).topicSeq())
+                .isEqualTo(1);
+        assertThat(mapper.findTopic(reviewId.value().toString(), secondNew.id().value().toString()).topicSeq())
+                .isEqualTo(2);
+
+        // Re-saving a mixed batch must not renumber topics that already carry a sequence.
+        store.saveTopics(List.of(secondNew, firstNew));
+        assertThat(mapper.findTopic(reviewId.value().toString(), firstNew.id().value().toString()).topicSeq())
+                .isEqualTo(1);
+        assertThat(mapper.findTopic(reviewId.value().toString(), secondNew.id().value().toString()).topicSeq())
+                .isEqualTo(2);
+    }
+
+    @Test
     void roundTripsJudgeDecisionAndGateDraft() {
         MyBatisReviewDebateStore store = newStore();
         ReviewId reviewId = new ReviewId(UUID.randomUUID());
@@ -233,6 +263,15 @@ class MyBatisReviewDebateStoreTests {
         public int upsertTopics(List<TopicRow> rows) {
             rows.forEach(row -> topics.put(row.topicId(), row));
             return rows.size();
+        }
+
+        @Override
+        public int maxTopicSeq(String reviewId) {
+            return topics.values().stream()
+                    .filter(row -> row.reviewId().equals(reviewId))
+                    .mapToInt(row -> row.topicSeq() == null ? 0 : row.topicSeq())
+                    .max()
+                    .orElse(0);
         }
 
         @Override
