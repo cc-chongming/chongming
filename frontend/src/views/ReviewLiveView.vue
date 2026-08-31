@@ -203,7 +203,27 @@ const activePhaseIndex = computed(() => {
             || defenseTurns.value.length > 0
     });
 });
-const activePhase = computed(() => selectedPhase.value ?? phases[activePhaseIndex.value].id);
+
+// [AIREVIEW-PLAN-073#1] 被动落位节奏层：目标上升时立即前进一步，其后每步最少停留 8s，杜绝中间阶段闪渡。
+const MIN_DWELL_MS = 8000;
+const pacedIndex = ref(0);
+let dwellTimer = null;
+function syncPaced() {
+    if (selectedPhase.value != null) { pacedIndex.value = activePhaseIndex.value; return; }
+    const target = activePhaseIndex.value;
+    if (target <= pacedIndex.value) { pacedIndex.value = target; return; }
+    if (dwellTimer != null) return;
+    pacedIndex.value = Math.min(target, pacedIndex.value + 1);
+    if (pacedIndex.value < target) {
+        dwellTimer = globalThis.setTimeout(() => { dwellTimer = null; syncPaced(); }, MIN_DWELL_MS);
+    }
+}
+watch([activePhaseIndex, selectedPhase], syncPaced, { immediate: true });
+onUnmounted(() => { if (dwellTimer != null) globalThis.clearTimeout(dwellTimer); });
+
+// [AIREVIEW-PLAN-073#2] activePhase 以节奏层 pacedIndex 落位（徽章 activePhaseIndex 仍立即反映目标）；
+// phaseState 等以 activePhaseIndex 为准的保持不动。
+const activePhase = computed(() => selectedPhase.value ?? phases[Math.min(pacedIndex.value, phases.length - 1)].id);
 const activePhaseDefinition = computed(() => phases.find((phase) => phase.id === activePhase.value) ?? phases[activePhaseIndex.value]);
 
 const debateTopics = computed(() => store.state.debates ?? []);
