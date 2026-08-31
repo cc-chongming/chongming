@@ -218,9 +218,9 @@ function syncPaced() {
         dwellTimer = globalThis.setTimeout(() => { dwellTimer = null; syncPaced(); }, MIN_DWELL_MS);
     }
 }
-// [AIREVIEW-PLAN-073#1-fix] 去掉 immediate：setup 期强制求值 activePhaseIndex 会触碰后定义的 computed（TDZ 白屏）；
-// 首帧在 onMounted 直接落位，dwell 仅约束会话内的后续推进。
-watch([activePhaseIndex, selectedPhase], syncPaced);
+// [AIREVIEW-PLAN-073#1-fix] 首帧在 onMounted 直接落位，dwell 仅约束会话内的后续推进。
+// 注意：watch 源在创建时即被求值（无论 immediate 与否），故对 activePhaseIndex 的 watch
+// 必须放在其传递依赖的全部 computed（scoutConcluded/conflictTopics/defenseTurns 等）定义之后，见文件尾部。TDZ 白屏根因。
 onMounted(() => { pacedIndex.value = activePhaseIndex.value; });
 onUnmounted(() => { if (dwellTimer != null) globalThis.clearTimeout(dwellTimer); });
 
@@ -592,6 +592,8 @@ async function load(reviewId) {
     );
 }
 
+// [AIREVIEW-PLAN-073#1-fix2] 节奏层 watch 置于全部 computed 之后：watch 源创建即求值，提前会 TDZ。
+watch([activePhaseIndex, selectedPhase], syncPaced);
 watch(() => props.reviewId, load, { immediate: true });
 // Keep the live debate view on the latest round: entering the debate phase, or the round counter
 // advancing to round two (via DEBATE_ROUND_2_STARTED), moves the selected round forward without
