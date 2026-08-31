@@ -344,6 +344,19 @@ const consensusStroke = computed(() => {
 // [AIREVIEW-PLAN-042#1] 答辩 Claim 合成回合：既有 turns 映射结果与 defenseTurns 合并后按 selectedRound 过滤，
 // 使异议答辩议题的答辩 Claim 也能出现在“辩论对话流”中（合成条目无 stance 字段，立场行自然不渲染）。
 const defenseTurns = computed(() => buildDefenseTurns(store.state.debates ?? [], store.events.value));
+// [AIREVIEW-PLAN-093#1] 回合是否有公开内容：既有 turns 命中，或异议答辩合成回合（REBUTTAL）命中该议题 subject 且 round 匹配。
+function hasRoundTurns(topic, round) {
+    if (!topic) return false;
+    return (topic.turns ?? []).some((turn) => (turn.round ?? 1) === round)
+        || defenseTurns.value.some((turn) => turn.subject === topic.subjectKey && (turn.round ?? 1) === round);
+}
+// [AIREVIEW-PLAN-093#3] 从当前议题最大回合往下找第一个有公开内容的回合，找不到回退 1。
+function latestRoundWithTurns(topic) {
+    for (let roundIndex = topicMaxRound.value; roundIndex >= 1; roundIndex -= 1) {
+        if (hasRoundTurns(topic, roundIndex)) return roundIndex;
+    }
+    return 1;
+}
 // [AIREVIEW-PLAN-045#1] 对话流聚焦当前议题：仅聚合该议题的 turns 与该议题的合成答辩回合，再按 selectedRound 过滤。
 const roundTurns = computed(() => {
     const topic = selectedTopic.value;
@@ -620,6 +633,10 @@ watch([() => activePhase.value, maxDebateRound], ([phase, round]) => {
 watch(focusTopicId, (fid) => {
     if (fid && !topicPinned.value) selectedTopicId.value = fid;
 });
+// [AIREVIEW-PLAN-093#3] 聚焦议题变化时把当前回合落到最近一个有公开内容的回合；手动 switchRound 不经过此 watch，仍保持手动选择。
+watch(selectedTopic, (topic) => {
+    if (topic) selectedRound.value = latestRoundWithTurns(topic);
+});
 onUnmounted(() => loadQueue.dispose());
 </script>
 
@@ -790,7 +807,7 @@ onUnmounted(() => loadQueue.dispose());
                         </div>
                         <div class="flow-round-tabs" role="tablist" aria-label="辩论回合">
                             <button v-for="round in topicMaxRound" :key="round" type="button" role="tab" :aria-selected="selectedRound === round" :class="['flow-round-tab', { active: selectedRound === round }]" @click="switchRound(round)">
-                                R{{ round }} <span>{{ round === topicMaxRound && !isTopicTerminal(selectedTopic) ? '进行中' : '已完成' }}</span>
+                                R{{ round }} <span>{{ round === topicMaxRound && !isTopicTerminal(selectedTopic) ? '进行中' : (hasRoundTurns(selectedTopic, round) ? '已完成' : '无内容') }}</span>
                             </button>
                         </div>
 
@@ -814,9 +831,11 @@ onUnmounted(() => loadQueue.dispose());
                                         <circle class="track" cx="50" cy="50" r="42"></circle>
                                         <circle class="fill" cx="50" cy="50" r="42" :style="{ strokeDashoffset: consensusOffset, stroke: consensusStroke }" stroke-dasharray="264"></circle>
                                     </svg>
-                                    <strong>{{ consensusPercent }}%</strong>
+                                    <strong v-if="!hasRoundTurns(selectedTopic, selectedRound) && isTopicTerminal(selectedTopic)">—</strong>
+                                    <strong v-else>{{ consensusPercent }}%</strong>
                                 </div>
-                                <small>共识度（支持 Claim 占比）</small>
+                                <small v-if="!hasRoundTurns(selectedTopic, selectedRound) && isTopicTerminal(selectedTopic)">本轮无公开内容</small>
+                                <small v-else>共识度（支持 Claim 占比）</small>
                                 <p v-if="!proClaims.length && conClaims.length" class="flow-debate-empty">议题当前仅含反对方论点，暂无支持方。</p>
                                 <p class="flow-round-display"><strong>R{{ selectedRound }}</strong> / {{ topicMaxRound }}</p>
                             </div>
