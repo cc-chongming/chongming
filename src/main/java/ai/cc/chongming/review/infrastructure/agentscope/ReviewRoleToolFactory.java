@@ -134,9 +134,12 @@ public class ReviewRoleToolFactory {
                             optionalText(input, "reasonSummary"),
                             evidenceIds(input.get("evidenceIds")));
                     AssessmentService.AssessmentSubmissionResult result = assessmentService.submit(review, submission);
-                    return ToolResultBlock.text("assessmentSaved=true; checkpointKey="
+                    // [AIREVIEW-PLAN-090#2] 写工具块状结果无 delta 流；经 emitter 回灌使公开 trace 可见结果文本。
+                    ToolResultBlock block = ToolResultBlock.text("assessmentSaved=true; checkpointKey="
                             + result.assessment().checkpointKey() + "; status=" + result.assessment().status()
                             + "; replayed=" + result.replayed());
+                    streamResult(param, block);
+                    return block;
                 }
             }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
                     "assessmentSubmissionRejected: " + rejectionReason(exception))));
@@ -209,7 +212,10 @@ public class ReviewRoleToolFactory {
                             defenseCommand == null ? null : defenseCommand.commandId());
                     ClaimService.ClaimSubmissionResult result = claimService.submit(review, submission);
                     consumeDefenseCommand(review, defenseCommand);
-                    return ToolResultBlock.text("claimId=" + result.claim().claimId().value() + "; replayed=" + result.replayed());
+                    // [AIREVIEW-PLAN-090#2] 写工具块状结果无 delta 流；经 emitter 回灌使公开 trace 可见结果文本。
+                    ToolResultBlock block = ToolResultBlock.text("claimId=" + result.claim().claimId().value() + "; replayed=" + result.replayed());
+                    streamResult(param, block);
+                    return block;
                 }
             }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
                     "claim submission rejected: " + rejectionReason(exception))));
@@ -291,7 +297,10 @@ public class ReviewRoleToolFactory {
                             requiredText(param.getInput(), "publicSummary"));
                     InitialReviewProgressService.CompletionResult result = progressService.completeWithoutClaim(
                             review, metadata(review, roleType, param), roleType, derivedSummary);
-                    return ToolResultBlock.text("initialReviewCompleted=true; stage=" + result.stage() + "; replayed=" + result.replayed());
+                    // [AIREVIEW-PLAN-090#2] 写工具块状结果无 delta 流；经 emitter 回灌使公开 trace 可见结果文本。
+                    ToolResultBlock block = ToolResultBlock.text("initialReviewCompleted=true; stage=" + result.stage() + "; replayed=" + result.replayed());
+                    streamResult(param, block);
+                    return block;
                 }
             }).onErrorResume(exception -> Mono.just(ToolResultBlock.error(
                     "initialReviewCompletionRejected: " + rejectionReason(exception))));
@@ -351,6 +360,18 @@ public class ReviewRoleToolFactory {
             return domain.errorCode().name() + ": " + domain.getMessage();
         }
         return failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
+    }
+
+    // [AIREVIEW-PLAN-090#1] 写工具块状结果无 delta 流；经 emitter 回灌使公开 trace 可见结果文本。
+    private static void streamResult(ToolCallParam param, ToolResultBlock block) {
+        try {
+            io.agentscope.core.tool.ToolEmitter emitter = param.getEmitter();
+            if (emitter != null) {
+                emitter.emit(block);
+            }
+        } catch (RuntimeException ignored) {
+            // 发射失败不改变工具语义
+        }
     }
 
     private static Map<String, Object> stringSchema(String description) {

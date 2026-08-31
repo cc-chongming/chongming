@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -53,6 +54,13 @@ public class ReviewDebateToolFactory {
     private static final long DISPATCH_DEFAULT_TTL_SECONDS = 600;
     private static final long DISPATCH_MIN_TTL_SECONDS = 60;
     private static final long DISPATCH_MAX_TTL_SECONDS = 3600;
+
+    // [AIREVIEW-PLAN-090#2] 这些写/调度工具的块状结果无 delta 流，成功后回灌；读工具与
+    // Director/Judge 收尾工具已有各自事件/文本，保持原样。
+    private static final Set<String> STREAMED_WRITE_TOOLS = Set.of(
+            "dispatch_debate_action", "register_topics", "submit_challenge", "submit_rebuttal",
+            "change_claim_position", "request_additional_evidence", "begin_judging",
+            "skip_debate_when_no_conflicts");
 
     private final ReviewRegistry reviewRegistry;
     private final DebateTools debateTools;
@@ -157,7 +165,12 @@ public class ReviewDebateToolFactory {
             return Mono.fromSupplier(() -> {
                 Review review = requireReview(context);
                 synchronized (review) {
-                    return invoke(review, metadata(review, actorRole, param), param.getInput());
+                    ToolResultBlock block = invoke(review, metadata(review, actorRole, param), param.getInput());
+                    // [AIREVIEW-PLAN-090#2] 写工具块状结果无 delta 流；经 emitter 回灌使公开 trace 可见结果文本。
+                    if (STREAMED_WRITE_TOOLS.contains(getName())) {
+                        streamResult(param, block);
+                    }
+                    return block;
                 }
             }).onErrorResume(exception -> {
                 String reason = rejectionReason(exception);
@@ -712,6 +725,18 @@ public class ReviewDebateToolFactory {
         review.recordCommand(metadata, reference);
         operation.run();
         return false;
+    }
+
+    // [AIREVIEW-PLAN-090#1] 写工具块状结果无 delta 流；经 emitter 回灌使公开 trace 可见结果文本。
+    private static void streamResult(ToolCallParam param, ToolResultBlock block) {
+        try {
+            io.agentscope.core.tool.ToolEmitter emitter = param.getEmitter();
+            if (emitter != null) {
+                emitter.emit(block);
+            }
+        } catch (RuntimeException ignored) {
+            // 发射失败不改变工具语义
+        }
     }
 
     private static String text(Map<String, Object> input, String name) { Object value = input.get(name); if (value == null || value.toString().isBlank()) throw new IllegalArgumentException(name + " is required"); return value.toString(); }

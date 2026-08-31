@@ -25,12 +25,16 @@ import ai.cc.chongming.review.infrastructure.agentscope.ReviewDebateToolFactory;
 import ai.cc.chongming.review.infrastructure.agentscope.ReviewWorkflowDispatcher;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateToolCommands;
 import ai.cc.chongming.review.infrastructure.agentscope.tool.DebateTools;
+import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.tool.ToolCallParam;
+import io.agentscope.core.tool.ToolEmitter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -172,6 +176,41 @@ class ReviewDebateToolFactoryTests {
         assertThat(dispatchStore.findByReview(reviewId, 1)).hasSize(1);
     }
 
+    /** [AIREVIEW-PLAN-090#3] 成功签发 dispatch 信封后，块状结果经 emitter 回灌，公开 trace 可见 commandId。 */
+    @Test
+    void dispatchDebateActionStreamsTheCommandIdThroughTheToolEmitter() {
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Review review = Review.restore(reviewId, ReviewStage.DEBATE, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true)), Map.of());
+        ReviewRegistry registry = mock(ReviewRegistry.class);
+        when(registry.find(reviewId)).thenReturn(Optional.of(review));
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        TopicId focus = new TopicId(UUID.randomUUID());
+        store.saveTopic(new DebateTopic(focus, reviewId, "focus.topic", List.of()));
+        InMemoryReviewDispatchStore dispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchService dispatchService = new ReviewDispatchService(dispatchStore, store, draft -> { });
+        ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
+                registry, mock(DebateTools.class), mock(DebateService.class), store, dispatchService);
+        ReviewRuntimeContext context = new ReviewRuntimeContext(
+                reviewId, 1, "test-user", "test-trace", IntakeCancellation.neverCancelled());
+        io.agentscope.core.tool.AgentTool dispatchTool = factory.directorTools(context).stream()
+                .filter(tool -> tool.getName().equals("dispatch_debate_action"))
+                .findFirst().orElseThrow();
+        Map<String, Object> input = Map.of(
+                "recipientRole", "PRODUCT", "allowedAction", "DEFENSE",
+                "topicId", focus.value().toString());
+        CaptureEmitter emitter = new CaptureEmitter();
+
+        dispatchTool.callAsync(ToolCallParam.builder()
+                        .toolUseBlock(new ToolUseBlock("call-focus", "dispatch_debate_action", input))
+                        .input(input)
+                        .emitter(emitter)
+                        .build())
+                .block();
+
+        assertThat(emitter.emittedText()).contains("commandId=");
+    }
+
     @Test
     void registerTopicsSchemaAdvertisesTheOptionalChinesePublicTitle() {
         ReviewDebateToolFactory factory = new ReviewDebateToolFactory(
@@ -224,5 +263,21 @@ class ReviewDebateToolFactoryTests {
         assertThat(proposal.publicTitle()).hasSize(200);
         assertThat(proposal.subjectKey()).isEqualTo("mcp.security");
         assertThat(proposal.claimIds()).isEmpty();
+    }
+
+    /** ToolEmitter 捕获实现：只记录 emit 到的 block 文本，供断言。 */
+    private static final class CaptureEmitter implements ToolEmitter {
+        private final List<String> emitted = new ArrayList<>();
+
+        @Override
+        public void emit(ToolResultBlock block) {
+            emitted.add(block.getOutput().stream()
+                    .map(Object::toString)
+                    .collect(Collectors.joining(" ")));
+        }
+
+        String emittedText() {
+            return String.join(" ", emitted);
+        }
     }
 }
