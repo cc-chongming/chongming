@@ -16,6 +16,9 @@ import java.util.Set;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimId;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.DebateTopicStatus;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.TurnId;
+import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
+import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
+import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimStatus;
 
 /**
  * [AIREVIEW-PLAN-003#1.4] Enforces the bounded debate topic lifecycle and mandatory references.
@@ -79,19 +82,38 @@ public final class DebateStateMachine {
     }
 
     /**
-     * [AIREVIEW-PLAN-024#方案4] One topic's second-round requirement: challenged topics must receive
-     * the rebuttal, open topics still hold unclarified conflicting positions, and any topic with an
-     * unanswered evidence request owes its target role one answer.
+     * [AIREVIEW-PLAN-024#方案4][AIREVIEW-PLAN-082#1] One topic's second-round requirement:
+     * challenged topics must receive the rebuttal, open topics still hold unclarified conflicting
+     * positions, and any topic with an unanswered evidence request owes its target role one answer.
+     * This single-topic overload keeps the legacy evidence-request-only view by passing no claims.
      */
     public boolean requiresSecondRoundAction(DebateTopic topic) {
         Objects.requireNonNull(topic, "topic must not be null");
+        return requiresSecondRoundAction(topic, List.of());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-082#1] Same requirement enriched with the topic's resolved claims. REBUTTED
+     * topics no longer converge solely on an empty action queue: an unwithdrawn P0/P1 OPPOSE claim
+     * means the substantive disagreement is still open and deserves a second round.
+     */
+    public boolean requiresSecondRoundAction(
+            DebateTopic topic,
+            java.util.Collection<ai.cc.chongming.review.domain.model.Claim> claims) {
+        Objects.requireNonNull(topic, "topic must not be null");
+        Objects.requireNonNull(claims, "claims must not be null");
         if (topic.status().isTerminal()) {
             return false;
         }
         if (topic.status() == DebateTopicStatus.OPEN || topic.status() == DebateTopicStatus.CHALLENGED) {
             return true;
         }
-        return hasUnansweredEvidenceRequest(topic.turns());
+        if (hasUnansweredEvidenceRequest(topic.turns())) {
+            return true;
+        }
+        return claims.stream().anyMatch(claim -> claim.position() == ClaimPosition.OPPOSE
+                && (claim.severity() == ClaimSeverity.P0 || claim.severity() == ClaimSeverity.P1)
+                && claim.status() != ClaimStatus.WITHDRAWN);
     }
 
     private boolean hasUnansweredEvidenceRequest(List<DebateTurn> turns) {

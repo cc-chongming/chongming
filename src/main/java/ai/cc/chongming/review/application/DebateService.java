@@ -346,7 +346,14 @@ public class DebateService {
             // (evidence owed, an unanswered challenge, or unclarified positions) the topic converges
             // to judging instead of running an empty second round. Evidence requests persist only in
             // the store, so the topic is rehydrated with its store turns before the check.
-            if (!debateStateMachine.requiresSecondRoundAction(topicWithStoreTurns(review, topic))) {
+            // [AIREVIEW-PLAN-082#2] Claims join the gate: an unwithdrawn P0/P1 OPPOSE claim keeps a
+            // REBUTTED topic open for a second round even when the turn queue drained.
+            DebateTopic topicWithTurns = topicWithStoreTurns(review, topic);
+            List<Claim> topicClaims = topic.claimIds().stream()
+                    .map(claimId -> debateStore.findClaim(review.id(), claimId).orElse(null))
+                    .filter(Objects::nonNull)
+                    .toList();
+            if (!debateStateMachine.requiresSecondRoundAction(topicWithTurns, topicClaims)) {
                 throw new ReviewDomainException(ReviewErrorCode.ILLEGAL_STATE_TRANSITION,
                         "no valid open debate action remains on this topic; converge to judging instead of running an empty second round");
             }

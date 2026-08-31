@@ -10,6 +10,9 @@ import static ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import static ai.cc.chongming.review.domain.model.ReviewTypes.TurnId;
+import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimPosition;
+import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimSeverity;
+import static ai.cc.chongming.review.domain.model.ReviewTypes.ClaimStatus;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -21,6 +24,7 @@ import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.exception.ReviewDomainException;
 import ai.cc.chongming.review.domain.exception.ReviewErrorCode;
 import ai.cc.chongming.review.domain.model.DebateTopic;
+import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurn;
 import ai.cc.chongming.review.domain.model.ReviewTypes.DebateTurnType;
@@ -143,6 +147,63 @@ class DebateServiceTopicRoundTests {
         assertThat(fixture.publisher().drafts(ReviewEventType.DEBATE_ROUND_2_STARTED))
                 .hasSize(eventsAfterFirst);
         assertThat(fixture.review().stage()).isEqualTo(ReviewStage.DEBATE);
+    }
+
+    @Test
+    void rebuttedTopicWithUnwithdrawnP1OpposeClaimBeginsSecondRound() {
+        Fixture fixture = fixture();
+        Claim p1 = claim(claimId(), fixture.review().id(), ClaimSeverity.P1, ClaimStatus.SUBMITTED);
+        DebateTopic topic = rebuttedTopicWithClaims(fixture.store(), fixture.review().id(), List.of(p1));
+
+        DebateService.TopicRoundResult result = fixture.service().beginTopicSecondRound(
+                fixture.review(), metadata(fixture.review(), "rebutted-p1-oppose-round-two"), topic.id());
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.topic().currentRound()).isEqualTo(2);
+        assertThat(fixture.store().findTopic(fixture.review().id(), topic.id()).orElseThrow().currentRound())
+                .isEqualTo(2);
+        ReviewEventDraft draft = fixture.publisher().only(ReviewEventType.DEBATE_ROUND_2_STARTED);
+        assertThat(draft.topicId()).isEqualTo(topic.id());
+    }
+
+    @Test
+    void rebuttedTopicWithOnlyP2OrP3OpposeClaimsRejectsSecondRound() {
+        Fixture fixture = fixture();
+        Claim p2 = claim(claimId(), fixture.review().id(), ClaimSeverity.P2, ClaimStatus.SUBMITTED);
+        Claim p3 = claim(claimId(), fixture.review().id(), ClaimSeverity.P3, ClaimStatus.SUBMITTED);
+        DebateTopic topic = rebuttedTopicWithClaims(fixture.store(), fixture.review().id(), List.of(p2, p3));
+
+        assertThatThrownBy(() -> fixture.service().beginTopicSecondRound(
+                fixture.review(), metadata(fixture.review(), "rebutted-p2-p3-round-two"), topic.id()))
+                .isInstanceOf(ReviewDomainException.class)
+                .extracting(exception -> ((ReviewDomainException) exception).errorCode())
+                .isEqualTo(ReviewErrorCode.ILLEGAL_STATE_TRANSITION);
+        assertThat(topic.currentRound()).isEqualTo(1);
+    }
+
+    private DebateTopic rebuttedTopicWithClaims(
+            InMemoryReviewDebateStore store, ReviewId reviewId, List<Claim> claims) {
+        List<ClaimId> claimIds = claims.stream().map(Claim::claimId).toList();
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), reviewId, "authentication", claimIds);
+        ClaimId targetClaimId = claims.getFirst().claimId();
+        DebateTurn challenge = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.CHALLENGE, targetClaimId, null,
+                "提供刷新令牌证据。", List.of(), null, null, Instant.now());
+        DebateTurn rebuttal = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), 1,
+                RoleType.BACKEND, RoleType.PRODUCT, DebateTurnType.REBUTTAL, null, challenge.turnId(),
+                "后端已给出策略说明。", List.of(), null, null, Instant.now());
+        topic.addChallenge(new DebateStateMachine(), challenge);
+        topic.addRebuttal(new DebateStateMachine(), rebuttal);
+        claims.forEach(store::saveClaim);
+        store.saveTopic(topic);
+        store.saveTurn(reviewId, challenge);
+        store.saveTurn(reviewId, rebuttal);
+        return topic;
+    }
+
+    private static Claim claim(ClaimId claimId, ReviewId reviewId, ClaimSeverity severity, ClaimStatus status) {
+        return new Claim(claimId, reviewId, RoleType.BACKEND, "authentication", severity,
+                ClaimPosition.OPPOSE, "后端反对该方案。", "存在残余风险。", List.of(), status);
     }
 
     // --- fixtures -----------------------------------------------------------
