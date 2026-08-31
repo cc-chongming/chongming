@@ -148,7 +148,8 @@ const phases = [
     { id: 'director', icon: '协', name: '评审规划', subtitle: '创建评审计划' },
     { id: 'review', icon: '审', name: '独立审查', subtitle: '多角色并行' },
     { id: 'conflict', icon: '冲', name: '冲突检测', subtitle: '识别分歧与风险' },
-    { id: 'debate', icon: '辩', name: '多轮辩论', subtitle: '围绕争议收敛' },
+    // [AIREVIEW-PLAN-081#1] 串行议题机制下全局轮次无意义，改名议题辩论；轮次下沉到议题内 R1/R2 选项卡。
+    { id: 'debate', icon: '辩', name: '议题辩论', subtitle: '围绕争议收敛' },
     { id: 'judge', icon: '裁', name: '裁决者裁决', subtitle: '形成评审判断' },
     { id: 'human', icon: '人', name: '人工决策', subtitle: '最终关口' }
 ];
@@ -305,7 +306,8 @@ const dissentCount = computed(() => conflictTopics.value.length - opposingCount.
 const phaseList = computed(() => phases.map((phase) => {
     if (phase.id === 'review') return { ...phase, subtitle: `${completedRoles.value}/${reviewRoleCodes.value.length} 角色初审完成` };
     if (phase.id === 'conflict' && conflictTopics.value.length) return { ...phase, subtitle: `${conflictTopics.value.length} 个议题登记` };
-    if (phase.id === 'debate' && debateTopics.value.length) return { ...phase, subtitle: `第 ${maxDebateRound.value} 轮 · ${debateTopics.value.length} 个议题` };
+    // [AIREVIEW-PLAN-081#2] 副标题不再显示全局轮次：串行机制下轮次是议题级细节。
+    if (phase.id === 'debate' && debateTopics.value.length) return { ...phase, subtitle: `${debateTopics.value.length} 个议题` };
     return phase;
 }));
 
