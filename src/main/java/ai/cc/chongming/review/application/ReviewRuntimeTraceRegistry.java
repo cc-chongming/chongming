@@ -216,6 +216,20 @@ public class ReviewRuntimeTraceRegistry {
     }
 
     /**
+     * [AIREVIEW-PLAN-072#1] Returns the observedAt of the newest event recorded for a runtime,
+     * without creating a trace for an unknown runtime id. Live publishes are clock-stamped and
+     * hydrated traces map the persisted {@code created_at}, so this is the last runtime activity
+     * even after a restart.
+     */
+    public Optional<Instant> lastObservedAt(String runtimeId) {
+        if (runtimeId == null || runtimeId.isBlank()) {
+            return Optional.empty();
+        }
+        RuntimeTrace trace = traces.get(runtimeId);
+        return trace == null ? Optional.empty() : trace.lastObservedAt();
+    }
+
+    /**
      * [AIREVIEW-PLAN-024#6] Per-attempt observability view: independent failure counts plus the
      * latest recorded value of each named stage metric.
      *
@@ -426,6 +440,20 @@ public class ReviewRuntimeTraceRegistry {
                 // Persistence enqueue shares this lock with sequence allocation so concurrent
                 // publishers cannot queue sequence N+1 before sequence N.
                 persist(stamped);
+            }
+        }
+
+        /**
+         * [AIREVIEW-PLAN-072#1] The trimmed event buffer keeps chronological order, so its final
+         * entry carries the newest observedAt. Both live publishes and hydrated persisted rows use
+         * the same observedAt component, keeping the liveness probe restart-safe.
+         */
+        private Optional<Instant> lastObservedAt() {
+            synchronized (this) {
+                if (events.isEmpty()) {
+                    return Optional.empty();
+                }
+                return Optional.of(events.get(events.size() - 1).observedAt());
             }
         }
 

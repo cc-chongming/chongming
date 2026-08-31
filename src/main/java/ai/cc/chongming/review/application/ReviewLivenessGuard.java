@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -78,6 +79,7 @@ public class ReviewLivenessGuard implements ReviewEventListener {
     private final ObjectProvider<JudgeService> judgeServiceProvider;
     private final ObjectProvider<ReviewCommandService> reviewCommandServiceProvider;
     private final ObjectProvider<ReviewDispatchStore> dispatchStoreProvider;
+    private final ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider;
     private final ConcurrentMap<String, LivenessState> states = new ConcurrentHashMap<>();
 
     /** [AIREVIEW-PLAN-063#1] 每个 commandId 的补偿重投计数，跨扫描保留，上限复用 livenessMaxRewakes。 */
@@ -99,7 +101,9 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                 debateServiceProvider, judgeServiceProvider, reviewCommandServiceProvider, null);
     }
 
-    @Autowired
+    /**
+     * [AIREVIEW-PLAN-072#2] 保留旧 8 参构造：仅注入 dispatch store，运行时活动探针传 null 关闭。
+     */
     public ReviewLivenessGuard(
             ReviewRegistry reviewRegistry,
             AgentScopeProperties properties,
@@ -109,6 +113,21 @@ public class ReviewLivenessGuard implements ReviewEventListener {
             ObjectProvider<JudgeService> judgeServiceProvider,
             ObjectProvider<ReviewCommandService> reviewCommandServiceProvider,
             ObjectProvider<ReviewDispatchStore> dispatchStoreProvider) {
+        this(reviewRegistry, properties, runtimeAdapterProvider, conflictDetectionServiceProvider,
+                debateServiceProvider, judgeServiceProvider, reviewCommandServiceProvider, dispatchStoreProvider, null);
+    }
+
+    @Autowired
+    public ReviewLivenessGuard(
+            ReviewRegistry reviewRegistry,
+            AgentScopeProperties properties,
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ObjectProvider<ConflictDetectionService> conflictDetectionServiceProvider,
+            ObjectProvider<DebateService> debateServiceProvider,
+            ObjectProvider<JudgeService> judgeServiceProvider,
+            ObjectProvider<ReviewCommandService> reviewCommandServiceProvider,
+            ObjectProvider<ReviewDispatchStore> dispatchStoreProvider,
+            ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider) {
         this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
@@ -118,6 +137,8 @@ public class ReviewLivenessGuard implements ReviewEventListener {
         this.reviewCommandServiceProvider = reviewCommandServiceProvider;
         // [AIREVIEW-PLAN-063#1] 可为 null（旧构造/测试缝）；redeliverPendingEnvelopes 内按 null 安全处理。
         this.dispatchStoreProvider = dispatchStoreProvider;
+        // [AIREVIEW-PLAN-072#2] 可为 null（旧构造/测试缝）；扫描时按 null 安全退化为仅领域心跳。
+        this.traceRegistryProvider = traceRegistryProvider;
     }
 
     /** [AIREVIEW-PLAN-060#1] committed events are the heartbeat feed; terminal events forget the attempt. */
@@ -162,10 +183,6 @@ public class ReviewLivenessGuard implements ReviewEventListener {
             String key = entry.getKey();
             LivenessState state = entry.getValue();
             try {
-                if (Duration.between(state.lastActivityAt, now)
-                        .compareTo(properties.livenessRewakeIdle()) < 0) {
-                    continue;
-                }
                 String[] parts = key.split(":");
                 if (parts.length != 2) {
                     continue;
@@ -176,6 +193,13 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                     reviewId = new ReviewId(UUID.fromString(parts[0]));
                     attemptNo = Integer.parseInt(parts[1]);
                 } catch (IllegalArgumentException ignored) {
+                    continue;
+                }
+                String runtimeId = ReviewRuntimeContext.runtimeIdFor(reviewId, attemptNo);
+                // [AIREVIEW-PLAN-072#2] 活性判定纳入运行时最后观测时间：任一通道有新活动都不算停摆。
+                Instant lastActivity = lastActivity(state, runtimeId);
+                if (Duration.between(lastActivity, now)
+                        .compareTo(properties.livenessRewakeIdle()) < 0) {
                     continue;
                 }
                 ReviewStage stage = state.stage;
@@ -216,6 +240,22 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                 LOGGER.warn("LIVENESS_SCAN_FAILED key={} error={}", key, exception.toString());
             }
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-072#2] 领域心跳与运行时最后观测时间取较大值；未配置 probe 或该 runtime 无
+     * trace 时回退到领域心跳，保持 PLAN-060 停摆判定的旧语义。
+     */
+    private Instant lastActivity(LivenessState state, String runtimeId) {
+        Instant lastActivity = state.lastActivityAt;
+        ReviewRuntimeTraceRegistry traceRegistry = providerOrNull(traceRegistryProvider);
+        if (traceRegistry != null) {
+            Optional<Instant> lastObservedAt = traceRegistry.lastObservedAt(runtimeId);
+            if (lastObservedAt.isPresent() && lastObservedAt.get().isAfter(lastActivity)) {
+                lastActivity = lastObservedAt.get();
+            }
+        }
+        return lastActivity;
     }
 
     private boolean rewake(Review review, ReviewStage stage, AgentRuntimeAdapter adapter) {
@@ -369,14 +409,19 @@ public class ReviewLivenessGuard implements ReviewEventListener {
                 .map(activation -> activation.roleType().name())
                 .sorted()
                 .collect(Collectors.joining(","));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+        ReviewRuntimeTraceRegistry traceRegistry = providerOrNull(traceRegistryProvider);
+        Instant lastTraceActivity = traceRegistry == null
+                ? Instant.EPOCH
+                : traceRegistry.lastObservedAt(runtimeId).orElse(Instant.EPOCH);
         boolean failed;
         synchronized (review) {
             failed = commandService.failReview(review,
                     "LIVENESS_TIMEOUT: 初审活性超时，未完成角色=[" + incompleteRoles + "]");
         }
         if (failed) {
-            LOGGER.warn("LIVENESS_FORCE_FAIL reviewId={} attemptNo={} incompleteRoles={}",
-                    review.id().value(), review.attemptNo(), incompleteRoles);
+            LOGGER.warn("LIVENESS_FORCE_FAIL reviewId={} attemptNo={} incompleteRoles={} lastTraceActivity={}",
+                    review.id().value(), review.attemptNo(), incompleteRoles, lastTraceActivity);
         } else {
             LOGGER.info("LIVENESS_FORCE_FAIL_SKIPPED reviewId={} attemptNo={} reason=NOT_FAILABLE stage={}",
                     review.id().value(), review.attemptNo(), review.stage());

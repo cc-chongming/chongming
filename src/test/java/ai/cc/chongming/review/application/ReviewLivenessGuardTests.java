@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -307,6 +308,50 @@ class ReviewLivenessGuardTests {
     }
 
     // ------------------------------------------------------------------
+    // [AIREVIEW-PLAN-072#2] runtime activity participates in the idle decision
+    // ------------------------------------------------------------------
+
+    @Test
+    void runtimeActivitySuppressesRewakeAndForceFail() throws Exception {
+        Review review = review(ReviewStage.INITIAL_REVIEW,
+                new RoleActivation(RoleType.PRODUCT, "product", false));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+        ReviewRuntimeTraceRegistry traceRegistry = mock(ReviewRuntimeTraceRegistry.class);
+        // [AIREVIEW-PLAN-072#4] 领域心跳已停摆，但运行时 trace 仍新鲜：一次扫描既不重唤醒也不強杀。
+        when(traceRegistry.lastObservedAt(runtimeId)).thenReturn(Optional.of(Instant.now()));
+        guard = guardWithTrace(Duration.ofMinutes(10), 3, traceRegistry);
+        guard.onCommitted(event(review, ReviewEventType.ROLE_STARTED, ReviewStage.INITIAL_REVIEW));
+        ageState(guard, review.id(), review.attemptNo(), Instant.EPOCH);
+
+        guard.scan();
+
+        verify(adapter, never()).send(anyString(), anyString(), anyString());
+        verify(commandService, never()).failReview(any(), anyString());
+    }
+
+    @Test
+    void dualSilenceStillRewakesAndFails() throws Exception {
+        Review review = review(ReviewStage.INITIAL_REVIEW,
+                new RoleActivation(RoleType.PRODUCT, "product", false));
+        String runtimeId = ReviewRuntimeContext.runtimeIdFor(review.id(), review.attemptNo());
+        ReviewRuntimeTraceRegistry traceRegistry = mock(ReviewRuntimeTraceRegistry.class);
+        when(traceRegistry.lastObservedAt(runtimeId)).thenReturn(Optional.empty());
+        guard = guardWithTrace(Duration.ZERO, 3, traceRegistry);
+        guard.onCommitted(event(review, ReviewEventType.ROLE_STARTED, ReviewStage.INITIAL_REVIEW));
+        ageState(guard, review.id(), review.attemptNo(), Instant.EPOCH);
+
+        guard.scan();
+        guard.scan();
+        guard.scan();
+        guard.scan();
+
+        verify(adapter, times(4)).send(eq(runtimeId), eq(runtimeId + "-product"), anyString());
+        verify(commandService, times(1)).failReview(eq(review), argThat(reason -> reason != null
+                && reason.startsWith("LIVENESS_TIMEOUT: 初审活性超时，未完成角色=[")
+                && reason.contains("PRODUCT")));
+    }
+
+    // ------------------------------------------------------------------
     // heartbeat reset and terminal cleanup
     // ------------------------------------------------------------------
 
@@ -485,6 +530,27 @@ class ReviewLivenessGuardTests {
                 providerOf(adapter), providerOf(conflictDetectionService),
                 providerOf(debateService), providerOf(judgeService), providerOf(commandService),
                 dispatchStore == null ? null : providerOf(dispatchStore));
+    }
+
+    /** [AIREVIEW-PLAN-072#4] 注入运行时 trace probe；traceRegistry 为 null 时按旧 9 参构造关闭。 */
+    private ReviewLivenessGuard guardWithTrace(Duration idle, int maxRewakes, ReviewRuntimeTraceRegistry traceRegistry) {
+        return new ReviewLivenessGuard(registry, properties(idle, maxRewakes),
+                providerOf(adapter), providerOf(conflictDetectionService),
+                providerOf(debateService), providerOf(judgeService), providerOf(commandService),
+                null, traceRegistry == null ? null : providerOf(traceRegistry));
+    }
+
+    /** [AIREVIEW-PLAN-072#4] 用反射把领域心跳拨回过去，跳过 Thread.sleep 的时序不确定性。 */
+    @SuppressWarnings("unchecked")
+    private static void ageState(ReviewLivenessGuard guard, ReviewId reviewId, int attemptNo, Instant at)
+            throws Exception {
+        java.lang.reflect.Field statesField = ReviewLivenessGuard.class.getDeclaredField("states");
+        statesField.setAccessible(true);
+        Map<String, Object> states = (Map<String, Object>) statesField.get(guard);
+        Object state = states.get(reviewId.value() + ":" + attemptNo);
+        java.lang.reflect.Field lastActivityField = state.getClass().getDeclaredField("lastActivityAt");
+        lastActivityField.setAccessible(true);
+        lastActivityField.set(state, at);
     }
 
     private AgentScopeProperties properties(Duration idle, int maxRewakes) {
