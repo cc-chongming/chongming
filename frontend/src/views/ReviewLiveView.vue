@@ -1,6 +1,6 @@
 <script setup>
 // [AIREVIEW-PLAN-034#1#6] De-bubbled stream panels, tool-call grouping layout and Chinese role/phase labels.
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch, onMounted } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatChinaTime } from '../services/china-time';
 import LiveAgentConversation from '../components/LiveAgentConversation.vue';
@@ -218,7 +218,10 @@ function syncPaced() {
         dwellTimer = globalThis.setTimeout(() => { dwellTimer = null; syncPaced(); }, MIN_DWELL_MS);
     }
 }
-watch([activePhaseIndex, selectedPhase], syncPaced, { immediate: true });
+// [AIREVIEW-PLAN-073#1-fix] 去掉 immediate：setup 期强制求值 activePhaseIndex 会触碰后定义的 computed（TDZ 白屏）；
+// 首帧在 onMounted 直接落位，dwell 仅约束会话内的后续推进。
+watch([activePhaseIndex, selectedPhase], syncPaced);
+onMounted(() => { pacedIndex.value = activePhaseIndex.value; });
 onUnmounted(() => { if (dwellTimer != null) globalThis.clearTimeout(dwellTimer); });
 
 // [AIREVIEW-PLAN-073#2] activePhase 以节奏层 pacedIndex 落位（徽章 activePhaseIndex 仍立即反映目标）；
