@@ -25,3 +25,5 @@
 - 2026-08-31 子代理 f5196278 交付；父代理审查 diff 无夹带；vitest 164 全绿；产物同步；提交。
 - 2026-08-31 hotfix be8b500：immediate watch 在 setup 期强制求值 activePhaseIndex，触碰后定义的 computed 触发 TDZ 白屏；
   改为非 immediate watch + onMounted 首帧直接落位（dwell 仅约束会话内后续推进）。
+- 2026-08-31 hotfix2：Vue watch 的源函数在 watch 创建时即求值（与 immediate 无关），
+  位于 computed 定义之前的 watch 仍 TDZ；将该 watch 移至全部 computed 之后。
