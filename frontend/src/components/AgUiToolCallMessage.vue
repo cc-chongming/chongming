@@ -1,6 +1,7 @@
 <script setup>
 // [AIREVIEW-PLAN-023#7.2] Tools stay compact and collapsed; diagnostics are masked before display.
 // [AIREVIEW-PLAN-034#2] Monochrome SVG tool icon; light expanded I/O panels.
+// [AIREVIEW-PLAN-079#1] Output block renders only once the tool reaches a terminal lifecycle state.
 import { computed, ref } from 'vue';
 import { maskSensitiveValue } from '../services/runtime-conversation-adapter';
 
@@ -26,6 +27,10 @@ const statusLabel = computed(() => ({
     RUNNING: '进行中', STREAMING: '进行中', SUCCESS: '已完成', COMPLETED: '已完成',
     ERROR: '失败', FAILED: '失败', DENIED: '已拒绝', INTERRUPTED: '已中断'
 }[effectiveStatus.value] ?? effectiveStatus.value ?? '未知状态'));
+// [AIREVIEW-PLAN-079#1] Effective status is the component's single terminal-state signal; reuse it so
+// pending/streaming observations never open an early output block.
+const TERMINAL_STATUSES = new Set(['SUCCESS', 'COMPLETED', 'ERROR', 'FAILED', 'DENIED', 'INTERRUPTED']);
+const isTerminal = computed(() => TERMINAL_STATUSES.has(effectiveStatus.value));
 const maskedInput = computed(() => maskSensitiveValue(props.item.input));
 const maskedOutput = computed(() => maskSensitiveValue(props.item.output));
 const outputSummary = computed(() => {
@@ -37,7 +42,8 @@ const outputSummary = computed(() => {
 const elapsed = computed(() => props.item.elapsedMs == null ? null : `${props.item.elapsedMs}ms`);
 
 function format(value) {
-    if (value == null) return '暂无数据';
+    // [AIREVIEW-PLAN-079#2] Only terminal empty output reaches this path.
+    if (value == null) return '（无输出）';
     if (typeof value === 'string') return value;
     try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
@@ -70,7 +76,8 @@ async function copy(kind, value) {
                     <header><h3>输入</h3><button type="button" @click="copy('input', maskedInput)">{{ copied === 'input' ? '已复制' : '复制' }}</button></header>
                     <pre>{{ format(maskedInput) }}</pre>
                 </section>
-                <section>
+                <!-- [AIREVIEW-PLAN-079#3] Keep “等待工具返回…” and status badge while running; output renders on terminal state only. -->
+                <section v-if="isTerminal">
                     <header><h3>输出</h3><button type="button" @click="copy('output', maskedOutput)">{{ copied === 'output' ? '已复制' : '复制' }}</button></header>
                     <pre>{{ format(maskedOutput) }}</pre>
                 </section>
