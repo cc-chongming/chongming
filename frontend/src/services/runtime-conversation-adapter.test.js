@@ -5,7 +5,8 @@ import {
     gateDifference,
     isReasoningEvent,
     maskSensitiveValue,
-    partitionClaimsByPosition
+    partitionClaimsByPosition,
+    sanitizeEchoedToolDump
 } from './runtime-conversation-adapter';
 
 describe('runtime conversation adapter', () => {
@@ -226,5 +227,17 @@ describe('runtime conversation adapter', () => {
         expect(published).toEqual(['review-b']);
         expect(disposed.length).toBeGreaterThanOrEqual(2);
         expect(visibility).toEqual([false, false, true]);
+    });
+
+    it('sanitizes echoed untrusted tool dumps out of public message text', () => {
+        const withDump = '这是我的结论。\n\n[BEGIN_UNTRUSTED_TOOL_RESULT tool=grep_files]\nsecret raw\n[END_UNTRUSTED_TOOL_RESULT]';
+        expect(sanitizeEchoedToolDump(withDump)).toBe('这是我的结论。\n\n…（工具原文已省略，详见工具调用组）');
+        expect(sanitizeEchoedToolDump(withDump)).not.toContain('[BEGIN_UNTRUSTED_TOOL_RESULT');
+        expect(sanitizeEchoedToolDump(withDump)).not.toContain('secret raw');
+    });
+
+    it('returns message text unchanged when no tool dump marker is present', () => {
+        expect(sanitizeEchoedToolDump('没有工具原文的正文。')).toBe('没有工具原文的正文。');
+        expect(sanitizeEchoedToolDump('')).toBe('');
     });
 });

@@ -54,6 +54,14 @@ export function isReasoningEvent(event) {
     return type.startsWith('REASONING_') || type.startsWith('THINKING_');
 }
 
+// [AIREVIEW-PLAN-089#1] 模型有时把不可信工具原文整段复述进正文；公开对话只保留标记前的自有表述。
+export function sanitizeEchoedToolDump(text) {
+    if (typeof text !== 'string' || !text) return text ?? '';
+    const idx = text.indexOf('[BEGIN_UNTRUSTED_TOOL_RESULT');
+    if (idx < 0) return text;
+    return text.slice(0, idx).trimEnd() + '\n\n…（工具原文已省略，详见工具调用组）';
+}
+
 export function partitionClaimsByPosition(claims = []) {
     return {
         support: claims.filter((claim) => claim?.position === 'SUPPORT'),
@@ -227,7 +235,9 @@ function reduceEvents(events, start, items, itemsByKey, roles, handledEvents) {
             continue;
         }
         if (event.type === 'TEXT_MESSAGE_END') {
-            agentItem(event, 'message', eventKey(event, 'message')).status = 'completed';
+            const ended = agentItem(event, 'message', eventKey(event, 'message'));
+            ended.status = 'completed';
+            ended.content = sanitizeEchoedToolDump(ended.content);
             continue;
         }
         if (event.type === 'TOOL_CALL_START') {
