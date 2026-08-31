@@ -55,6 +55,8 @@ const selectedPhase = ref(null);
 const selectedRound = ref(1);
 // [AIREVIEW-PLAN-045#1] 辩论议题 Tab：记录当前聚焦议题；议题列表变化（新增/重放）时按 topicId 稳定选择，选中项消失自动回落第一个。
 const selectedTopicId = ref(null);
+// [AIREVIEW-PLAN-083#2] 手动切换议题后钉住选择，服务端焦点推进不再覆盖；点“回到焦点”解除。
+const topicPinned = ref(false);
 // [AIREVIEW-PLAN-050#1] Claim 详情弹框：保存被点击的 Claim（null 表示关闭）。
 const claimDetail = ref(null);
 const expandedRole = ref(null);
@@ -234,6 +236,14 @@ const debateTopics = computed(() => store.state.debates ?? []);
 // [AIREVIEW-PLAN-045#1] 当前聚焦议题：按 selectedTopicId 匹配，匹配不到（选中项消失/重放/换评审）自动回落第一个议题。
 const selectedTopic = computed(() => debateTopics.value.find((topic) => topic.topicId === selectedTopicId.value)
     ?? debateTopics.value[0] ?? null);
+// [AIREVIEW-PLAN-083#1] 服务端焦点议题：列表序即登记序，首个未终结议题即当前焦点。
+const focusTopicId = computed(() => debateTopics.value.find((topic) => !isTopicTerminal(topic))?.topicId ?? null);
+// [AIREVIEW-PLAN-083#1] 议题状态：已终结→已裁决；焦点→进行中；其余→排队中。
+function topicStatus(topic) {
+    if (isTopicTerminal(topic)) return 'adjudicated';
+    if (topic?.topicId === focusTopicId.value) return 'ongoing';
+    return 'queued';
+}
 const allClaims = computed(() => debateTopics.value.flatMap((topic) => topic.claims ?? []));
 const roleClaims = computed(() => {
     const byId = new Map();
@@ -502,6 +512,8 @@ function isTopicAdjudicated(topic) {
 
 // [AIREVIEW-PLAN-045#1] 切换聚焦议题：仅当所选回合超出该议题最大回合时回落（不强行重置回合）。
 function switchTopic(topic) {
+    // [AIREVIEW-PLAN-083#2] 手动点选议题即钉住，焦点议题推进时不再覆盖用户选择。
+    topicPinned.value = true;
     selectedTopicId.value = topic?.topicId ?? null;
     const topicTurns = topic?.turns ?? [];
     const topicMax = Math.max(1, topic?.currentRound ?? 1, ...topicTurns.map((turn) => turn.round ?? 1));
@@ -603,6 +615,10 @@ watch(() => props.reviewId, load, { immediate: true });
 watch([() => activePhase.value, maxDebateRound], ([phase, round]) => {
     if (phase === 'debate' && round > selectedRound.value) selectedRound.value = round;
 }, { immediate: true });
+// [AIREVIEW-PLAN-083#2] 未钉住时焦点议题推进自动跟随（无需 immediate：selectedTopic 已有回落兜底）。
+watch(focusTopicId, (fid) => {
+    if (fid && !topicPinned.value) selectedTopicId.value = fid;
+});
 onUnmounted(() => loadQueue.dispose());
 </script>
 
@@ -766,8 +782,10 @@ onUnmounted(() => loadQueue.dispose());
                         <!-- [AIREVIEW-PLAN-045#1] 议题 Tab 栏：聚焦议题切换（法庭、轮次上限与对话流均随议题联动），位于回合选项卡上方。 -->
                         <div class="flow-topic-tabs" role="tablist" aria-label="辩论议题">
                             <button v-for="(topic, index) in debateTopics" :key="topic.topicId" type="button" role="tab" :aria-selected="selectedTopic?.topicId === topic.topicId" :class="['flow-topic-tab', { active: selectedTopic?.topicId === topic.topicId }]" @click="switchTopic(topic)">
-                                <strong>议题 {{ index + 1 }}</strong><span class="flow-topic-title">{{ topic.title ?? topic.subjectKey }}</span><small :class="['flow-topic-status', isTopicAdjudicated(topic) ? 'adjudicated' : 'ongoing']">{{ isTopicAdjudicated(topic) ? '已裁决' : '进行中' }}</small>
+                                <strong>议题 {{ index + 1 }}</strong><span class="flow-topic-title">{{ topic.title ?? topic.subjectKey }}</span><small :class="['flow-topic-status', topicStatus(topic)]">{{ topicStatus(topic) === 'adjudicated' ? '已裁决' : topicStatus(topic) === 'ongoing' ? '进行中' : '排队中' }}</small>
                             </button>
+                            <!-- [AIREVIEW-PLAN-083#2] 手动切走后显示“回到焦点”，解除钉住并跳回服务端焦点议题。 -->
+                            <button v-if="topicPinned && focusTopicId && selectedTopic?.topicId !== focusTopicId" type="button" class="flow-topic-follow" @click="topicPinned = false; selectedTopicId = focusTopicId">回到焦点</button>
                         </div>
                         <div class="flow-round-tabs" role="tablist" aria-label="辩论回合">
                             <button v-for="round in topicMaxRound" :key="round" type="button" role="tab" :aria-selected="selectedRound === round" :class="['flow-round-tab', { active: selectedRound === round }]" @click="switchRound(round)">

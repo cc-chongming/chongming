@@ -364,6 +364,9 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-topic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .flow-topic-status { flex: 0 0 auto; padding: .12rem .42rem; border-radius: 99px; font-size: .6rem; font-weight: 800; white-space: nowrap; color: #79e6b6; background: rgba(52, 211, 153, .16); }
 .flow-topic-status.adjudicated { color: #b9c3db; background: var(--flow-surface-3); }
+.flow-topic-status.queued { color: #94a3b8; background: rgba(148, 163, 184, .16); }
+/* [AIREVIEW-PLAN-083#2] 回到焦点按钮：挤到 Tab 栏最右，变量色随主题自动切换。 */
+.flow-topic-follow { margin-left: auto; padding: .12rem .5rem; border: 1px solid var(--flow-border); border-radius: 99px; background: transparent; color: var(--flow-accent); font-size: .62rem; font-weight: 700; cursor: pointer; }
 /* [AIREVIEW-PLAN-050#3] 法庭/列去掉 overflow（sticky 陷阱），标签随看板滚动钉在顶部。 */
 .flow-debate-court { display: grid; grid-template-columns: minmax(0, 1fr) 11rem minmax(0, 1fr); min-height: 16rem; background: var(--flow-surface); border: 1px solid var(--flow-border); border-radius: .65rem; }
 .flow-debate-side { padding: .95rem; }.flow-debate-side.pro { border-right: 1px solid var(--flow-border); }.flow-debate-side.con { border-left: 1px solid var(--flow-border); }
@@ -739,6 +742,7 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-topic-tab.active { color: #fff; background: #2563eb; border-color: #2563eb; box-shadow: 0 2px 10px rgba(37, 99, 235, .28); }
 .flow-topic-status { color: #047857; background: #d1fae5; }
 .flow-topic-status.adjudicated { color: #57534e; background: #e7e5e4; }
+.flow-topic-status.queued { color: #64748b; background: #e2e8f0; }
 /* [AIREVIEW-PLAN-050#1] Claim 详情弹框：遮罩 + 居中浅色 DSH 卡片；z-index 70 高于页面内容与抽屉浮层；正文区超高时自身内滚。 */
 .flow-claim-modal-overlay { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 1rem; background: rgba(28, 25, 23, .45); }
 .flow-claim-modal { display: flex; flex-direction: column; width: min(40rem, calc(100vw - 2rem)); max-height: 70vh; color: #1c1917; background: #fff; border: 1px solid #d6d3d1; border-radius: .65rem; box-shadow: 0 14px 44px rgba(28, 25, 23, .24); }
