@@ -350,6 +350,13 @@ function hasRoundTurns(topic, round) {
     return (topic.turns ?? []).some((turn) => (turn.round ?? 1) === round)
         || defenseTurns.value.some((turn) => turn.subject === topic.subjectKey && (turn.round ?? 1) === round);
 }
+// [AIREVIEW-PLAN-095#1] 空回合无交叉质询的原因：唯一质疑方即支持方自身（自冲突）或质询未获回应。
+function emptyRoundReason(topic) {
+    const claims = topic?.claims ?? [];
+    const supportRoles = new Set(claims.filter((claim) => claim.position === 'SUPPORT').map((claim) => claim.role));
+    const externalOppose = claims.some((claim) => claim.position === 'OPPOSE' && !supportRoles.has(claim.role));
+    return externalOppose ? '质询未获回应' : '自冲突·无交叉质询';
+}
 // [AIREVIEW-PLAN-093#3] 从当前议题最大回合往下找第一个有公开内容的回合，找不到回退 1。
 function latestRoundWithTurns(topic) {
     for (let roundIndex = topicMaxRound.value; roundIndex >= 1; roundIndex -= 1) {
@@ -834,7 +841,7 @@ onUnmounted(() => loadQueue.dispose());
                                     <strong v-if="!hasRoundTurns(selectedTopic, selectedRound) && isTopicTerminal(selectedTopic)">—</strong>
                                     <strong v-else>{{ consensusPercent }}%</strong>
                                 </div>
-                                <small v-if="!hasRoundTurns(selectedTopic, selectedRound) && isTopicTerminal(selectedTopic)">本轮无公开内容</small>
+                                <small v-if="!hasRoundTurns(selectedTopic, selectedRound) && isTopicTerminal(selectedTopic)">本轮无公开内容 · {{ emptyRoundReason(selectedTopic) }}</small>
                                 <small v-else>共识度（支持 Claim 占比）</small>
                                 <p v-if="!proClaims.length && conClaims.length" class="flow-debate-empty">议题当前仅含反对方论点，暂无支持方。</p>
                                 <p class="flow-round-display"><strong>R{{ selectedRound }}</strong> / {{ topicMaxRound }}</p>
@@ -872,7 +879,7 @@ onUnmounted(() => loadQueue.dispose());
                                     <small v-if="turn.stanceBefore || turn.stanceAfter">立场：{{ turn.stanceBefore || '—' }} → {{ turn.stanceAfter || '—' }}</small>
                                 </li>
                             </ol>
-                            <p v-else class="flow-debate-empty">该回合暂无公开的质询或答辩记录。</p>
+                            <p v-else class="flow-debate-empty">该回合暂无公开的质询或答辩记录（{{ emptyRoundReason(selectedTopic) }}）。</p>
                         </section>
                         </div><!-- /flow-debate-split [AIREVIEW-PLAN-043#4] -->
                     </template>
