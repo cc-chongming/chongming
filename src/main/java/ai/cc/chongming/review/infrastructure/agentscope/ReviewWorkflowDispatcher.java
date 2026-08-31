@@ -2,6 +2,7 @@ package ai.cc.chongming.review.infrastructure.agentscope;
 
 import ai.cc.chongming.review.application.DebateConvergenceGuard;
 import ai.cc.chongming.review.application.DebateFocusResolver;
+import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewEventListener;
@@ -105,6 +106,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     private final ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider;
     private final ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider;
     private final ObjectProvider<ReviewOrchestrationService> orchestrationProvider;
+    // [AIREVIEW-PLAN-084#1] 末题关闭即进裁决；ObjectProvider 防与 DebateService 事件构造循环。
+    private final ObjectProvider<DebateService> debateServiceProvider;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
     // [AIREVIEW-PLAN-075#3] per-attempt wake 冷却状态：lastTurnEventAt / lastWakeAt / 上次文案 hash。
     private final ConcurrentMap<String, WakeCooldownState> wakeCooldowns = new ConcurrentHashMap<>();
@@ -133,9 +136,30 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     }
 
     /**
-     * [AIREVIEW-PLAN-069#4] Canonical Spring constructor. Terminal-state cleanup dependencies are
-     * injected as lazy {@link ObjectProvider}s so the dispatcher never hard-depends on beans that
-     * may themselves receive review events (no construction cycle).
+     * [AIREVIEW-PLAN-069#4] Compatibility constructor used by older tests; the DebateService
+     * provider is absent, so terminal-close auto-judging is disabled for those call sites.
+     */
+    public ReviewWorkflowDispatcher(
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ReviewRegistry reviewRegistry,
+            ReviewDispatchService dispatchService,
+            ReviewDebateStore debateStore,
+            ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider,
+            AgentScopeProperties properties,
+            ObjectProvider<ReviewLivenessGuard> livenessGuardProvider,
+            ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider,
+            ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider,
+            ObjectProvider<ReviewOrchestrationService> orchestrationProvider) {
+        this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, convergenceGuardProvider,
+                properties, livenessGuardProvider, planPromoterProvider, traceRegistryProvider,
+                orchestrationProvider, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4][AIREVIEW-PLAN-084#1] Canonical Spring constructor. Terminal-state
+     * cleanup and last-close auto-judging dependencies are injected as lazy {@link ObjectProvider}s
+     * so the dispatcher never hard-depends on beans that may themselves receive review events
+     * (no construction cycle).
      */
     @org.springframework.beans.factory.annotation.Autowired
     public ReviewWorkflowDispatcher(
@@ -148,7 +172,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             ObjectProvider<ReviewLivenessGuard> livenessGuardProvider,
             ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider,
             ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider,
-            ObjectProvider<ReviewOrchestrationService> orchestrationProvider) {
+            ObjectProvider<ReviewOrchestrationService> orchestrationProvider,
+            ObjectProvider<DebateService> debateServiceProvider) {
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
         this.reviewRegistry = reviewRegistry;
         this.dispatchService = dispatchService;
@@ -159,6 +184,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         this.planPromoterProvider = planPromoterProvider;
         this.traceRegistryProvider = traceRegistryProvider;
         this.orchestrationProvider = orchestrationProvider;
+        this.debateServiceProvider = debateServiceProvider;
     }
 
     /** [AIREVIEW-PLAN-059#4] properties 缺失（旧构造/测试缝）时按配置默认值视为串行开启。 */
@@ -236,6 +262,24 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
                 wakeDirector(event, "A debate topic was closed. " + focusText
                         + "If more topics still need their second round, open it per topic with begin_second_round(topicId) (议题级，仅该议题进入第二轮); when every topic is terminal, use begin_judging.");
                 nextFocus.ifPresent(topic -> advanceChallengeQueue(event, topic.id(), SERVER_CHALLENGE_ON_FOCUS_ADVANCE));
+            }
+            // [AIREVIEW-PLAN-084#1] 末题关闭即确定性进裁决：wake 之后若 store 内全部议题已终态，
+            // 直接 resolve DebateService 调用 beginJudging；DebateService 自身的 064 幂等守卫保证重放安全。
+            if (current != null && debateStore != null
+                    && debateStore.findTopics(current.id()).stream()
+                            .allMatch(topic -> topic.status().isTerminal())) {
+                DebateService debateService = debateServiceProvider == null
+                        ? null : debateServiceProvider.getIfAvailable();
+                if (debateService != null) {
+                    try {
+                        debateService.beginJudging(current);
+                        LOGGER.info("BEGIN_JUDGING_ON_LAST_CLOSE reviewId={} attemptNo={}",
+                                current.id().value(), current.attemptNo());
+                    } catch (RuntimeException exception) {
+                        LOGGER.warn("BEGIN_JUDGING_ON_LAST_CLOSE_FAILED reviewId={} attemptNo={}",
+                                current.id().value(), current.attemptNo(), exception);
+                    }
+                }
             }
         } else if (event.type() == ReviewEventType.CHALLENGE_SUBMITTED) {
             issueRebuttalDispatch(event);

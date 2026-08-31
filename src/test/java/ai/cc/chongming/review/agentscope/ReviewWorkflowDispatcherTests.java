@@ -13,6 +13,7 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewLivenessGuard;
@@ -633,6 +634,42 @@ class ReviewWorkflowDispatcherTests {
         assertThat(dispatchStore.findByReview(judging.id(), judging.attemptNo())).isEmpty();
     }
 
+    // --- [AIREVIEW-PLAN-084#3] last topic CLOSED immediately begins judging --------------------------
+
+    @Test
+    void closingLastTopicBeginsJudgingWhenAllTopicsAreTerminal() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry isolatedRegistry = new InMemoryReviewRegistry();
+        Review owner = debateReview(isolatedRegistry);
+        DebateTopic resolved = restoredTopic(owner, "resolved.topic", DebateTopicStatus.RESOLVED, "已决议");
+        DebateTopic escalated = restoredTopic(owner, "escalated.topic", DebateTopicStatus.ESCALATED, "已升级");
+        store.saveTopic(resolved);
+        store.saveTopic(escalated);
+        DebateService debateService = mock(DebateService.class);
+
+        judgingDispatcher(isolatedRegistry, store, debateService)
+                .onCommitted(eventFor(owner, ReviewEventType.DEBATE_TOPIC_CLOSED, null, resolved.id()));
+
+        verify(debateService).beginJudging(owner);
+    }
+
+    @Test
+    void closingNonLastTopicNeverBeginsJudgingWhileAnyTopicIsNotTerminal() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry isolatedRegistry = new InMemoryReviewRegistry();
+        Review owner = debateReview(isolatedRegistry);
+        DebateTopic resolved = restoredTopic(owner, "resolved.topic", DebateTopicStatus.RESOLVED, "已决议");
+        DebateTopic open = new DebateTopic(new TopicId(UUID.randomUUID()), owner.id(), "open.topic", List.of());
+        store.saveTopic(resolved);
+        store.saveTopic(open);
+        DebateService debateService = mock(DebateService.class);
+
+        judgingDispatcher(isolatedRegistry, store, debateService)
+                .onCommitted(eventFor(owner, ReviewEventType.DEBATE_TOPIC_CLOSED, null, resolved.id()));
+
+        verify(debateService, never()).beginJudging(any());
+    }
+
     @Test
     void secondSupportClaimDoesNotReArmServerChallenges() {
         Review defending = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
@@ -713,6 +750,32 @@ class ReviewWorkflowDispatcherTests {
                 Map.of());
         registry.register(fresh);
         return fresh;
+    }
+
+    /** [AIREVIEW-PLAN-084#3] 独立的 DEBATE review，避免与 setUp 共享 store 中的非终态议题互相污染。 */
+    private Review debateReview(InMemoryReviewRegistry targetRegistry) {
+        Review fresh = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.DEBATE, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                Map.of());
+        targetRegistry.register(fresh);
+        return fresh;
+    }
+
+    /** [AIREVIEW-PLAN-084#3] 预置终态议题快照，模拟末题关闭时的 store 状态。 */
+    private DebateTopic restoredTopic(Review owner, String subjectKey, DebateTopicStatus status, String resolution) {
+        return DebateTopic.restore(new TopicId(UUID.randomUUID()), owner.id(), subjectKey, List.of(),
+                status, 1, List.of(), resolution, Instant.now());
+    }
+
+    /** [AIREVIEW-PLAN-084#3] 注入 mock DebateService 的 dispatcher；自带独立 dispatch store 不串扰 shared 状态。 */
+    private ReviewWorkflowDispatcher judgingDispatcher(
+            InMemoryReviewRegistry targetRegistry, InMemoryReviewDebateStore targetStore,
+            DebateService debateService) {
+        InMemoryReviewDispatchStore isolatedDispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchService isolatedDispatch = new ReviewDispatchService(isolatedDispatchStore, targetStore, draft -> { });
+        return new ReviewWorkflowDispatcher(mockProvider(), targetRegistry, isolatedDispatch, targetStore, null,
+                serialProperties(false), null, null, null, null, providerOf(debateService));
     }
 
     private Claim claim(Review owner, RoleType role, ClaimSeverity severity, ClaimPosition position) {
