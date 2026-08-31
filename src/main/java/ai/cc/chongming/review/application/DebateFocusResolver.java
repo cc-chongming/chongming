@@ -10,7 +10,8 @@ import java.util.Optional;
 /**
  * [AIREVIEW-PLAN-059#2] 议题串行辩论的焦点解析器：store 列表序第一个非终态议题即焦点，
  * 调度信封仅可为焦点议题签发，其余议题排队；焦点终态后自动前进到下一个非终态议题。
- * 纯函数实现，便于单测；列表序在 MyBatis 为 topic_id 序、内存实现为登记序，二者皆稳定。
+ * 纯函数实现，便于单测；列表序在 MyBatis 为 created_at, topic_id 序、内存实现为登记序，二者皆稳定。
+ * [AIREVIEW-PLAN-074#2] 登记序见 InMemoryReviewDebateStore 的 LinkedHashMap 实现。
  */
 public final class DebateFocusResolver {
 

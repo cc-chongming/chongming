@@ -88,13 +88,17 @@ public interface DebatePersistenceMapper {
             """)
     int upsertTopics(@Param("rows") List<TopicRow> rows);
 
+    /**
+     * [AIREVIEW-PLAN-074#1] Topics are returned in registration/focus order instead of random UUID
+     * order, so the first tab and first open focus match what the user registered first.
+     */
     @Select("""
             SELECT topic_id AS topicId, review_id AS reviewId, subject_key AS subjectKey,
                    public_title AS publicTitle, claim_ids_json AS claimIdsJson, status,
                    current_round AS currentRound, resolution, closed_at AS closedAt, created_at AS createdAt
             FROM review_debate_topic
             WHERE review_id = #{reviewId}
-            ORDER BY topic_id
+            ORDER BY created_at, topic_id
             """)
     List<TopicRow> findTopics(@Param("reviewId") String reviewId);
 

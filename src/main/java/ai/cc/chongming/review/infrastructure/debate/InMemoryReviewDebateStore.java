@@ -12,6 +12,7 @@ import ai.cc.chongming.review.domain.model.ReviewTypes.TopicId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.TurnId;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -81,7 +82,9 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
             }
         }
         topics.compute(reviewId, (ignored, existing) -> {
-            Map<TopicId, DebateTopic> replacement = new ConcurrentHashMap<>(
+            // [AIREVIEW-PLAN-074#2] LinkedHashMap preserves registration order; copying the existing
+            // map before appending means re-saving an existing topic never reshuffles the list.
+            Map<TopicId, DebateTopic> replacement = new LinkedHashMap<>(
                     existing == null ? Map.of() : existing);
             topicBatch.forEach(topic -> replacement.putIfAbsent(topic.id(), topic));
             return replacement;
@@ -95,8 +98,9 @@ public class InMemoryReviewDebateStore implements ReviewDebateStore {
 
     @Override
     public List<DebateTopic> findTopics(ReviewId reviewId) {
+        // [AIREVIEW-PLAN-074#2] Return the LinkedHashMap insertion order directly instead of UUID
+        // order, matching the durable store's created_at ordering.
         return topics.getOrDefault(reviewId, Map.of()).values().stream()
-                .sorted(Comparator.comparing(topic -> topic.id().value()))
                 .toList();
     }
 
