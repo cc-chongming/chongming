@@ -4,7 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import ai.cc.chongming.review.config.ReviewRuntimeTraceProperties;
+import ai.cc.chongming.review.domain.event.ReviewEvent;
+import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewStage;
+import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.domain.repository.RuntimeTraceStore;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -365,6 +369,49 @@ class ReviewRuntimeTraceRegistryTests {
                         exception);
             }
         });
+    }
+
+    /**
+     * [AIREVIEW-PLAN-077#1] A committed domain event leaves the publish path as a
+     * {@code chongming.review.domain-event.v1} CUSTOM frame whose value carries the allocated trace
+     * sequence and the review stage.
+     */
+    @Test
+    void domainEventEmitsCustomWithStageAndSequence() throws Exception {
+        ReviewRuntimeTraceRegistry registry = registry(new FakeTraceStore(), 1000);
+        String runtimeId = runtimeId(1);
+        ReviewRuntimeTraceRegistry.Subscription subscription = registry.subscribe(runtimeId, 0);
+        registry.activate(subscription);
+
+        ReviewId reviewId = new ReviewId(UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        ReviewEvent event = new ReviewEvent(
+                UUID.randomUUID(),
+                1L,
+                reviewId,
+                1,
+                ReviewEventType.INITIAL_REVIEW_COMPLETED,
+                ReviewEventType.INITIAL_REVIEW_COMPLETED.category(),
+                ReviewStage.INITIAL_REVIEW,
+                RoleType.DIRECTOR,
+                null,
+                null,
+                null,
+                null,
+                null,
+                50,
+                Instant.now(),
+                1,
+                Map.of("publicSummary", "初评完成"));
+
+        registry.recordDomainEvent(runtimeId, event);
+
+        awaitTrue(() -> sseDataPayloads(subscription.emitter()).size() == 1);
+        List<String> payloads = sseDataPayloads(subscription.emitter());
+        assertThat(payloads).hasSize(1);
+        JsonNode node = new ObjectMapper().readTree(payloads.get(0));
+        assertThat(node.get("name").asText()).isEqualTo(ReviewRuntimeTraceRegistry.DOMAIN_EVENT_NAME);
+        assertThat(node.get("value").get("stage").asText()).isEqualTo(ReviewStage.INITIAL_REVIEW.name());
+        assertThat(node.get("value").get("sequence").asLong()).isEqualTo(1L);
     }
 
     private static ReviewRuntimeTraceRegistry registry(FakeTraceStore store, int maxEvents) {

@@ -1,6 +1,7 @@
 package ai.cc.chongming.review.application;
 
 import ai.cc.chongming.review.config.ReviewRuntimeTraceProperties;
+import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RuntimeTraceStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,6 +60,9 @@ public class ReviewRuntimeTraceRegistry {
     /** Custom event names carrying PLAN-024 observability metrics. */
     static final String FAILURE_METRIC_EVENT_NAME = "chongming.runtime-metrics.failure.v1";
     static final String STAGE_METRIC_EVENT_NAME = "chongming.runtime-metrics.v1";
+
+    /** [AIREVIEW-PLAN-077#1] Custom event name carrying review domain facts to the AG-UI client. */
+    public static final String DOMAIN_EVENT_NAME = "chongming.review.domain-event.v1";
 
     /** Well-known stage metric names recorded for a review attempt. */
     public static final String METRIC_STAGE_DURATION = "stage-duration";
@@ -204,6 +208,19 @@ public class ReviewRuntimeTraceRegistry {
         value.put("metric", metricName);
         value.putAll(safeValues);
         trace.publish(new AguiEvent.Custom(runtimeId, "runtime-metrics", STAGE_METRIC_EVENT_NAME, value));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-077#1] Bridges one committed review domain event into the AG-UI stream as a
+     * {@code chongming.review.domain-event.v1} custom event. The value embeds the trace sequence
+     * allocated by the same synchronized publish path, so live delivery and durable replay stay ordered.
+     *
+     * @param runtimeId runtime that owns this review attempt
+     * @param event committed domain event to publish
+     */
+    public void recordDomainEvent(String runtimeId, ReviewEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        resolveTrace(runtimeId).recordDomainEvent(event);
     }
 
     /**
@@ -439,6 +456,48 @@ public class ReviewRuntimeTraceRegistry {
                 subscriptions.values().forEach(subscription -> enqueue(subscription, stamped));
                 // Persistence enqueue shares this lock with sequence allocation so concurrent
                 // publishers cannot queue sequence N+1 before sequence N.
+                persist(stamped);
+            }
+        }
+
+        /**
+         * [AIREVIEW-PLAN-077#1] Publishes a review domain event from the same critical section as
+         * {@link #publish} so the trace sequence is allocated first and then embedded in the custom
+         * event value. Nullable fields are omitted instead of written as null because the SSE payload
+         * and the persisted JSON must stay clean JSON objects.
+         */
+        private void recordDomainEvent(ReviewEvent event) {
+            StampedEvent stamped;
+            synchronized (this) {
+                long assigned = sequence.incrementAndGet();
+                Map<String, Object> value = new LinkedHashMap<>();
+                value.put("schemaVersion", 1);
+                value.put("sequence", assigned);
+                value.put("reviewId", event.reviewId().value().toString());
+                value.put("attemptNo", event.attemptNo());
+                value.put("type", event.type().name());
+                if (event.stage() != null) {
+                    value.put("stage", event.stage().name());
+                }
+                if (event.progress() != null) {
+                    value.put("progress", event.progress());
+                }
+                if (event.actorRole() != null) {
+                    value.put("actorRole", event.actorRole().name());
+                }
+                value.put("payload", new LinkedHashMap<>(event.payload()));
+                value.put("occurredAt", event.occurredAt().toString());
+                AguiEvent.Custom custom = new AguiEvent.Custom(
+                        "review:" + event.reviewId().value(),
+                        runtimeId,
+                        DOMAIN_EVENT_NAME,
+                        value);
+                stamped = new StampedEvent(assigned, custom, Instant.now());
+                events.add(stamped);
+                if (events.size() > maxEvents) {
+                    events.removeFirst();
+                }
+                subscriptions.values().forEach(subscription -> enqueue(subscription, stamped));
                 persist(stamped);
             }
         }
