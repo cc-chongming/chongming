@@ -152,7 +152,8 @@ const phases = [
     { id: 'conflict', icon: '冲', name: '冲突检测', subtitle: '识别分歧与风险' },
     // [AIREVIEW-PLAN-081#1] 串行议题机制下全局轮次无意义，改名议题辩论；轮次下沉到议题内 R1/R2 选项卡。
     { id: 'debate', icon: '辩', name: '议题辩论', subtitle: '围绕争议收敛' },
-    { id: 'judge', icon: '裁', name: '裁决者裁决', subtitle: '形成评审判断' },
+    // [AIREVIEW-PLAN-086#1] 与“议题辩论”呼应、对齐裁决卡内部命名：逐议题裁决。
+    { id: 'judge', icon: '裁', name: '议题裁决', subtitle: '形成评审判断' },
     { id: 'human', icon: '人', name: '人工决策', subtitle: '最终关口' }
 ];
 const streamPhases = ['scout', 'director', 'judge'];
