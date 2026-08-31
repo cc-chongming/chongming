@@ -23,3 +23,5 @@
 ## 变更记录
 - 2026-08-31 立计划；派发后台子代理实施。
 - 2026-08-31 子代理 f5196278 交付；父代理审查 diff 无夹带；vitest 164 全绿；产物同步；提交。
+- 2026-08-31 hotfix be8b500：immediate watch 在 setup 期强制求值 activePhaseIndex，触碰后定义的 computed 触发 TDZ 白屏；
+  改为非 immediate watch + onMounted 首帧直接落位（dwell 仅约束会话内后续推进）。
