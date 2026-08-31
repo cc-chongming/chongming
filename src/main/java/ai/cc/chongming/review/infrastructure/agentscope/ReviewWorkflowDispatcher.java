@@ -4,6 +4,7 @@ import ai.cc.chongming.review.application.DebateConvergenceGuard;
 import ai.cc.chongming.review.application.DebateFocusResolver;
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
+import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewEventListener;
 import ai.cc.chongming.review.application.ReviewLivenessGuard;
@@ -108,6 +109,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     private final ObjectProvider<ReviewOrchestrationService> orchestrationProvider;
     // [AIREVIEW-PLAN-084#1] 末题关闭即进裁决；ObjectProvider 防与 DebateService 事件构造循环。
     private final ObjectProvider<DebateService> debateServiceProvider;
+    // [AIREVIEW-PLAN-085#1] 末裁即拟门禁；ObjectProvider 防与 JudgeService 事件构造循环。
+    private final ObjectProvider<JudgeService> judgeServiceProvider;
     private final ConcurrentMap<String, reactor.core.publisher.Sinks.Many<Dispatch>> queues = new ConcurrentHashMap<>();
     // [AIREVIEW-PLAN-075#3] per-attempt wake 冷却状态：lastTurnEventAt / lastWakeAt / 上次文案 hash。
     private final ConcurrentMap<String, WakeCooldownState> wakeCooldowns = new ConcurrentHashMap<>();
@@ -136,8 +139,9 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     }
 
     /**
-     * [AIREVIEW-PLAN-069#4] Compatibility constructor used by older tests; the DebateService
-     * provider is absent, so terminal-close auto-judging is disabled for those call sites.
+     * [AIREVIEW-PLAN-069#4][AIREVIEW-PLAN-084#1][AIREVIEW-PLAN-085#1] Compatibility constructor used
+     * by older tests; the DebateService and JudgeService providers are absent, so terminal-close
+     * auto-judging and last-judgement gate drafting are disabled for those call sites.
      */
     public ReviewWorkflowDispatcher(
             ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
@@ -156,10 +160,31 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
     }
 
     /**
-     * [AIREVIEW-PLAN-069#4][AIREVIEW-PLAN-084#1] Canonical Spring constructor. Terminal-state
-     * cleanup and last-close auto-judging dependencies are injected as lazy {@link ObjectProvider}s
-     * so the dispatcher never hard-depends on beans that may themselves receive review events
-     * (no construction cycle).
+     * [AIREVIEW-PLAN-084#1] Compatibility constructor used by older tests; the JudgeService
+     * provider is absent, so last-judgement gate drafting is disabled for those call sites.
+     */
+    public ReviewWorkflowDispatcher(
+            ObjectProvider<AgentRuntimeAdapter> runtimeAdapterProvider,
+            ReviewRegistry reviewRegistry,
+            ReviewDispatchService dispatchService,
+            ReviewDebateStore debateStore,
+            ObjectProvider<DebateConvergenceGuard> convergenceGuardProvider,
+            AgentScopeProperties properties,
+            ObjectProvider<ReviewLivenessGuard> livenessGuardProvider,
+            ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider,
+            ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider,
+            ObjectProvider<ReviewOrchestrationService> orchestrationProvider,
+            ObjectProvider<DebateService> debateServiceProvider) {
+        this(runtimeAdapterProvider, reviewRegistry, dispatchService, debateStore, convergenceGuardProvider,
+                properties, livenessGuardProvider, planPromoterProvider, traceRegistryProvider,
+                orchestrationProvider, debateServiceProvider, null);
+    }
+
+    /**
+     * [AIREVIEW-PLAN-069#4][AIREVIEW-PLAN-084#1][AIREVIEW-PLAN-085#1] Canonical Spring constructor.
+     * Terminal-state cleanup, last-close auto-judging and last-judgement gate drafting dependencies
+     * are injected as lazy {@link ObjectProvider}s so the dispatcher never hard-depends on beans that
+     * may themselves receive review events (no construction cycle).
      */
     @org.springframework.beans.factory.annotation.Autowired
     public ReviewWorkflowDispatcher(
@@ -173,7 +198,8 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             ObjectProvider<DirectorPlanRevisionPromoter> planPromoterProvider,
             ObjectProvider<ReviewRuntimeTraceRegistry> traceRegistryProvider,
             ObjectProvider<ReviewOrchestrationService> orchestrationProvider,
-            ObjectProvider<DebateService> debateServiceProvider) {
+            ObjectProvider<DebateService> debateServiceProvider,
+            ObjectProvider<JudgeService> judgeServiceProvider) {
         this.runtimeAdapterProvider = Objects.requireNonNull(runtimeAdapterProvider, "runtimeAdapterProvider must not be null");
         this.reviewRegistry = reviewRegistry;
         this.dispatchService = dispatchService;
@@ -185,6 +211,7 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         this.traceRegistryProvider = traceRegistryProvider;
         this.orchestrationProvider = orchestrationProvider;
         this.debateServiceProvider = debateServiceProvider;
+        this.judgeServiceProvider = judgeServiceProvider;
     }
 
     /** [AIREVIEW-PLAN-059#4] properties 缺失（旧构造/测试缝）时按配置默认值视为串行开启。 */
@@ -326,6 +353,44 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
         } else if (event.type() == ReviewEventType.DEBATE_SKIPPED) {
             clearGuard(event);
             dispatchJudgeForEvent(event);
+        } else if (event.type() == ReviewEventType.JUDGEMENT_SUBMITTED) {
+            // [AIREVIEW-PLAN-085#1] 末条裁决提交即服务器确定性拟 Gate 草案；幂等守卫在 JudgeService。
+            draftGateOnLastJudgement(event);
+        }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-085#1] JUDGEMENT_SUBMITTED 收口：仅在评审处于 JUDGING、每个议题都已有
+     * Judge decision 且尚无 Gate 草案时，经懒 ObjectProvider 调用 JudgeService.draftGate。
+     * 任何一条裁决提交都可命中该分支，但只有末条裁决会让 allMatch 成立，天然只触发一次。
+     */
+    private void draftGateOnLastJudgement(ReviewEvent event) {
+        Review review = reviewRegistry == null ? null
+                : reviewRegistry.find(event.reviewId())
+                        .filter(candidate -> candidate.attemptNo() == event.attemptNo())
+                        .orElse(null);
+        if (review == null || debateStore == null || review.stage() != ReviewStage.JUDGING) {
+            return;
+        }
+        List<DebateTopic> topics = debateStore.findTopics(review.id());
+        boolean everyTopicJudged = topics.stream()
+                .allMatch(topic -> debateStore.findJudgeDecision(review.id(), topic.id()).isPresent());
+        if (!everyTopicJudged || debateStore.findGateDraft(review.id()).isPresent()) {
+            return;
+        }
+        JudgeService judgeService = judgeServiceProvider == null
+                ? null : judgeServiceProvider.getIfAvailable();
+        if (judgeService == null) {
+            return;
+        }
+        try {
+            judgeService.draftGate(review);
+            // [AIREVIEW-PLAN-085#2] 成功日志记录末裁触发拟门禁的事实。
+            LOGGER.info("GATE_DRAFT_ON_LAST_JUDGEMENT reviewId={} attemptNo={}",
+                    review.id().value(), review.attemptNo());
+        } catch (RuntimeException exception) {
+            LOGGER.warn("GATE_DRAFT_ON_LAST_JUDGEMENT_FAILED reviewId={} attemptNo={}",
+                    review.id().value(), review.attemptNo(), exception);
         }
     }
 

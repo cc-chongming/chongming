@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 
 import ai.cc.chongming.review.application.DebateService;
 import ai.cc.chongming.review.application.DirectorPlanRevisionPromoter;
+import ai.cc.chongming.review.application.JudgeService;
 import ai.cc.chongming.review.application.ReviewDispatchService;
 import ai.cc.chongming.review.application.ReviewLivenessGuard;
 import ai.cc.chongming.review.application.ReviewOrchestrationService;
@@ -26,6 +27,7 @@ import ai.cc.chongming.review.domain.event.ReviewEventDraft;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.Claim;
 import ai.cc.chongming.review.domain.model.DebateTopic;
+import ai.cc.chongming.review.domain.model.GateDecision;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand;
 import ai.cc.chongming.review.domain.model.ReviewDispatchCommand.DispatchCommandStatus;
@@ -670,6 +672,63 @@ class ReviewWorkflowDispatcherTests {
         verify(debateService, never()).beginJudging(any());
     }
 
+    // --- [AIREVIEW-PLAN-085#3] last JUDGEMENT_SUBMITTED drafts the Gate ---------------------------
+
+    @Test
+    void lastJudgementDraftsGateWhenEveryTopicJudgedAndNoGateDraft() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry isolatedRegistry = new InMemoryReviewRegistry();
+        Review owner = judgingReview(isolatedRegistry);
+        DebateTopic first = restoredTopic(owner, "resolved.first", DebateTopicStatus.RESOLVED, "已决议");
+        DebateTopic second = restoredTopic(owner, "resolved.second", DebateTopicStatus.RESOLVED, "已决议");
+        store.saveTopic(first);
+        store.saveTopic(second);
+        store.saveJudgeDecision(owner.id(), judged(first, GateResult.AI_PASS));
+        store.saveJudgeDecision(owner.id(), judged(second, GateResult.CONDITIONAL));
+        JudgeService judgeService = mock(JudgeService.class);
+
+        gateDispatcher(isolatedRegistry, store, judgeService)
+                .onCommitted(eventFor(owner, ReviewEventType.JUDGEMENT_SUBMITTED, null, second.id()));
+
+        verify(judgeService).draftGate(owner);
+    }
+
+    @Test
+    void lastJudgementNeverDraftsGateWhenGateDraftAlreadyExists() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry isolatedRegistry = new InMemoryReviewRegistry();
+        Review owner = judgingReview(isolatedRegistry);
+        DebateTopic resolved = restoredTopic(owner, "resolved.topic", DebateTopicStatus.RESOLVED, "已决议");
+        store.saveTopic(resolved);
+        store.saveJudgeDecision(owner.id(), judged(resolved, GateResult.AI_PASS));
+        store.saveGateDraft(new GateDecision(owner.id(), GateResult.AI_PASS, DecisionStatus.DRAFT,
+                DecisionActor.AI, "既有门禁草案", Instant.now()));
+        JudgeService judgeService = mock(JudgeService.class);
+
+        gateDispatcher(isolatedRegistry, store, judgeService)
+                .onCommitted(eventFor(owner, ReviewEventType.JUDGEMENT_SUBMITTED, null, resolved.id()));
+
+        verify(judgeService, never()).draftGate(any());
+    }
+
+    @Test
+    void nonLastJudgementNeverDraftsGateWhileAnyTopicHasNoJudgeDecision() {
+        InMemoryReviewDebateStore store = new InMemoryReviewDebateStore();
+        InMemoryReviewRegistry isolatedRegistry = new InMemoryReviewRegistry();
+        Review owner = judgingReview(isolatedRegistry);
+        DebateTopic judged = restoredTopic(owner, "judged.topic", DebateTopicStatus.RESOLVED, "已决议");
+        DebateTopic pending = restoredTopic(owner, "pending.topic", DebateTopicStatus.RESOLVED, "已决议");
+        store.saveTopic(judged);
+        store.saveTopic(pending);
+        store.saveJudgeDecision(owner.id(), judged(judged, GateResult.AI_PASS));
+        JudgeService judgeService = mock(JudgeService.class);
+
+        gateDispatcher(isolatedRegistry, store, judgeService)
+                .onCommitted(eventFor(owner, ReviewEventType.JUDGEMENT_SUBMITTED, null, judged.id()));
+
+        verify(judgeService, never()).draftGate(any());
+    }
+
     @Test
     void secondSupportClaimDoesNotReArmServerChallenges() {
         Review defending = freshReview(RoleType.PRODUCT, RoleType.BACKEND, RoleType.FRONTEND);
@@ -776,6 +835,32 @@ class ReviewWorkflowDispatcherTests {
         ReviewDispatchService isolatedDispatch = new ReviewDispatchService(isolatedDispatchStore, targetStore, draft -> { });
         return new ReviewWorkflowDispatcher(mockProvider(), targetRegistry, isolatedDispatch, targetStore, null,
                 serialProperties(false), null, null, null, null, providerOf(debateService));
+    }
+
+    /** [AIREVIEW-PLAN-085#3] 独立的 JUDGING review，避免与 setUp 的 DEBATE 共享态互相污染。 */
+    private Review judgingReview(InMemoryReviewRegistry targetRegistry) {
+        Review fresh = Review.restore(new ReviewId(UUID.randomUUID()), ReviewStage.JUDGING, 1, 0,
+                List.of(new RoleActivation(RoleType.PRODUCT, "product", true),
+                        new RoleActivation(RoleType.BACKEND, "backend", true)),
+                Map.of());
+        targetRegistry.register(fresh);
+        return fresh;
+    }
+
+    /** [AIREVIEW-PLAN-085#3] 注入 mock JudgeService，且刻意不带 DebateService 的 dispatcher。 */
+    private ReviewWorkflowDispatcher gateDispatcher(
+            InMemoryReviewRegistry targetRegistry, InMemoryReviewDebateStore targetStore,
+            JudgeService judgeService) {
+        InMemoryReviewDispatchStore isolatedDispatchStore = new InMemoryReviewDispatchStore();
+        ReviewDispatchService isolatedDispatch = new ReviewDispatchService(isolatedDispatchStore, targetStore, draft -> { });
+        ObjectProvider<DebateService> absentDebateService = providerOf(null);
+        return new ReviewWorkflowDispatcher(mockProvider(), targetRegistry, isolatedDispatch, targetStore, null,
+                serialProperties(false), null, null, null, null, absentDebateService, providerOf(judgeService));
+    }
+
+    /** [AIREVIEW-PLAN-085#3] 一份议题级 Judge decision 快照。 */
+    private JudgeDecision judged(DebateTopic topic, GateResult result) {
+        return new JudgeDecision(topic.id(), result, "已裁决", List.of(), List.of(), Instant.now());
     }
 
     private Claim claim(Review owner, RoleType role, ClaimSeverity severity, ClaimPosition position) {
