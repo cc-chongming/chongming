@@ -9,6 +9,9 @@ import { isStoredTokenUsable, redirectToLogin, withAuthToken } from './auth-toke
 export const REVIEW_EVENT_TYPES = [
     'REVIEW_ACCEPTED', 'PLAN_CREATED', 'PLAN_REVISED',
     'ROLE_ACTIVATED', 'ROLE_STARTED', 'ROLE_COMPLETED', 'ROLE_FAILED', 'CONTEXT_SCOUT_DEGRADED',
+    // [AIREVIEW-PLAN-080#1] 初审全完成→CONFLICT_DETECTION 的转换事件；缺它则阶段白屏期不跳转
+    // （ROLE_COMPLETED 只更新卡片，stage 不动），只能等后续白名单事件迟到跳变。
+    'INITIAL_REVIEW_COMPLETED',
     // The structured conclusion lands with this event; without a live listener the scout
     // conclusion panel stays empty until a manual page reload.
     'CONTEXT_SCOUT_COMPLETED',
