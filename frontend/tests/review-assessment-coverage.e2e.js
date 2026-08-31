@@ -237,7 +237,7 @@ test('completes waiting human review through notifying with report version and s
     await expect(page.getByText('WAITING_HUMAN', { exact: true }).first()).toBeVisible();
     await page.getByRole('combobox', { name: '结论', exact: true }).selectOption('PASS');
     await page.getByRole('textbox', { name: '理由', exact: true }).fill(gateDecision.reason);
-    await page.getByRole('button', { name: '提交最终 Gate' }).click();
+    await page.getByRole('button', { name: '提交最终结论' }).click();
 
     await expect.poll(() => gateRequests.length).toBe(1);
     expect(gateRequests[0]).toMatchObject({ expectedVersion: 12, result: 'PASS', reason: gateDecision.reason });

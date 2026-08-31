@@ -172,3 +172,16 @@ export function humanizeGateReason(reasonSummary) {
     const readable = [coverageText, ...triggers].filter(Boolean);
     return readable.length ? readable.join('；') : trimmed;
 }
+// [AIREVIEW-PLAN-088#20] 通知投递状态/渠道/响应码的中文展示映射；未命中时原样回退，保持后端事实可读。
+export function deliveryStatusLabel(status) {
+    return { SENT: '已发送', FAILED: '失败', DEAD: '死信', QUEUED: '排队中' }[status] ?? status;
+}
+
+export function channelLabel(channel) {
+    return { 'smtp-mail': '邮件' }[channel] ?? channel;
+}
+
+// [AIREVIEW-PLAN-088#14] SMTP_ACCEPTED 等 Outbox responseCode 的中文展示；未列出的 code 原样显示。
+export function responseLabel(code) {
+    return { SMTP_ACCEPTED: '邮件服务器已接受' }[code] ?? code;
+}

@@ -27,7 +27,7 @@ import { buildActivationRows } from '../services/review-activation-presenter';
 import { buildDefenseTurns } from '../services/review-debate-presenter';
 import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
-import { resolveAiGateDraft } from '../services/review-conclusion-presenter';
+import { resolveAiGateDraft, deliveryStatusLabel, channelLabel, responseLabel } from '../services/review-conclusion-presenter';
 import { reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
@@ -578,7 +578,7 @@ function eventTitle(event) {
         DEBATE_TOPIC_CLOSED: '关闭辩论议题', CHALLENGE_SUBMITTED: '提交质询',
         REBUTTAL_SUBMITTED: '提交答辩', POSITION_CHANGED: '更新立场',
         JUDGEMENT_SUBMITTED: '裁决者提交裁决', GATE_DRAFTED: '形成关口草案',
-        HUMAN_GATE_FINALIZED: '人工确认最终 Gate', REVIEW_FAILED: '评审运行失败',
+        HUMAN_GATE_FINALIZED: '人工确认最终结论', REVIEW_FAILED: '评审运行失败',
         REVIEW_CANCELLED: '评审已取消'
     }[event.type] ?? event.type;
 }
@@ -871,15 +871,15 @@ onUnmounted(() => loadQueue.dispose());
                     <section class="flow-conclusion-chain" aria-label="评审结论链">
                         <article><span>1</span><div><small>议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else-if="pendingJudgementTopics.length">{{ pendingJudgementTopics.length }} 个议题已升级，等待 Judge 裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
                         <i aria-hidden="true">↓</i>
-                        <article><span>2</span><div><small>确定性 AI Gate 草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><p v-if="gateDraft?.reasonSummary">{{ gateDraft.reasonSummary }}</p></div></article>
+                        <article><span>2</span><div><small>确定性 AI 门禁草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><p v-if="gateDraft?.reasonSummary">{{ gateDraft.reasonSummary }}</p></div></article>
                         <i aria-hidden="true">↓</i>
-                        <article><span>3</span><div><small>人工最终 Gate</small><strong v-if="store.state.humanGateVersions.length">{{ gateLabel(store.state.humanGateVersions.at(-1).result) }}</strong><strong v-else>等待人工决策</strong><p v-if="store.state.humanGateVersions.at(-1)?.reason">{{ store.state.humanGateVersions.at(-1).reason }}</p></div></article>
+                        <article><span>3</span><div><small>人工最终结论</small><strong v-if="store.state.humanGateVersions.length">{{ gateLabel(store.state.humanGateVersions.at(-1).result) }}</strong><strong v-else>等待人工决策</strong><p v-if="store.state.humanGateVersions.at(-1)?.reason">{{ store.state.humanGateVersions.at(-1).reason }}</p></div></article>
                         <i aria-hidden="true">↓</i>
-                        <article><span>4</span><div><small>正式报告版本</small><strong>{{ store.state.reportVersions?.length ? `已生成 ${store.state.reportVersions.length} 个版本` : '等待最终 Gate 后生成' }}</strong></div></article>
+                        <article><span>4</span><div><small>正式报告版本</small><strong>{{ store.state.reportVersions?.length ? `已生成 ${store.state.reportVersions.length} 个版本` : '等待最终结论后生成' }}</strong></div></article>
                     </section>
 
                     <section v-if="gateOverride" class="flow-gate-difference" role="status">
-                        <strong>人工结论与 AI Gate 草案不同</strong>
+                        <strong>人工结论与 AI 门禁草案不同</strong>
                         <p>AI 草案：{{ gateLabel(gateOverride.aiResult) }}；人工最终结论：{{ gateLabel(gateOverride.humanResult) }}。</p>
                         <p v-if="gateOverride.reason">人工理由：{{ gateOverride.reason }}</p>
                     </section>
@@ -901,7 +901,7 @@ onUnmounted(() => loadQueue.dispose());
                         @error="(message) => { humanPanelError = message; }"
                     />
 
-                    <section v-if="store.state.humanGateVersions.length" class="flow-gate-history" aria-label="Gate 版本历史">
+                    <section v-if="store.state.humanGateVersions.length" class="flow-gate-history" aria-label="结论版本历史">
                         <article v-for="gate in store.state.humanGateVersions" :key="gate.gateVersion">
                             <strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ formatChinaTime(gate.decidedAt) }}</span>
                             <p>{{ gate.reason }}</p>
@@ -910,15 +910,15 @@ onUnmounted(() => loadQueue.dispose());
 
                     <section class="flow-notification-panel" aria-labelledby="flow-notification-title">
                         <header><h2 id="flow-notification-title">通知状态</h2></header>
-                        <p class="flow-notification-note">通知失败不会改变评审事实；可对 FAILED 或 DEAD 的通知发起幂等重试。</p>
+                        <p class="flow-notification-note">通知失败不会改变评审事实；可对失败或死信的通知发起幂等重试。</p>
                         <ul v-if="store.state.notifications.length" class="notification-list">
                             <li v-for="entry in store.state.notifications" :key="entry.notificationId">
-                                <div><strong>{{ entry.deliveryStatus }}</strong><span>{{ entry.command?.channel }} · Gate v{{ entry.command?.gateVersion }}</span></div>
-                                <p>{{ entry.lastErrorCode || entry.responseCode || '等待投递结果' }}</p>
+                                <div><strong>{{ deliveryStatusLabel(entry.deliveryStatus) }}</strong><span>{{ channelLabel(entry.command?.channel) }} · 结论 v{{ entry.command?.gateVersion }}</span></div>
+                                <p>{{ responseLabel(entry.lastErrorCode || entry.responseCode || '等待投递结果') }}</p>
                                 <button v-if="['FAILED', 'DEAD'].includes(entry.deliveryStatus)" class="text-button" type="button" @click="retryNotification(entry)">重试（v{{ entry.version }}）</button>
                             </li>
                         </ul>
-                        <p v-else class="flow-empty">最终 Gate 提交后将显示通知 Outbox 状态。</p>
+                        <p v-else class="flow-empty">最终结论提交后将显示通知投递状态。</p>
                     </section>
                 </template>
             </main>

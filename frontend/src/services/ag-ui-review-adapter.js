@@ -30,8 +30,9 @@ function publicContent(event) {
         REBUTTAL_SUBMITTED: '提交了公开答辩',
         POSITION_CHANGED: '更新了公开立场',
         JUDGEMENT_SUBMITTED: '提交了裁决摘要',
-        GATE_DRAFTED: '形成了 Gate 草案',
-        HUMAN_GATE_FINALIZED: '确认了最终 Gate'
+        // [AIREVIEW-PLAN-088#20] 中文化事件摘要
+        GATE_DRAFTED: '形成了门禁草案',
+        HUMAN_GATE_FINALIZED: '确认了最终结论'
     };
     return `${actor}${labels[event.type] ?? `报告了 ${event.type}`}。`;
 }

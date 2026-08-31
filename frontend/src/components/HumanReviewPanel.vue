@@ -64,11 +64,11 @@ function reportError(error) {
 
 async function finalizeDecision() {
     if (!decision.result) {
-        message.value = '请选择最终 Gate 结论。';
+        message.value = '请选择最终结论。';
         return;
     }
     if (props.reviewVersion === null) {
-        message.value = '评审版本尚未加载，暂不能安全提交最终 Gate。';
+        message.value = '评审尚未加载，暂不能安全提交最终结论。';
         return;
     }
     busy.value = true;
@@ -81,7 +81,7 @@ async function finalizeDecision() {
             conditions: idList(decision.conditionsText),
             overrideReason: decision.overrideReason.trim() || null
         });
-        message.value = '最终 Gate 已提交；后续调整会创建新版本。';
+        message.value = '最终结论已提交；后续调整会创建新版本。';
         emit('changed');
     } catch (error) {
         reportError(error);
@@ -94,12 +94,12 @@ async function finalizeDecision() {
 <template>
     <section class="panel human-panel" aria-labelledby="human-review-title">
         <div class="panel-heading"><div><p class="eyebrow">版本化人工介入</p><h2 id="human-review-title">人工审核</h2></div></div>
-        <p class="muted">提交后版本只读；再次提交会创建新的 Gate 版本。</p>
+        <p class="muted">提交后只读；再次提交会创建新的结论版本。</p>
         <p v-if="message" class="inline-message" role="status">{{ message }}</p>
 
         <section class="decision-guidance" aria-labelledby="decision-guidance-title">
             <div class="decision-guidance-heading"><div><p class="eyebrow">需要你做什么</p><h3 id="decision-guidance-title">本次决策：确认 AI 草案，或给出最终放行结论</h3></div></div>
-            <p>AI 只负责产出「Gate 草案」，不会自行放行；正式结论必须由你从下方五个选项中选一个提交，这是本次评审的最终关口。</p>
+            <p>AI 只负责产出「门禁草案」，不会自行放行；正式结论必须由你从下方五个选项中选一个提交，这是本次评审的最终关口。</p>
             <p v-if="judgeSummaries.length"><strong>AI 已裁决 {{ judgeSummaries.length }} 个议题</strong><template v-if="judgeTallyText">：{{ judgeTallyText }}</template>。</p>
             <p v-else class="muted"><strong>议题裁决：</strong>尚未就绪，Judge 尚未给出公开裁决。</p>
             <p v-if="gateDraft"><strong>AI 草案结论：</strong>「{{ gateComparison.draftLabel }}」<template v-if="draftTriggerReason">；触发原因：{{ draftTriggerReason }}</template>。</p>
@@ -109,7 +109,7 @@ async function finalizeDecision() {
 
         <section class="decision-basis" aria-labelledby="decision-basis-title">
             <div class="decision-basis-heading">
-                <div><p class="eyebrow">决策依据</p><h3 id="decision-basis-title">Judge → AI Gate 草案 → 人工最终 Gate</h3></div>
+                <div><p class="eyebrow">决策依据</p><h3 id="decision-basis-title">议题裁决 → AI 门禁草案 → 人工最终结论</h3></div>
                 <span v-if="gateComparison.differs" class="gate-difference-badge">人工结论与 AI 草案不一致</span>
             </div>
 
@@ -127,7 +127,7 @@ async function finalizeDecision() {
             </article>
 
             <article class="decision-stage">
-                <header><span class="decision-step">2</span><div><small>确定性 AI Gate 草案</small><strong>{{ gateComparison.draftLabel }}</strong></div></header>
+                <header><span class="decision-step">2</span><div><small>确定性 AI 门禁草案</small><strong>{{ gateComparison.draftLabel }}</strong></div></header>
                 <div v-if="gateDraft" class="draft-reason">
                     <p>{{ draftHumanizedReason || gateComparison.draftReason }}</p>
                     <details v-if="draftHumanizedReason && draftHumanizedReason !== gateComparison.draftReason" class="draft-reason-original">
@@ -135,11 +135,11 @@ async function finalizeDecision() {
                         <code>{{ gateComparison.draftReason }}</code>
                     </details>
                 </div>
-                <p v-else class="muted">尚未形成 AI Gate 草案，或正在从公开事件恢复草案事实。</p>
+                <p v-else class="muted">尚未形成 AI 门禁草案，或正在从公开事件恢复草案事实。</p>
             </article>
 
             <article class="decision-stage human-result" :class="{ different: gateComparison.differs }">
-                <header><span class="decision-step">3</span><div><small>人工最终 Gate</small><strong>{{ gateComparison.humanLabel }}</strong></div></header>
+                <header><span class="decision-step">3</span><div><small>人工最终结论</small><strong>{{ gateComparison.humanLabel }}</strong></div></header>
                 <template v-if="latestHumanGate">
                     <p>{{ gateComparison.humanReason }}</p>
                     <p v-if="gateComparison.overrideReason" class="override-reason"><strong>人工覆盖说明：</strong>{{ gateComparison.overrideReason }}</p>
@@ -150,8 +150,8 @@ async function finalizeDecision() {
         </section>
 
         <div class="gate-form">
-            <h3>最终 Gate</h3>
-            <p class="muted">当前评审版本：{{ reviewVersion ?? '加载中' }}。最终决定会触发报告与通知状态更新。</p>
+            <h3>最终结论</h3>
+            <p class="muted">最终决定提交后生效，并触发报告生成与通知。</p>
             <form class="review-form compact" @submit.prevent="finalizeDecision">
                 <label>结论<select v-model="decision.result" required><option value="" disabled>请选择</option><option value="PASS">通过</option><option value="CONDITIONAL">有条件通过</option><option value="BLOCK">驳回</option><option value="RETURN">退回修改</option><option value="OVERRIDE">人工覆盖</option></select>
                     <ul v-if="GATE_CONCLUSION_HINTS.length" class="gate-option-hints" aria-label="五个结论的含义">
@@ -160,7 +160,7 @@ async function finalizeDecision() {
                 <label class="full">理由<textarea v-model="decision.reason" required></textarea></label>
                 <label v-if="decision.result === 'CONDITIONAL'" class="full">条件（逗号或换行分隔）<textarea v-model="decision.conditionsText" required></textarea></label>
                 <label v-if="decision.result === 'OVERRIDE'" class="full">Override 理由<textarea v-model="decision.overrideReason" required></textarea></label>
-                <div class="form-actions full"><button class="button" type="submit" :disabled="busy || reviewVersion === null || !decision.result">提交最终 Gate</button></div>
+                <div class="form-actions full"><button class="button" type="submit" :disabled="busy || reviewVersion === null || !decision.result">提交最终结论</button></div>
             </form>
             <ol v-if="gateVersions.length" class="plan-history"><li v-for="gate in gateVersions" :key="gate.gateVersion"><strong>v{{ gate.gateVersion }} · {{ gateLabel(gate.result) }}</strong><span>{{ formatChinaTime(gate.decidedAt) }}</span><p>{{ gate.reason }}</p></li></ol>
         </div>

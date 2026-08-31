@@ -179,7 +179,7 @@ test('renders the live review page as the full-flow workspace with phase-specifi
     // 切换到人工决策：展示 Gate 草案区与决策按钮条（人工面板在可达阶段直接内嵌本页）
     await page.getByRole('button', { name: /人工决策/ }).click();
     await expect(page.getByText('系统已暂停 AI 输出，最终结论必须由人工在本页明确选择并提交')).toBeVisible();
-    await expect(page.getByText('人工结论与 AI Gate 草案不同')).toBeVisible();
+    await expect(page.getByText('人工结论与 AI 门禁草案不同')).toBeVisible();
     // 结论文案会在结论链、人工理由与 Gate 版本历史多处展示。
     await expect(page.getByText('范围需要补齐').first()).toBeVisible();
     await expect(page.getByLabel('评审结论链').getByText('范围需要补齐', { exact: true })).toBeVisible();

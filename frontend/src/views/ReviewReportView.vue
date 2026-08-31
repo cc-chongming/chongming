@@ -292,7 +292,7 @@ onMounted(() => load(selectedVersion.value));
                     </div></div>
                 </div>
 
-                <div class="rpt-section"><h3>最终 Gate</h3>
+                <div class="rpt-section"><h3>最终结论</h3>
                     <div v-if="finalGate" class="gate-box" :class="`t-${gateFor(finalGate.result).tone}`">
                         <div class="gate-tag" :class="`t-${gateFor(finalGate.result).tone}`">{{ gateFor(finalGate.result).icon }} {{ gateFor(finalGate.result).label }}</div>
                         <div class="gate-meta">
@@ -307,7 +307,7 @@ onMounted(() => load(selectedVersion.value));
                     </div>
                     <div v-else class="gate-box t-yl">
                         <div class="gate-tag t-yl">⏳ 待定</div>
-                        <div class="gate-meta">本轮评审尚未形成最终 Gate 决策。</div>
+                        <div class="gate-meta">本轮评审尚未形成最终结论。</div>
                     </div>
                 </div>
 
@@ -335,7 +335,7 @@ onMounted(() => load(selectedVersion.value));
 
         <section v-else-if="!loading" class="panel empty-report">
             <h2>尚无报告</h2>
-            <p>报告通常在最终 Gate 后自动生成；若异步生成失败，可在这里请求新版本。</p>
+            <p>报告通常在最终结论后自动生成；若异步生成失败，可在这里请求新版本。</p>
             <button class="button" type="button" :disabled="generating" @click="generate">{{ generating ? '正在生成…' : '生成报告' }}</button>
         </section>
     </section>
