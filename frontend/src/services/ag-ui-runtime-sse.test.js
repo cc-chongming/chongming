@@ -10,7 +10,7 @@ class FakeEventSource {
     }
 
     close() { this.closed = true; }
-    emit(value) { this.onmessage?.({ data: JSON.stringify(value) }); }
+    emit(value, lastEventId) { this.onmessage?.({ data: JSON.stringify(value), lastEventId }); }
 }
 
 const originalLocalStorage = globalThis.localStorage;
@@ -50,10 +50,49 @@ describe('AG-UI runtime subscription', () => {
         source.emit({ type: 'RUN_STARTED', runId: 'review:2:director' });
         source.emit({ unexpected: true });
 
-        expect(source.url).toBe('/api/reviews/11111111-1111-1111-1111-111111111111/attempts/2/runtime/ag-ui');
+        expect(source.url).toBe('/api/reviews/11111111-1111-1111-1111-111111111111/attempts/2/runtime/ag-ui?afterSequence=0');
         expect(received).toEqual([{ type: 'RUN_STARTED', runId: 'review:2:director' }]);
         subscription.close();
         expect(source.closed).toBe(true);
+    });
+
+    // [AIREVIEW-PLAN-091#4]
+    it('forwards a supplied afterSequence cursor into the stream URL', () => {
+        const subscription = createAgUiRuntimeSubscription({
+            reviewId: '33333333-3333-3333-3333-333333333333',
+            attemptNo: 1,
+            afterSequence: 123,
+            EventSourceImpl: FakeEventSource,
+            onEvent: () => {}
+        });
+
+        expect(FakeEventSource.instances.at(-1).url)
+            .toBe('/api/reviews/33333333-3333-3333-3333-333333333333/attempts/1/runtime/ag-ui?afterSequence=123');
+        subscription.close();
+    });
+
+    // [AIREVIEW-PLAN-091#4]
+    it('reconnects with afterSequence advanced from the latest lastEventId', () => {
+        const scheduled = [];
+        const subscription = createAgUiRuntimeSubscription({
+            reviewId: 'r2',
+            attemptNo: 1,
+            EventSourceImpl: FakeEventSource,
+            setTimeoutImpl: (callback) => { scheduled.push(callback); return scheduled.length; },
+            clearTimeoutImpl: () => {},
+            onEvent: () => {}
+        });
+
+        const source = FakeEventSource.instances[0];
+        source.emit({ type: 'RUN_STARTED', runId: 'review:1:director' }, '200');
+        source.onerror();
+        expect(source.closed).toBe(true);
+        expect(scheduled).toHaveLength(1);
+        scheduled[0]();
+
+        expect(FakeEventSource.instances[1].url)
+            .toBe('/api/reviews/r2/attempts/1/runtime/ag-ui?afterSequence=200');
+        subscription.close();
     });
 
     it('reconnects with the freshest stored token instead of the one frozen in the URL', () => {

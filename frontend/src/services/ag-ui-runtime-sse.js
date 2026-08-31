@@ -4,6 +4,7 @@ import { isStoredTokenUsable, redirectToLogin, withAuthToken } from './auth-toke
 export function createAgUiRuntimeSubscription({
     reviewId,
     attemptNo,
+    afterSequence = 0,
     onEvent,
     onState = () => {},
     EventSourceImpl = globalThis.EventSource,
@@ -19,19 +20,25 @@ export function createAgUiRuntimeSubscription({
     let retryTimer;
     let closed = false;
     let retries = 0;
+    // [AIREVIEW-PLAN-091#2] Advance the replay cursor as events arrive so a reconnect resumes after the freshest sequence.
+    let cursor = Number(afterSequence) || 0;
 
     const open = () => {
         if (closed) return;
         // Rebuild the URL on every (re)open so a refreshed token is picked up instead of
         // retrying forever with an expired one frozen in the query string.
         onState({ status: retries === 0 ? 'connecting' : 'reconnecting' });
-        source = new EventSourceImpl(withAuthToken(
-            `/api/reviews/${encodeURIComponent(reviewId)}/attempts/${attemptNo}/runtime/ag-ui`));
+        // [AIREVIEW-PLAN-091#2] withAuthToken appends `&access_token` for URLs that already contain a query string.
+        const url = `/api/reviews/${encodeURIComponent(reviewId)}/attempts/${attemptNo}/runtime/ag-ui?afterSequence=${cursor}`;
+        source = new EventSourceImpl(withAuthToken(url));
         source.onopen = () => {
             retries = 0;
             onState({ status: 'connected' });
         };
         source.onmessage = (message) => {
+            // [AIREVIEW-PLAN-091#2] Track the highest emitted sequence for the next reconnect URL.
+            const seq = Number(message.lastEventId);
+            if (Number.isFinite(seq) && seq > cursor) cursor = seq;
             try {
                 const event = { ...JSON.parse(message.data), id: message.lastEventId || undefined };
                 if (event?.type) onEvent(event);

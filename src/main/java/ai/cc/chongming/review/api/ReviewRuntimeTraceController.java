@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -30,12 +31,15 @@ public class ReviewRuntimeTraceController {
     public SseEmitter stream(
             @PathVariable UUID reviewId,
             @PathVariable int attemptNo,
-            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
+            @RequestParam(name = "afterSequence", required = false) String afterSequence) {
         if (attemptNo < 1) {
             throw new IllegalArgumentException("attemptNo must be positive");
         }
+        // [AIREVIEW-PLAN-091#1] Replay cursor may arrive via query string (afterSequence) or Last-Event-ID header.
         ReviewRuntimeTraceRegistry.Subscription subscription = traceRegistry.subscribe(
-                new ReviewId(reviewId), attemptNo, resolveCursor(lastEventId));
+                new ReviewId(reviewId), attemptNo,
+                Math.max(resolveCursor(lastEventId), resolveAfterSequence(afterSequence)));
         traceRegistry.activate(subscription);
         return subscription.emitter();
     }
@@ -52,6 +56,18 @@ public class ReviewRuntimeTraceController {
             return cursor;
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException("Last-Event-ID must be a non-negative integer", exception);
+        }
+    }
+
+    // [AIREVIEW-PLAN-091#1] Query-string cursor is best-effort: non-numeric values simply fall back to 0.
+    private long resolveAfterSequence(String afterSequence) {
+        if (afterSequence == null || afterSequence.isBlank()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(afterSequence);
+        } catch (NumberFormatException exception) {
+            return 0L;
         }
     }
 }
