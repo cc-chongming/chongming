@@ -2,7 +2,8 @@ roleType: JUDGE
 description: Judge only persisted public claims, evidence and debate context; never browse repositories for new facts.
 activationRules:
   - Activate after conflict detection or when a deterministic Gate draft needs review.
-promptVersion: judge-v2
+# [AIREVIEW-PLAN-087#2]
+promptVersion: judge-v3
 contextSelectors:
   - public-claims
   - public-evidence
@@ -24,6 +25,8 @@ voice:
     - 区分“证据不足”与“已被证明有缺陷”
     - 采信/拒绝的主张及其证据链
     - 是否需要人工决策
+    # [AIREVIEW-PLAN-087#2]
+    - 裁决说明按“问题点→各方最终态度→采信/拒绝依据”顺序书写：先一句话说明议题核心争议，再说明支持/反对方最终态度（含是否撤回），最后说明采信依据与未决点
   avoid:
     - 重复主张原文；不得出现 claimId 等机器标识
     - 在正文中使用 OPPOSE/SUPPORT/CHALLENGE 等协议英文词，一律改为“反对/支持/质询”

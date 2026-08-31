@@ -117,7 +117,8 @@ async function finalizeDecision() {
                 <header><span class="decision-step">1</span><div><small>Judge 议题裁决</small><strong>{{ judgeSummaries.length ? `${judgeSummaries.length} 个议题已裁决` : '尚未形成裁决' }}</strong></div></header>
                 <ul v-if="judgeSummaries.length" class="judge-summary-list">
                     <li v-for="judge in judgeSummaries" :key="judge.topicId">
-                        <div><strong>{{ judge.resultLabel }}</strong><code>{{ judge.subjectKey }}</code></div>
+                        <!-- [AIREVIEW-PLAN-087#1] -->
+                        <div><strong>{{ judge.resultLabel }}</strong><span class="judge-topic-title">{{ judge.title ?? judge.subjectKey }}</span><code v-if="judge.title" class="judge-topic-tech">{{ judge.subjectKey }}</code></div>
                         <p>{{ judge.reason }}</p>
                         <small>采信 {{ judge.accepted.length }} 项 · 拒绝 {{ judge.rejected.length }} 项</small>
                     </li>
@@ -192,6 +193,9 @@ async function finalizeDecision() {
 .judge-summary-list li { padding: 10px 12px; border-left: 3px solid #60a5fa; background: #f8fafc; }
 .judge-summary-list li > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .judge-summary-list code { color: #78716c; font-size: 11px; overflow-wrap: anywhere; }
+/* [AIREVIEW-PLAN-087#1] */
+.judge-topic-title { margin-left: .5rem; color: #1c1917; font-size: .8rem; font-weight: 700; }
+.judge-topic-tech { margin-left: .4rem; color: #a8a29e; font-size: .62rem; }
 .judge-summary-list p { margin: 6px 0; line-height: 1.55; }
 .judge-summary-list small { color: #57534e; }
 .human-result.different { border-color: #fca5a5; background: #fff7f7; box-shadow: inset 3px 0 #dc2626; }

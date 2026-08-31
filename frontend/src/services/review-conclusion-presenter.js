@@ -24,6 +24,8 @@ export function presentDebateJudgement(debate, claims = []) {
     return {
         topicId: debate.topicId ?? debate.subjectKey,
         subjectKey: debate.subjectKey ?? '未命名议题',
+        // [AIREVIEW-PLAN-087#1]
+        title: debate.title ?? null,
         result: judgement.result,
         resultLabel: conclusionLabel(judgement.result),
         reason: judgement.reasonSummary?.trim() || '未提供公开裁决理由。',
