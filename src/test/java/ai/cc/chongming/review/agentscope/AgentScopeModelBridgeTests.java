@@ -166,15 +166,16 @@ class AgentScopeModelBridgeTests {
         };
         AgentScopeModelBridge bridge = new AgentScopeModelBridge(
                 gateway, context(), RoleType.DIRECTOR, "scout", "Inspect", Set.of("list_files"));
+        // [AIREVIEW-PLAN-089-followup] 单工具结果已被 4000 上限截断，需足够多条数才能触发全局 48000 上限。
         String largeOutput = "x".repeat(12_000);
+        List<ToolResultMessage> messages = new java.util.ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            messages.add(new ToolResultMessage("call-" + i, "list_files", largeOutput));
+        }
+        messages.add(new ToolResultMessage("call-5", "list_files", "LATEST_EVIDENCE"));
 
         bridge.stream(
-                        List.of(
-                                new ToolResultMessage("call-1", "list_files", largeOutput),
-                                new ToolResultMessage("call-2", "list_files", largeOutput),
-                                new ToolResultMessage("call-3", "list_files", largeOutput),
-                                new ToolResultMessage("call-4", "list_files", largeOutput),
-                                new ToolResultMessage("call-5", "list_files", "LATEST_EVIDENCE")),
+                        messages,
                         List.of(ToolSchema.builder().name("list_files").description("List").parameters(Map.of()).build()),
                         null)
                 .blockFirst();
@@ -182,7 +183,9 @@ class AgentScopeModelBridgeTests {
         assertThat(captured.get().publicContext())
                 .hasSizeLessThanOrEqualTo(48_080)
                 .contains("LATEST_EVIDENCE")
-                .contains("较早的公开上下文已因长度限制省略")
+                // [AIREVIEW-PLAN-089-followup] 089 后单工具结果先被 4000 上限截断，全局省略标记不再必然触发；
+                // 新契约保证是单工具截断标记。
+                .contains("[工具结果已截断]")
                 .contains("[BEGIN_UNTRUSTED_TOOL_RESULT tool=list_files]")
                 .contains("[END_UNTRUSTED_TOOL_RESULT]");
         assertThat(count(captured.get().publicContext(), "[BEGIN_UNTRUSTED_TOOL_RESULT"))

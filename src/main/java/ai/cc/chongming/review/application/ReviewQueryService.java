@@ -242,8 +242,9 @@ public class ReviewQueryService {
                 .collect(Collectors.groupingBy(DebateTurn::topicId, LinkedHashMap::new, Collectors.toList()));
         Map<TopicId, JudgeDecision> decisionsByTopic = debateStore.findJudgeDecisions(reviewId);
 
+        // [AIREVIEW-PLAN-092#1] 不再按 UUID 重排：findTopics 已按 topic_seq 登记序返回，
+        // 与串行焦点顺序一致；旧 UUID 重排导致 UI 编号与执行顺序错位（观感 3→10→1）。
         return debateStore.findTopics(reviewId).stream()
-                .sorted(Comparator.comparing(topic -> topic.id().value()))
                 .map(topic -> toDebateView(topic, claimsById, turnsByTopic, decisionsByTopic))
                 .toList();
     }
