@@ -25,7 +25,7 @@ import { describeLiveRunState } from '../services/live-run-status';
 import { buildActivationRows } from '../services/review-activation-presenter';
 // [AIREVIEW-PLAN-042#1] 异议答辩议题的答辩 Claim（SUPPORT）由事实事件投影为对话流 REBUTTAL 回合（见 review-debate-presenter.js）。
 import { buildDefenseTurns } from '../services/review-debate-presenter';
-import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
+import { isScoutConcluded, resolvePhaseLanding, shouldReleasePhasePin } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
 import { resolveAiGateDraft, deliveryStatusLabel, channelLabel, responseLabel, humanizeGateReason, judgementReasonBlocks } from '../services/review-conclusion-presenter';
 import { reviewApi } from '../api/review-api';
@@ -634,6 +634,14 @@ async function load(reviewId) {
 
 // [AIREVIEW-PLAN-073#1-fix2] 节奏层 watch 置于全部 computed 之后：watch 源创建即求值，提前会 TDZ。
 watch([activePhaseIndex, selectedPhase], syncPaced);
+// [AIREVIEW-PLAN-110#1] 手动钉住永久压制被动落位会把视图卡在早前步骤（如议题裁决），
+// 评审进入待人工决策后人工决策面板永远不出现；目标进入人工决策区间且钉住在更早阶段时
+// 解除钉住，节奏层随即落位人工决策。到达后用户再手动回看不再触发（stage 不再跃迁）。
+watch(activePhaseIndex, (target) => {
+    if (shouldReleasePhasePin({ targetIndex: target, pinnedIndex: phases.findIndex((phase) => phase.id === selectedPhase.value) })) {
+        selectedPhase.value = null;
+    }
+});
 watch(() => props.reviewId, load, { immediate: true });
 // Keep the live debate view on the latest round: entering the debate phase, or the round counter
 // advancing to round two (via DEBATE_ROUND_2_STARTED), moves the selected round forward without

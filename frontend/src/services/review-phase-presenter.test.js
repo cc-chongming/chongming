@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isScoutConcluded, resolvePhaseLanding } from './review-phase-presenter';
+import { isScoutConcluded, resolvePhaseLanding, shouldReleasePhasePin } from './review-phase-presenter';
 
 describe('review phase landing', () => {
     it('lands on context scout while PLANNING and scout has not concluded', () => {
@@ -81,5 +81,29 @@ describe('isScoutConcluded', () => {
     it('stays open without either signal', () => {
         expect(isScoutConcluded({ contextScout: null, scoutRunFinished: false })).toBe(false);
         expect(isScoutConcluded()).toBe(false);
+    });
+});
+
+describe('shouldReleasePhasePin', () => {
+    it('releases an earlier pin when the flow enters the human gate', () => {
+        // [AIREVIEW-PLAN-110#1] 钉在议题裁决(5)时进入待人工决策(6)：解除钉住落位人工决策。
+        expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: 5 })).toBe(true);
+        expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: 0 })).toBe(true);
+    });
+
+    it('keeps the pin while the target is before the human gate', () => {
+        // 运行期手动回看早前阶段仍受尊重：目标未进入人工决策区间不解除。
+        expect(shouldReleasePhasePin({ targetIndex: 5, pinnedIndex: 4 })).toBe(false);
+        expect(shouldReleasePhasePin({ targetIndex: 3, pinnedIndex: 1 })).toBe(false);
+    });
+
+    it('keeps the pin when the user already selected the human phase', () => {
+        expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: 6 })).toBe(false);
+    });
+
+    it('does nothing without a pin', () => {
+        expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: null })).toBe(false);
+        expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: -1 })).toBe(false);
+        expect(shouldReleasePhasePin({ targetIndex: 6 })).toBe(false);
     });
 });
