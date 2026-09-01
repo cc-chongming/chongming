@@ -653,8 +653,9 @@ onUnmounted(() => loadQueue.dispose());
             <RouterLink class="flow-header-link flow-back-link" :to="{ name: 'reviews' }">← 评审列表</RouterLink>
             <RouterLink class="review-flow-brand" :to="{ name: 'dashboard' }">重明</RouterLink>
             <div class="review-flow-title"><strong>需求评审全流程</strong><span>评审 #{{ reviewId }}</span></div>
-            <div class="review-flow-header-status" :data-status="runtimeTrace.state.status"><span aria-hidden="true"></span>{{ liveRunState.connectionText }} · {{ stage }}</div>
-            <span class="flow-header-button flow-stage-chip" aria-label="评审阶段">{{ stage }}</span>
+            <!-- [AIREVIEW-PLAN-096#1] 连接态不再拼接原始英文 stage；阶段由右侧徽章以中文独立呈现。 -->
+            <div class="review-flow-header-status" :data-status="runtimeTrace.state.status"><span aria-hidden="true"></span>{{ liveRunState.connectionText }}</div>
+            <span class="flow-header-button flow-stage-chip" aria-label="评审阶段">{{ stageLabel[stage] ?? stage }}</span>
             <button class="flow-drawer-toggle" type="button" :aria-expanded="drawerOpen" @click="drawerOpen = !drawerOpen">{{ drawerOpen ? '收起观察' : '展开观察' }}</button>
             <button v-if="liveCancelable" class="flow-header-button" type="button" :disabled="commandBusy" @click="cancelLiveWithConfirm">取消评审</button>
             <button class="flow-header-button" type="button" :disabled="commandBusy" @click="() => store.refreshSummary().catch(() => {})">刷新状态</button>
