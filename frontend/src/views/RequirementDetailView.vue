@@ -5,6 +5,8 @@ import { formatApiError, ReviewApiError, reviewApi } from '../api/review-api';
 import { authStore } from '../stores/auth-store';
 import { taskApi } from '../api/task-api';
 import { formatChinaTime } from '../services/china-time';
+// [AIREVIEW-PLAN-101#2] 门禁版本历史的机器理由中文化。
+import { humanizeGateReason } from '../services/review-conclusion-presenter';
 import RepositorySelect from '../components/RepositorySelect.vue';
 import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
 import RequirementDocInput from '../components/RequirementDocInput.vue';
@@ -589,7 +591,7 @@ onMounted(refreshRepositoryAvailability);
                                 <div class="gate-tag" :class="`t-${gateInfo(gate.result).tone}`">{{ gateInfo(gate.result).icon }} {{ gateInfo(gate.result).label }}</div>
                                 <div class="gate-meta">
                                     <div v-if="gate.actor"><strong>决策者:</strong> {{ gate.actor }}<span v-if="gate.decidedAt"> · {{ formatChinaTime(gate.decidedAt) }}</span></div>
-                                    <div v-if="gate.reasonSummary"><strong>理由:</strong> {{ gate.reasonSummary }}</div>
+                                    <div v-if="gate.reasonSummary"><strong>理由:</strong> {{ humanizeGateReason(gate.reasonSummary) }}</div>
                                 </div>
                             </div>
                             <div v-else class="gate-empty">

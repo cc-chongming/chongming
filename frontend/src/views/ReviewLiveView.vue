@@ -27,7 +27,7 @@ import { buildActivationRows } from '../services/review-activation-presenter';
 import { buildDefenseTurns } from '../services/review-debate-presenter';
 import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
-import { resolveAiGateDraft, deliveryStatusLabel, channelLabel, responseLabel } from '../services/review-conclusion-presenter';
+import { resolveAiGateDraft, deliveryStatusLabel, channelLabel, responseLabel, humanizeGateReason } from '../services/review-conclusion-presenter';
 import { reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
@@ -899,7 +899,7 @@ onUnmounted(() => loadQueue.dispose());
                     <section class="flow-conclusion-chain" aria-label="评审结论链">
                         <article><span>1</span><div><small>议题裁决</small><strong v-if="judgements.length">{{ judgements.length }} 个议题已裁决</strong><strong v-else-if="pendingJudgementTopics.length">{{ pendingJudgementTopics.length }} 个议题已升级，等待 Judge 裁决</strong><strong v-else>等待裁决</strong><p v-if="judgements.length">{{ judgements.map((topic) => gateLabel(topic.judgement.result)).join('、') }}</p></div></article>
                         <i aria-hidden="true">↓</i>
-                        <article><span>2</span><div><small>确定性 AI 门禁草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><p v-if="gateDraft?.reasonSummary">{{ gateDraft.reasonSummary }}</p></div></article>
+                        <article><span>2</span><div><small>确定性 AI 门禁草案</small><strong v-if="gateDraft">{{ gateLabel(gateDraft.result) }} · {{ gateLabel(gateDraft.status) }}</strong><strong v-else>尚未形成</strong><!-- [AIREVIEW-PLAN-101#1] 门禁机器理由中文化，与人工审核面板同口径。 --><p v-if="gateDraft?.reasonSummary">{{ humanizeGateReason(gateDraft.reasonSummary) }}</p></div></article>
                         <i aria-hidden="true">↓</i>
                         <article><span>3</span><div><small>人工最终结论</small><strong v-if="store.state.humanGateVersions.length">{{ gateLabel(store.state.humanGateVersions.at(-1).result) }}</strong><strong v-else>等待人工决策</strong><p v-if="store.state.humanGateVersions.at(-1)?.reason">{{ store.state.humanGateVersions.at(-1).reason }}</p></div></article>
                         <i aria-hidden="true">↓</i>
