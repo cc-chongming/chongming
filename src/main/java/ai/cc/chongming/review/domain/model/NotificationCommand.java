@@ -34,7 +34,8 @@ public record NotificationCommand(
         String objectTitle,
         String objectSubtitle,
         String objectStatus,
-        String objectHolder) {
+        String objectHolder,
+        String requirementId) {
 
     public NotificationCommand {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
@@ -63,6 +64,7 @@ public record NotificationCommand(
         objectSubtitle = objectSubtitle == null || objectSubtitle.isBlank() ? null : objectSubtitle.trim();
         objectStatus = objectStatus == null || objectStatus.isBlank() ? null : objectStatus.trim();
         objectHolder = objectHolder == null || objectHolder.isBlank() ? null : objectHolder.trim();
+        requirementId = requirementId == null || requirementId.isBlank() ? null : requirementId.trim();
     }
 
     /** Legacy Gate-result command shape. */
@@ -76,7 +78,7 @@ public record NotificationCommand(
             List<String> conditions,
             String reportUrl) {
         this(reviewId, gateVersion, channel, destination, result, reason, conditions, reportUrl, null, 0, null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     /**
@@ -97,12 +99,13 @@ public record NotificationCommand(
             String objectTitle,
             String objectSubtitle,
             String objectStatus,
-            String objectHolder) {
+            String objectHolder,
+            String requirementId) {
         return new NotificationCommand(
                 reviewId, 0L, channel, destination, null, title, List.of(),
                 "/api/reviews/" + reviewId.value() + "/report",
                 eventType, eventSequence, recipientUsername, templateKey,
-                objectTitle, objectSubtitle, objectStatus, objectHolder);
+                objectTitle, objectSubtitle, objectStatus, objectHolder, requirementId);
     }
 
     public String idempotencyKey() {

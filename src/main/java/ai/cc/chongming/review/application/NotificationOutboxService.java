@@ -331,6 +331,8 @@ public class NotificationOutboxService implements ReviewEventListener {
         String objectSubtitle = payload.get("requirementTitle");
         String objectStatus = payload.get("status");
         String objectHolder = payload.get("holder");
+        // [AIREVIEW-PLAN-110#1] 需求详情按钮深链需要需求 id。
+        String requirementId = payload.get("requirementId");
         for (String username : recipients) {
             User user = userRepository.findByUsername(username).orElse(null);
             if (user == null) {
@@ -353,7 +355,7 @@ public class NotificationOutboxService implements ReviewEventListener {
                 NotificationCommand command = NotificationCommand.forEvent(
                         event.reviewId(), event.type().name(), event.sequence(),
                         channel[0], channel[1], username, templateKey, title,
-                        objectTitle, objectSubtitle, objectStatus, objectHolder);
+                        objectTitle, objectSubtitle, objectStatus, objectHolder, requirementId);
                 if (outboxStore.findByIdempotencyKey(command.idempotencyKey()).isEmpty()) {
                     outboxStore.enqueue(NotificationOutboxEntry.pending(command, requestHash(command), clock.instant()));
                 }
