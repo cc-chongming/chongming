@@ -135,7 +135,7 @@ async function finalizeDecision() {
                 <ul v-if="judgeSummaries.length" class="judge-summary-list">
                     <li v-for="judge in judgeSummaries" :key="judge.topicId">
                         <!-- [AIREVIEW-PLAN-087#1] -->
-                        <div><strong>{{ judge.resultLabel }}</strong><span class="judge-topic-title">{{ judge.title ?? judge.subjectKey }}</span><code v-if="judge.title" class="judge-topic-tech">{{ judge.subjectKey }}</code></div>
+                        <div class="judge-card-head"><strong>{{ judge.resultLabel }}</strong><span class="judge-topic-title">{{ judge.title ?? judge.subjectKey }}</span><code v-if="judge.title" class="judge-topic-tech">{{ judge.subjectKey }}</code></div>
                         <!-- [AIREVIEW-PLAN-102#2] 裁决理由分段分行、标签加粗。 -->
                         <div class="judge-reason"><p v-for="(block, index) in judgementReasonBlocks(judge.reason)" :key="index"><strong v-if="block.label">{{ block.label }}</strong><span>{{ block.text }}</span></p></div>
                         <!-- [AIREVIEW-PLAN-103#2] 各方原始主张可见：自冲突议题无辩论过程，反对方原文仍须呈现给决策者。 -->
@@ -216,7 +216,10 @@ async function finalizeDecision() {
 .decision-step { display: grid; width: 28px; height: 28px; place-items: center; color: #1d4ed8; background: #dbeafe; border-radius: 50%; font-weight: 800; }
 .judge-summary-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 .judge-summary-list li { padding: 10px 12px; border-left: 3px solid #60a5fa; background: #f8fafc; }
-.judge-summary-list li > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.judge-summary-list li > .judge-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+/* [AIREVIEW-PLAN-104#1] 裁决理由竖排分段：理由容器恢复块级，标签独立成行，不再被标题行 flex 规则拉成并排。 */
+.judge-summary-list li > .judge-reason { display: block; }
+.judge-summary-list .judge-reason p strong { display: block; margin: .45rem 0 2px; color: #1c1917; }
 .judge-summary-list code { color: #78716c; font-size: 11px; overflow-wrap: anywhere; }
 /* [AIREVIEW-PLAN-087#1] */
 .judge-topic-title { margin-left: .5rem; color: #1c1917; font-size: .8rem; font-weight: 700; }
@@ -227,6 +230,6 @@ async function finalizeDecision() {
 .override-reason { color: #7c2d12; }
 .difference-copy { padding: 9px 10px; color: #991b1b; background: #fee2e2; border-radius: 7px; font-weight: 700; }
 @media (max-width: 720px) {
-    .decision-basis-heading, .judge-summary-list li > div { align-items: flex-start; flex-direction: column; }
+    .decision-basis-heading, .judge-summary-list li > .judge-card-head { align-items: flex-start; flex-direction: column; }
 }
 </style>
