@@ -603,9 +603,10 @@ public class ReviewWorkflowDispatcher implements ReviewEventListener {
             }
             try {
                 synchronized (review) {
+                    // [AIREVIEW-PLAN-097#1] 幂等键纳入 round 维度：同轮重复触发仍幂等，跨轮（R1/R2）不再互吞。
                     dispatchService.issue(review, new ReviewDispatchService.DispatchProposal(
                             new ReviewCommandMetadata(review.id(), review.version(),
-                                    new IdempotencyKey("dispatch:challenge:" + topic.id().value() + ":" + recipient)),
+                                    new IdempotencyKey("dispatch:challenge:" + topic.id().value() + ":r" + round + ":" + recipient)),
                             recipient,
                             DispatchedAction.CHALLENGE,
                             round,

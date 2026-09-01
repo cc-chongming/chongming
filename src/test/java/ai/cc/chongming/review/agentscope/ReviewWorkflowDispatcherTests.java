@@ -791,6 +791,95 @@ class ReviewWorkflowDispatcherTests {
                         && message.contains("仅该议题进入第二轮")));
     }
 
+    /**
+     * [AIREVIEW-PLAN-097#2] 回归：R1 已完成（同一 OPPOSE 角色 BACKEND 已有 round=1 CHALLENGE turn、
+     * SUPPORT 角色 PRODUCT 已有 round=1 REBUTTAL turn，且 R1 CHALLENGE 信封已消费）后开启第二轮，
+     * 队列必须向同一 OPPOSE 角色再签发一条 round=2 的 PENDING CHALLENGE，不被 R1 幂等键
+     * （dispatch:challenge:{topicId}:{recipient}）当作重放静默吞掉。
+     */
+    @Test
+    void secondRoundChallengeForSameOpposeRoleIsNotDedupedByRoundOneIdempotencyKey() {
+        Review opposing = freshReview(RoleType.PRODUCT, RoleType.BACKEND);
+        Claim support = claim(opposing, RoleType.PRODUCT, ClaimSeverity.P1, ClaimPosition.SUPPORT);
+        Claim oppose = claim(opposing, RoleType.BACKEND, ClaimSeverity.P1, ClaimPosition.OPPOSE);
+        DebateTopic topic = new DebateTopic(new TopicId(UUID.randomUUID()), opposing.id(), "api.contract",
+                List.of(support.claimId(), oppose.claimId()));
+        debateStore.saveTopic(topic);
+
+        // R1 开题：服务端向唯一 OPPOSE 角色签发 round=1 CHALLENGE。
+        dispatcher.onCommitted(openedEvent(opposing, topic));
+        List<ReviewDispatchCommand> roundOneCommands = challengeCommands(opposing);
+        assertThat(roundOneCommands).hasSize(1);
+        ReviewDispatchCommand roundOneChallenge = roundOneCommands.getFirst();
+        assertThat(roundOneChallenge.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+        assertThat(roundOneChallenge.round()).isEqualTo(1);
+        assertThat(roundOneChallenge.recipientRole()).isEqualTo(RoleType.BACKEND);
+        assertThat(roundOneChallenge.status()).isEqualTo(DispatchCommandStatus.PENDING);
+        assertThat(roundOneChallenge.idempotencyKey().value())
+                .isEqualTo("dispatch:challenge:" + topic.id().value() + ":r1:" + RoleType.BACKEND);
+
+        // R1 CHALLENGE 落地并消费信封（真实流程中角色凭信封完成质询后信封转为 CONSUMED）。
+        DebateTurn roundOneChallengeTurn = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), 1,
+                RoleType.BACKEND, RoleType.PRODUCT, DebateTurnType.CHALLENGE, support.claimId(), null,
+                "后端质疑接口契约", List.of(), null, null, Instant.now());
+        debateStore.saveTurn(opposing.id(), roundOneChallengeTurn);
+        topic.addChallenge(new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                roundOneChallengeTurn);
+        debateStore.saveTopic(topic);
+        dispatchService.consume(opposing, roundOneChallenge);
+        dispatcher.onCommitted(eventFor(opposing, ReviewEventType.CHALLENGE_SUBMITTED,
+                roundOneChallengeTurn.turnId(), topic.id()));
+
+        // R1 REBUTTAL 落地：SUPPORT 角色完成答辩，第一轮收尾（议题进入 REBUTTED）。
+        DebateTurn roundOneRebuttal = new DebateTurn(new TurnId(UUID.randomUUID()), topic.id(), 1,
+                RoleType.PRODUCT, RoleType.BACKEND, DebateTurnType.REBUTTAL, support.claimId(),
+                roundOneChallengeTurn.turnId(), "产品答辩接口契约", List.of(), null, null, Instant.now());
+        debateStore.saveTurn(opposing.id(), roundOneRebuttal);
+        topic.addRebuttal(new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                roundOneRebuttal);
+        debateStore.saveTopic(topic);
+        dispatcher.onCommitted(eventFor(opposing, ReviewEventType.REBUTTAL_SUBMITTED,
+                roundOneRebuttal.turnId(), topic.id()));
+
+        // 开启第二轮：真实 DebateService 把议题 currentRound 推进到 2 并发布 DEBATE_ROUND_2_STARTED，
+        // 事件经 publisher 回灌 dispatcher 路由到质询队列。
+        DebateService debateService = new DebateService(debateStore,
+                new ai.cc.chongming.review.application.EvidenceLedgerService(),
+                new ai.cc.chongming.review.domain.protocol.DebateStateMachine(),
+                new ai.cc.chongming.review.domain.protocol.ReviewProtocolGuard(),
+                draft -> {
+                    published.add(draft);
+                    ReviewWorkflowDispatcher current = dispatcherRef.get();
+                    if (current != null) {
+                        current.onCommitted(ReviewEvent.committed(sequence.incrementAndGet(), draft));
+                    }
+                });
+        debateService.beginTopicSecondRound(opposing,
+                new ReviewCommandMetadata(opposing.id(), opposing.version(),
+                        new IdempotencyKey("round-two-begin-" + topic.id().value())),
+                topic.id());
+
+        // [AIREVIEW-PLAN-097#2] 同一 OPPOSE 角色现在持有两条 CHALLENGE（round=1 与 round=2）互不互吞。
+        List<ReviewDispatchCommand> challenges = challengeCommands(opposing);
+        assertThat(challenges).hasSize(2);
+        assertThat(challenges).extracting(ReviewDispatchCommand::round)
+                .containsExactlyInAnyOrder(1, 2);
+        assertThat(challenges).extracting(ReviewDispatchCommand::recipientRole)
+                .containsOnly(RoleType.BACKEND);
+        ReviewDispatchCommand roundTwoChallenge = challenges.stream()
+                .filter(command -> command.round() == 2).findFirst().orElseThrow();
+        ReviewDispatchCommand roundOne = challenges.stream()
+                .filter(command -> command.round() == 1).findFirst().orElseThrow();
+        assertThat(roundTwoChallenge.commandId()).isNotEqualTo(roundOne.commandId());
+        assertThat(roundTwoChallenge.allowedAction()).isEqualTo(DispatchedAction.CHALLENGE);
+        assertThat(roundTwoChallenge.round()).isEqualTo(2);
+        assertThat(roundTwoChallenge.recipientRole()).isEqualTo(RoleType.BACKEND);
+        assertThat(roundTwoChallenge.status()).isEqualTo(DispatchCommandStatus.PENDING);
+        assertThat(roundTwoChallenge.topicId()).isEqualTo(topic.id());
+        assertThat(roundTwoChallenge.idempotencyKey().value())
+                .isEqualTo("dispatch:challenge:" + topic.id().value() + ":r2:" + RoleType.BACKEND);
+    }
+
     // --- helpers -------------------------------------------------------------
 
     /** [AIREVIEW-PLAN-076#1] 过滤出该评审全部 CHALLENGE 调度信封，忽略 order 不稳定的答辩信封。 */

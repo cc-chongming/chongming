@@ -6,6 +6,7 @@ import ai.cc.chongming.review.domain.gateway.ModelGateway;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.RoleType;
 import ai.cc.chongming.review.infrastructure.agentscope.AgentScopeModelBridge;
+import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.ThinkingBlock;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultMessage;
