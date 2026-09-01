@@ -390,6 +390,9 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 /* [AIREVIEW-PLAN-100#1] 徽章内阶段图标资产对齐文本基线。 */
 .flow-verdict-badge { display: inline-flex; align-items: center; gap: .35rem; }
 .flow-verdict-badge .flow-verdict-icon { width: 1.05rem; height: 1.05rem; }
+/* [AIREVIEW-PLAN-102#3] 裁决理由结构化分段：段落间距 + 标签加粗可读性。 */
+.judge-reason p, .flow-judgement-reason p { margin: .3rem 0; line-height: 1.6; }
+.judge-reason p strong, .flow-judgement-reason p strong { margin-right: .25rem; }
 .flow-verdict-text { flex: 1; min-width: 12rem; color: #cfd6e6; font-size: .76rem; }
 .flow-verdict-btns { display: flex; flex-wrap: wrap; gap: .45rem; }
 .flow-verdict-btns a { padding: .35rem .75rem; border: 1px solid var(--flow-border); border-radius: .4rem; color: var(--flow-text); font-size: .7rem; font-weight: 700; text-decoration: none; }.flow-verdict-btns a:hover { filter: brightness(1.15); }

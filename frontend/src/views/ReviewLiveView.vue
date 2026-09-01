@@ -27,7 +27,7 @@ import { buildActivationRows } from '../services/review-activation-presenter';
 import { buildDefenseTurns } from '../services/review-debate-presenter';
 import { isScoutConcluded, resolvePhaseLanding } from '../services/review-phase-presenter';
 import { claimOverview, completedReviewRoles, gateLabel, reviewRoles } from '../services/review-live-presenter';
-import { resolveAiGateDraft, deliveryStatusLabel, channelLabel, responseLabel, humanizeGateReason } from '../services/review-conclusion-presenter';
+import { resolveAiGateDraft, deliveryStatusLabel, channelLabel, responseLabel, humanizeGateReason, judgementReasonBlocks } from '../services/review-conclusion-presenter';
 import { reviewApi } from '../api/review-api';
 import { createReviewStore } from '../stores/review-store';
 import { createRuntimeTraceStore } from '../stores/runtime-trace-store';
@@ -741,7 +741,8 @@ onUnmounted(() => loadQueue.dispose());
                         <article v-for="topic in judgements" :key="topic.topicId" class="flow-judgement-card">
                             <!-- [AIREVIEW-PLAN-044#2] 裁决卡优先显示中文议题标题。 -->
                             <header><span class="flow-judgement-badge">{{ gateLabel(topic.judgement.result) }}</span><strong>{{ topic.title ?? topic.subjectKey }}</strong></header>
-                            <p>{{ topic.judgement.reasonSummary }}</p>
+                            <!-- [AIREVIEW-PLAN-102#2] 裁决理由分段分行、标签加粗。 -->
+                            <div class="flow-judgement-reason"><p v-for="(block, index) in judgementReasonBlocks(topic.judgement.reasonSummary)" :key="index"><strong v-if="block.label">{{ block.label }}</strong><span>{{ block.text }}</span></p></div>
                             <small>接受 {{ topic.judgement.acceptedClaimIds?.length ?? 0 }} 项 · 拒绝 {{ topic.judgement.rejectedClaimIds?.length ?? 0 }} 项</small>
                             <details v-if="topic.judgement.acceptedClaimIds?.length"><summary>查看采信的 Claim</summary><ReviewClaimList :claims="claimsForIds(topic.judgement.acceptedClaimIds)" /></details>
                             <details v-if="topic.judgement.rejectedClaimIds?.length"><summary>查看拒绝的 Claim</summary><ReviewClaimList :claims="claimsForIds(topic.judgement.rejectedClaimIds)" /></details>

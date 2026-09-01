@@ -3,6 +3,7 @@ import {
     compareGateDecision,
     GATE_CONCLUSION_HINTS,
     humanizeGateReason,
+    judgementReasonBlocks,
     latestGateDecision,
     presentDebateJudgement,
     resolveAiGateDraft
@@ -181,5 +182,22 @@ describe('humanizeGateReason [AIREVIEW-PLAN-023#6.3]', () => {
             expect(hint.label).toBeTruthy();
             expect(hint.description).toBeTruthy();
         }
+    });
+});
+
+// [AIREVIEW-PLAN-102#1] 裁决理由按结构标签分段，标签加粗、每段独立成行。
+describe('judgement reason blocks [AIREVIEW-PLAN-102#1]', () => {
+    it('splits labelled segments and keeps the label with its colon', () => {
+        const blocks = judgementReasonBlocks('核心争议：验收是否建立在未执行验证之上。项目方立场（反对，严重级）：集成测试持续跳过。采信依据：双方无分歧。裁决：保留验收判据。');
+        expect(blocks.map((block) => block.label)).toEqual([
+            '核心争议：', '项目方立场（反对，严重级）：', '采信依据：', '裁决：'
+        ]);
+        expect(blocks[0].text).toBe('验收是否建立在未执行验证之上。');
+        expect(blocks.at(-1).text).toBe('保留验收判据。');
+    });
+
+    it('returns the raw text as one block when no label is present', () => {
+        expect(judgementReasonBlocks('自由文本没有标签')).toEqual([{ label: null, text: '自由文本没有标签' }]);
+        expect(judgementReasonBlocks('')).toEqual([]);
     });
 });

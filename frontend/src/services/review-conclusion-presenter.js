@@ -172,6 +172,25 @@ export function humanizeGateReason(reasonSummary) {
     const readable = [coverageText, ...triggers].filter(Boolean);
     return readable.length ? readable.join('；') : trimmed;
 }
+// [AIREVIEW-PLAN-102#1] 裁决理由结构化分段：识别「核心争议 / …立场（…） / 采信依据 / 裁决 / 未决点」
+// 等标签，标签加粗、每段独立成行；未识别任何标签时单段原样返回，不损坏自由文本。
+const JUDGEMENT_LABEL_RE = /((?:[一-鿿]{2,8}立场（[^）]*）|核心争议|采信依据|裁决|未决点)\uff1a)/g;
+export function judgementReasonBlocks(reasonSummary) {
+    const source = String(reasonSummary ?? '').trim();
+    if (!source) return [];
+    const blocks = [];
+    let label = null;
+    let cursor = 0;
+    for (const match of source.matchAll(JUDGEMENT_LABEL_RE)) {
+        const text = source.slice(cursor, match.index).trim();
+        if (text || label) blocks.push({ label, text });
+        label = match[1];
+        cursor = match.index + match[0].length;
+    }
+    const tail = source.slice(cursor).trim();
+    if (tail || label) blocks.push({ label, text: tail });
+    return blocks.length ? blocks : [{ label: null, text: source }];
+}
 // [AIREVIEW-PLAN-088#20] 通知投递状态/渠道/响应码的中文展示映射；未命中时原样回退，保持后端事实可读。
 export function deliveryStatusLabel(status) {
     return { SENT: '已发送', FAILED: '失败', DEAD: '死信', QUEUED: '排队中' }[status] ?? status;

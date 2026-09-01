@@ -8,6 +8,7 @@ import {
     conclusionLabel,
     GATE_CONCLUSION_HINTS,
     humanizeGateReason,
+    judgementReasonBlocks,
     latestGateDecision,
     presentDebateJudgement
 } from '../services/review-conclusion-presenter';
@@ -119,7 +120,8 @@ async function finalizeDecision() {
                     <li v-for="judge in judgeSummaries" :key="judge.topicId">
                         <!-- [AIREVIEW-PLAN-087#1] -->
                         <div><strong>{{ judge.resultLabel }}</strong><span class="judge-topic-title">{{ judge.title ?? judge.subjectKey }}</span><code v-if="judge.title" class="judge-topic-tech">{{ judge.subjectKey }}</code></div>
-                        <p>{{ judge.reason }}</p>
+                        <!-- [AIREVIEW-PLAN-102#2] 裁决理由分段分行、标签加粗。 -->
+                        <div class="judge-reason"><p v-for="(block, index) in judgementReasonBlocks(judge.reason)" :key="index"><strong v-if="block.label">{{ block.label }}</strong><span>{{ block.text }}</span></p></div>
                         <small>采信 {{ judge.accepted.length }} 项 · 拒绝 {{ judge.rejected.length }} 项</small>
                     </li>
                 </ul>
