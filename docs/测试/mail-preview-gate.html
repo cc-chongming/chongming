@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>最终 Gate 通知</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f5f7;">
+  <tr>
+    <td align="center" style="background-color:#f4f5f7;padding:24px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="background-color:#ffffff;border-radius:8px;">
+        <tr>
+          <td bgcolor="#1e3a8a" style="background-color:#1e3a8a;padding:16px 24px;border-radius:8px 8px 0 0;">
+            <span style="color:#ffffff;font-weight:700;font-size:18px;">重明</span>
+            <span style="color:#bfdbfe;font-size:13px;margin-left:8px;">AI 需求评审平台</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 24px 16px;">
+            <h1 style="margin:0 0 12px;font-size:18px;color:#111827;line-height:1.5;">最终 Gate 通知</h1>
+            <span style="display:inline-block;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700;background-color:#fef3c7;color:#92400e;">有条件通过</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 24px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="88" valign="top" style="font-size:13px;color:#6b7280;padding:4px 0;">评审</td><td style="font-size:14px;color:#111827;padding:4px 0;">a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d</td></tr></table>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="88" valign="top" style="font-size:13px;color:#6b7280;padding:4px 0;">Gate 版本</td><td style="font-size:14px;color:#111827;padding:4px 0;">v1</td></tr></table>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="88" valign="top" style="font-size:13px;color:#6b7280;padding:4px 0;">结论</td><td style="font-size:14px;color:#111827;padding:4px 0;">CONDITIONAL</td></tr></table>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="88" valign="top" style="font-size:13px;color:#6b7280;padding:4px 0;">理由</td><td style="font-size:14px;color:#111827;padding:4px 0;">补充 version 字段后 AI 判断风险可控，但需人工确认验收标准</td></tr></table>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="88" valign="top" style="font-size:13px;color:#6b7280;padding:4px 0;">条件</td><td style="font-size:14px;color:#111827;padding:4px 0;"><div style="padding:1px 0;">1. 补充 version 字段</div><div style="padding:1px 0;">2. 验收标准需细化可量化指标</div></td></tr></table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px;">
+            <a href="http://127.0.0.1:8080/review/reviews/a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d/report" style="display:inline-block;background-color:#2563eb;color:#ffffff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;">查看评审报告</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 24px 24px;border-top:1px solid #e5e7eb;">
+            <div style="font-size:12px;color:#9ca3af;line-height:1.8;">
+              报告接口：http://127.0.0.1:8080/review/reviews/a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d/report<br/>
+              幂等键：a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d:1:smtp-mail<br/>
+              本邮件由重明评审系统自动发送，请勿直接回复。
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

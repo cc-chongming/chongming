@@ -7,6 +7,8 @@ import org.springframework.boot.context.properties.bind.ConstructorBinding;
  * [AIREVIEW-PLAN-011#1.6] QQ/SMTP mail channel settings. Deployments should keep credentials in
  * environment variables; the optional authCode only exists so a local profile can bake the QQ
  * authorization code into application-local.yml, matching the existing local-secret convention.
+ * [AIREVIEW-PLAN-108] publicBaseUrl is the externally visible base URL used to build the HTML report CTA;
+ * leave it empty to fall back to the command's reportUrl.
  *
  * @author wangli
  */
@@ -17,11 +19,18 @@ public record NotificationMailProperties(
         String sender,
         String credentialEnvironmentVariable,
         String subjectPrefix,
-        String authCode) {
+        String authCode,
+        String publicBaseUrl) {
 
     public NotificationMailProperties(
             String host, int port, String sender, String credentialEnvironmentVariable, String subjectPrefix) {
-        this(host, port, sender, credentialEnvironmentVariable, subjectPrefix, null);
+        this(host, port, sender, credentialEnvironmentVariable, subjectPrefix, null, null);
+    }
+
+    public NotificationMailProperties(
+            String host, int port, String sender, String credentialEnvironmentVariable, String subjectPrefix,
+            String authCode) {
+        this(host, port, sender, credentialEnvironmentVariable, subjectPrefix, authCode, null);
     }
 
     @ConstructorBinding
@@ -37,5 +46,9 @@ public record NotificationMailProperties(
                 : credentialEnvironmentVariable;
         subjectPrefix = subjectPrefix == null || subjectPrefix.isBlank() ? "【重明需求评审】" : subjectPrefix;
         authCode = authCode == null ? "" : authCode;
+        publicBaseUrl = publicBaseUrl == null || publicBaseUrl.isBlank() ? "" : publicBaseUrl.trim();
+        while (publicBaseUrl.endsWith("/")) {
+            publicBaseUrl = publicBaseUrl.substring(0, publicBaseUrl.length() - 1);
+        }
     }
 }

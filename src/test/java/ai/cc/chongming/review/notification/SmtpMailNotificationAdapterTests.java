@@ -7,7 +7,9 @@ import ai.cc.chongming.review.domain.model.NotificationDeliveryReceipt;
 import ai.cc.chongming.review.domain.model.ReviewTypes.GateResult;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.infrastructure.notification.SmtpMailNotificationAdapter;
+import jakarta.mail.BodyPart;
 import jakarta.mail.Message;
+import jakarta.mail.Multipart;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeUtility;
@@ -18,10 +20,12 @@ import org.springframework.mail.MailSendException;
 import org.springframework.mail.javamail.JavaMailSender;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
@@ -33,6 +37,8 @@ import static org.mockito.Mockito.when;
 /**
  * [AIREVIEW-PLAN-011#1.6] Verifies the QQ/SMTP channel builds the Gate mail from the immutable
  * command and fails closed without credentials instead of guessing a transport request.
+ * [AIREVIEW-PLAN-108] Also verifies the multipart/alternative body: the plain-text fallback keeps
+ * the historical content while the HTML part carries the branded header, CTA and escaped values.
  *
  * @author wangli
  */
@@ -59,10 +65,11 @@ class SmtpMailNotificationAdapterTests {
         assertEquals("sender@qq.com", sent.getFrom()[0].toString());
         assertEquals("reviewer@qq.com", sent.getRecipients(Message.RecipientType.TO)[0].toString());
         assertEquals("【重明需求评审】Gate v1 · CONDITIONAL", MimeUtility.decodeText(sent.getSubject()));
-        String body = (String) sent.getContent();
-        assertTrue(body.contains("Gate 版本: v1"));
-        assertTrue(body.contains("结论: CONDITIONAL"));
-        assertTrue(body.contains("补充 version 字段"));
+        assertTrue(sent.getContentType().startsWith("multipart/alternative"), "CT=" + sent.getContentType());
+        String plain = partBody(sent, "text/plain");
+        assertTrue(plain.contains("Gate 版本: v1"));
+        assertTrue(plain.contains("结论: CONDITIONAL"));
+        assertTrue(plain.contains("补充 version 字段"));
     }
 
     @Test
@@ -145,10 +152,133 @@ class SmtpMailNotificationAdapterTests {
         assertEquals(true, exception.retryable());
     }
 
+    @Test
+    void sendsTransitionNotificationAsMultipartAlternativeWithBrandedHtml() throws Exception {
+        JavaMailSender mailSender = mock(JavaMailSender.class);
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+        SmtpMailNotificationAdapter adapter = new SmtpMailNotificationAdapter(
+                new NotificationMailProperties("smtp.qq.com", 465, "sender@qq.com", AUTH_CODE_ENV,
+                        "【重明需求评审】", null, "http://example.org/review"),
+                mailSender,
+                env -> AUTH_CODE_ENV.equals(env) ? "test-auth-code" : null);
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        NotificationCommand command = NotificationCommand.forEvent(
+                reviewId, "TASK_HANDOFF", 1L, "smtp-mail", "reviewer@qq.com", "wangli",
+                "task-handoff", "需求评审任务已交接给评审角色 A");
+
+        adapter.deliver(command);
+
+        ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(captor.capture());
+        MimeMessage sent = captor.getValue();
+        sent.saveChanges();
+        assertTrue(sent.getContentType().startsWith("multipart/alternative"));
+        String plain = partBody(sent, "text/plain");
+        assertTrue(plain.contains("事件: TASK_HANDOFF"));
+        String html = partBody(sent, "text/html");
+        assertTrue(html.contains("重明"));
+        assertTrue(html.contains("AI 需求评审平台"));
+        assertTrue(html.contains("任务流转"));
+        assertTrue(html.contains("href=\"http://example.org/review/reviews/" + reviewId.value() + "/report\""));
+        assertTrue(html.contains("查看评审报告"));
+    }
+
+    @Test
+    void escapesHtmlInHtmlPartButKeepsPlainText() throws Exception {
+        JavaMailSender mailSender = mock(JavaMailSender.class);
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+        SmtpMailNotificationAdapter adapter = new SmtpMailNotificationAdapter(
+                new NotificationMailProperties(null, 0, "sender@qq.com", AUTH_CODE_ENV, null),
+                mailSender,
+                env -> "test-auth-code");
+        String malicious = "<script>alert(1)</script>";
+        NotificationCommand command = NotificationCommand.forEvent(
+                new ReviewId(UUID.randomUUID()), "TASK_HANDOFF", 1L, "smtp-mail", "reviewer@qq.com", null,
+                "task-handoff", malicious);
+
+        adapter.deliver(command);
+
+        ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(captor.capture());
+        MimeMessage sent = captor.getValue();
+        sent.saveChanges();
+        String html = partBody(sent, "text/html");
+        assertFalse(html.contains(malicious));
+        assertTrue(html.contains("&lt;script&gt;"));
+        String plain = partBody(sent, "text/plain");
+        assertTrue(plain.contains(malicious));
+    }
+
+    @Test
+    void rendersGateResultBadgeInHtml() throws Exception {
+        JavaMailSender mailSender = mock(JavaMailSender.class);
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+        SmtpMailNotificationAdapter adapter = new SmtpMailNotificationAdapter(
+                new NotificationMailProperties(null, 0, "sender@qq.com", AUTH_CODE_ENV, null),
+                mailSender,
+                env -> "test-auth-code");
+
+        adapter.deliver(command("smtp-mail", "reviewer@qq.com"));
+
+        ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(captor.capture());
+        MimeMessage sent = captor.getValue();
+        sent.saveChanges();
+        String html = partBody(sent, "text/html");
+        assertTrue(html.contains("最终 Gate 通知"));
+        assertTrue(html.contains("有条件通过"));
+    }
+
+    @Test
+    void fallsBackToReportUrlWhenPublicBaseUrlIsBlank() throws Exception {
+        JavaMailSender mailSender = mock(JavaMailSender.class);
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+        SmtpMailNotificationAdapter adapter = new SmtpMailNotificationAdapter(
+                new NotificationMailProperties(null, 0, "sender@qq.com", AUTH_CODE_ENV, null),
+                mailSender,
+                env -> "test-auth-code");
+
+        adapter.deliver(command("smtp-mail", "reviewer@qq.com"));
+
+        ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(captor.capture());
+        MimeMessage sent = captor.getValue();
+        sent.saveChanges();
+        String html = partBody(sent, "text/html");
+        assertTrue(html.contains("href=\"/api/reviews/example/report\""));
+    }
+
     private NotificationCommand command(String channel, String destination) {
         return new NotificationCommand(
                 new ReviewId(UUID.randomUUID()), 1L, channel, destination,
                 GateResult.CONDITIONAL, "needs tracked conditions",
                 List.of("补充 version 字段"), "/api/reviews/example/report");
+    }
+
+    private static String describe(Multipart multipart) throws Exception {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < multipart.getCount(); i++) {
+            BodyPart part = multipart.getBodyPart(i);
+            builder.append("[").append(i).append("]=").append(part.getContentType());
+            if (part.getContent() instanceof Multipart nested) {
+                builder.append("(").append(describe(nested)).append(")");
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String partBody(MimeMessage message, String contentTypePrefix) throws Exception {
+        Object content = message.getContent();
+        if (content instanceof Multipart multipart) {
+            for (int i = 0; i < multipart.getCount(); i++) {
+                BodyPart part = multipart.getBodyPart(i);
+                if (part.getContentType().toLowerCase(Locale.ROOT).startsWith(contentTypePrefix)) {
+                    return (String) part.getContent();
+                }
+            }
+            throw new AssertionError("No " + contentTypePrefix + " part; top CT=" + message.getContentType()
+                    + " parts=" + describe(multipart));
+        }
+        throw new AssertionError("No " + contentTypePrefix + " part; content=" + content);
     }
 }

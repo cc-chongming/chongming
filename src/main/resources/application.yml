@@ -220,6 +220,8 @@ review:
       credential-environment-variable: ${REVIEW_QQ_MAIL_AUTH_CODE_ENV:REVIEW_QQ_MAIL_AUTH_CODE}
       subject-prefix: ${REVIEW_QQ_MAIL_SUBJECT_PREFIX:【重明需求评审】}
       auth-code: ${REVIEW_QQ_MAIL_AUTH_CODE:}
+      # [AIREVIEW-PLAN-108] Externally visible base URL for the HTML report CTA; empty falls back to reportUrl.
+      public-base-url: ${REVIEW_PUBLIC_BASE_URL:}
     chaoxing:
       # 学习通 uid 通知通道：默认关闭、继续以 QQ 邮箱为主；启用需配置 api/puid/pcode 与签名 token/key（fillParams_encnew），
       # 且收件人 users.company_uid 为数字 uid 时才会与邮件并行扇出（多端通知）。
