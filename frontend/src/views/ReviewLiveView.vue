@@ -913,7 +913,8 @@ onUnmounted(() => loadQueue.dispose());
                     </section>
 
                     <section class="flow-verdict-bar">
-                        <span class="flow-verdict-badge">🧑 人工决策</span>
+                        <!-- [AIREVIEW-PLAN-100#1] 人形 emoji 与页面图标体系不符：改用人工决策阶段图标资产。 -->
+                        <span class="flow-verdict-badge"><img class="flow-verdict-icon" :src="phaseIconUrl('human', 'running')" alt="">人工决策</span>
                         <span class="flow-verdict-text">系统已暂停 AI 输出，最终结论必须由人工在本页明确选择并提交</span>
                     </section>
                     <p v-if="humanPanelError" class="flow-error" role="alert">{{ humanPanelError }}</p>
