@@ -164,7 +164,8 @@ class SmtpMailNotificationAdapterTests {
         ReviewId reviewId = new ReviewId(UUID.randomUUID());
         NotificationCommand command = NotificationCommand.forEvent(
                 reviewId, "TASK_HANDOFF", 1L, "smtp-mail", "reviewer@qq.com", "wangli",
-                "task-handoff", "需求评审任务已交接给评审角色 A");
+                "task-handoff", "需求评审任务已交接给评审角色 A",
+                "订单列表联调任务", "订单列表查询需求", "DEVELOPING", "wangli");
 
         adapter.deliver(command);
 
@@ -175,11 +176,26 @@ class SmtpMailNotificationAdapterTests {
         assertTrue(sent.getContentType().startsWith("multipart/alternative"));
         String plain = partBody(sent, "text/plain");
         assertTrue(plain.contains("事件: TASK_HANDOFF"));
+        // [AIREVIEW-PLAN-109] Task info card rows in the plain-text fallback.
+        assertTrue(plain.contains("- 任务: 订单列表联调任务"));
+        assertTrue(plain.contains("- 需求: 订单列表查询需求"));
+        assertTrue(plain.contains("- 当前状态: 开发中"));
+        assertTrue(plain.contains("- 当前持有人: wangli"));
         String html = partBody(sent, "text/html");
         assertTrue(html.contains("重明"));
         assertTrue(html.contains("AI 需求评审平台"));
         assertTrue(html.contains("任务流转"));
-        assertTrue(html.contains("href=\"http://example.org/review/reviews/" + reviewId.value() + "/report\""));
+        // [AIREVIEW-PLAN-109] Task info card rows in the branded HTML.
+        assertTrue(html.contains(">任务</td>"));
+        assertTrue(html.contains(">订单列表联调任务</td>"));
+        assertTrue(html.contains(">需求</td>"));
+        assertTrue(html.contains(">订单列表查询需求</td>"));
+        assertTrue(html.contains(">当前状态</td>"));
+        assertTrue(html.contains(">开发中</td>"));
+        assertTrue(html.contains(">当前持有人</td>"));
+        assertTrue(html.contains(">wangli</td>"));
+        // [AIREVIEW-PLAN-109] Hash-history deep link: /review/#/reviews/{id}/report.
+        assertTrue(html.contains("href=\"http://example.org/review/#/reviews/" + reviewId.value() + "/report\""));
         assertTrue(html.contains("查看评审报告"));
     }
 
@@ -194,7 +210,7 @@ class SmtpMailNotificationAdapterTests {
         String malicious = "<script>alert(1)</script>";
         NotificationCommand command = NotificationCommand.forEvent(
                 new ReviewId(UUID.randomUUID()), "TASK_HANDOFF", 1L, "smtp-mail", "reviewer@qq.com", null,
-                "task-handoff", malicious);
+                "task-handoff", malicious, null, null, null, null);
 
         adapter.deliver(command);
 

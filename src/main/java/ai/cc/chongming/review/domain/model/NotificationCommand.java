@@ -12,6 +12,9 @@ import java.util.Objects;
  * notification": matrix rows carry {@code eventType}/{@code eventSequence}/{@code recipientUsername}/
  * {@code templateKey} and leave the Gate-specific {@code result} null; legacy Gate commands keep
  * the historical shape and idempotency key.
+ * [AIREVIEW-PLAN-109] Matrix commands additionally carry nullable {@code objectTitle}/
+ * {@code objectSubtitle}/{@code objectStatus}/{@code objectHolder} so the mail info card can show
+ * the task, requirement, current status and current holder without touching the idempotency key.
  *
  * @author wangli
  */
@@ -27,7 +30,11 @@ public record NotificationCommand(
         String eventType,
         long eventSequence,
         String recipientUsername,
-        String templateKey) {
+        String templateKey,
+        String objectTitle,
+        String objectSubtitle,
+        String objectStatus,
+        String objectHolder) {
 
     public NotificationCommand {
         Objects.requireNonNull(reviewId, "reviewId must not be null");
@@ -52,6 +59,10 @@ public record NotificationCommand(
         }
         recipientUsername = recipientUsername == null || recipientUsername.isBlank() ? null : recipientUsername.trim();
         templateKey = templateKey == null || templateKey.isBlank() ? null : templateKey.trim();
+        objectTitle = objectTitle == null || objectTitle.isBlank() ? null : objectTitle.trim();
+        objectSubtitle = objectSubtitle == null || objectSubtitle.isBlank() ? null : objectSubtitle.trim();
+        objectStatus = objectStatus == null || objectStatus.isBlank() ? null : objectStatus.trim();
+        objectHolder = objectHolder == null || objectHolder.isBlank() ? null : objectHolder.trim();
     }
 
     /** Legacy Gate-result command shape. */
@@ -64,11 +75,15 @@ public record NotificationCommand(
             String reason,
             List<String> conditions,
             String reportUrl) {
-        this(reviewId, gateVersion, channel, destination, result, reason, conditions, reportUrl, null, 0, null, null);
+        this(reviewId, gateVersion, channel, destination, result, reason, conditions, reportUrl, null, 0, null, null,
+                null, null, null, null);
     }
 
     /**
      * [AIREVIEW-PLAN-030] Matrix command factory for one recipient and channel of one event.
+     * [AIREVIEW-PLAN-109] Optional task info ({@code objectTitle}/{@code objectSubtitle}/
+     * {@code objectStatus}/{@code objectHolder}) is carried verbatim for the mail info card; all
+     * four may be null for events without a task payload.
      */
     public static NotificationCommand forEvent(
             ReviewId reviewId,
@@ -78,11 +93,16 @@ public record NotificationCommand(
             String destination,
             String recipientUsername,
             String templateKey,
-            String title) {
+            String title,
+            String objectTitle,
+            String objectSubtitle,
+            String objectStatus,
+            String objectHolder) {
         return new NotificationCommand(
                 reviewId, 0L, channel, destination, null, title, List.of(),
                 "/api/reviews/" + reviewId.value() + "/report",
-                eventType, eventSequence, recipientUsername, templateKey);
+                eventType, eventSequence, recipientUsername, templateKey,
+                objectTitle, objectSubtitle, objectStatus, objectHolder);
     }
 
     public String idempotencyKey() {

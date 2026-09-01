@@ -218,6 +218,10 @@ public class DevTaskCommandService {
             Map<String, String> payload = new LinkedHashMap<>(extra);
             payload.put("taskId", task.taskId().value().toString());
             payload.put("requirementId", task.requirementId().value().toString());
+            // [AIREVIEW-PLAN-109] Task facts for the mail info card; requirementTitle is a read-time
+            // enrichment that may be absent, so it degrades to an empty string (Map.copyOf forbids null).
+            payload.put("taskTitle", task.title() == null ? "" : task.title());
+            payload.put("requirementTitle", task.requirementTitle() == null ? "" : task.requirementTitle());
             payload.put("status", task.status().name());
             payload.put("holder", task.currentHolderUsername() == null ? "" : task.currentHolderUsername());
             eventPublisher.publish(new ReviewEventDraft(

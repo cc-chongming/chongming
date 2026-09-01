@@ -324,6 +324,13 @@ public class NotificationOutboxService implements ReviewEventListener {
         }
         String templateKey = templateFor(event.type());
         String title = titleFor(event);
+        // [AIREVIEW-PLAN-109] Carry the task info card facts (may be null for events without a
+        // task payload, e.g. HUMAN_REVIEW_REQUIRED); the command constructor normalizes blanks.
+        java.util.Map<String, String> payload = event.payload();
+        String objectTitle = payload.get("taskTitle");
+        String objectSubtitle = payload.get("requirementTitle");
+        String objectStatus = payload.get("status");
+        String objectHolder = payload.get("holder");
         for (String username : recipients) {
             User user = userRepository.findByUsername(username).orElse(null);
             if (user == null) {
@@ -345,7 +352,8 @@ public class NotificationOutboxService implements ReviewEventListener {
             for (String[] channel : channels) {
                 NotificationCommand command = NotificationCommand.forEvent(
                         event.reviewId(), event.type().name(), event.sequence(),
-                        channel[0], channel[1], username, templateKey, title);
+                        channel[0], channel[1], username, templateKey, title,
+                        objectTitle, objectSubtitle, objectStatus, objectHolder);
                 if (outboxStore.findByIdempotencyKey(command.idempotencyKey()).isEmpty()) {
                     outboxStore.enqueue(NotificationOutboxEntry.pending(command, requestHash(command), clock.instant()));
                 }

@@ -125,6 +125,19 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             body.append("- 内容: ").append(command.reason()).append('\n');
             body.append("- 收件人: ").append(command.recipientUsername() == null ? "-" : command.recipientUsername()).append('\n');
             body.append("- 评审: ").append(command.reviewId().value()).append('\n');
+            // [AIREVIEW-PLAN-109] Task info card rows; only present when the command carries them.
+            if (command.objectTitle() != null) {
+                body.append("- 任务: ").append(command.objectTitle()).append('\n');
+            }
+            if (command.objectSubtitle() != null) {
+                body.append("- 需求: ").append(command.objectSubtitle()).append('\n');
+            }
+            if (command.objectStatus() != null) {
+                body.append("- 当前状态: ").append(statusLabel(command.objectStatus())).append('\n');
+            }
+            if (command.objectHolder() != null) {
+                body.append("- 当前持有人: ").append(command.objectHolder()).append('\n');
+            }
             body.append("- 报告接口: ").append(command.reportUrl()).append('\n');
             body.append("- 幂等键: ").append(command.idempotencyKey()).append('\n');
             return body.toString();
@@ -204,6 +217,19 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             rows.append(infoRow("内容", command.reason()));
             rows.append(infoRow("收件人", command.recipientUsername() == null ? "-" : command.recipientUsername()));
             rows.append(infoRow("评审", command.reviewId().value().toString()));
+            // [AIREVIEW-PLAN-109] Task info card rows; only present when the command carries them.
+            if (command.objectTitle() != null) {
+                rows.append(infoRow("任务", command.objectTitle()));
+            }
+            if (command.objectSubtitle() != null) {
+                rows.append(infoRow("需求", command.objectSubtitle()));
+            }
+            if (command.objectStatus() != null) {
+                rows.append(infoRow("当前状态", statusLabel(command.objectStatus())));
+            }
+            if (command.objectHolder() != null) {
+                rows.append(infoRow("当前持有人", command.objectHolder()));
+            }
         } else {
             rows.append(infoRow("评审", command.reviewId().value().toString()));
             rows.append(infoRow("Gate 版本", "v" + command.gateVersion()));
@@ -217,8 +243,10 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             }
         }
 
+        // [AIREVIEW-PLAN-109] The workbench SPA uses hash history under /review/, so the deep
+        // link must be publicBaseUrl + "/#/reviews/{id}/report" instead of a server-path URL.
         String ctaHref = properties.publicBaseUrl() != null && !properties.publicBaseUrl().isBlank()
-                ? properties.publicBaseUrl() + "/reviews/" + command.reviewId().value() + "/report"
+                ? properties.publicBaseUrl() + "/#/reviews/" + command.reviewId().value() + "/report"
                 : command.reportUrl();
 
         StringBuilder html = new StringBuilder();
@@ -270,6 +298,23 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
         html.append("</body>\n");
         html.append("</html>");
         return html.toString();
+    }
+
+    /**
+     * [AIREVIEW-PLAN-109] Chinese label for the task status shown in the mail card; unknown
+     * statuses (e.g. statuses added later) fall through to the raw enum name.
+     */
+    private static String statusLabel(String status) {
+        // [AIREVIEW-PLAN-109#3] 与 DevTaskTypes.DevTaskStatus 枚举一一对应的中文映射。
+        return switch (status) {
+            case "PENDING_ASSIGN" -> "待指派";
+            case "DEVELOPING" -> "开发中";
+            case "PAUSED" -> "已暂停";
+            case "PENDING_ACCEPTANCE" -> "待验收";
+            case "DONE" -> "已完成";
+            case "CANCELLED" -> "已关闭";
+            default -> status;
+        };
     }
 
     private String infoRow(String label, String value) {
