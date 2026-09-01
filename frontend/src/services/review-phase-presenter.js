@@ -55,11 +55,11 @@ export function resolvePhaseLanding({ stage, runtimeItems = [], scoutConcluded =
     return byStage;
 }
 
-// [AIREVIEW-PLAN-110#1] 人工决策在 phases 数组中的索引（与 PHASE_INDEX_BY_STAGE 对齐）。
+// [AIREVIEW-PLAN-111#1] 人工决策在 phases 数组中的索引（与 PHASE_INDEX_BY_STAGE 对齐）。
 export const HUMAN_PHASE_INDEX = PHASE_INDEX_BY_STAGE.WAITING_HUMAN;
 
 /**
- * [AIREVIEW-PLAN-110#1] 手动阶段钉住的解除时机。
+ * [AIREVIEW-PLAN-111#1] 手动阶段钉住的解除时机。
  *
  * 手动点选阶段（selectedPhase）原本永久压制被动落位，导致评审进入待人工决策后
  * 视图仍停留在早前点选的步骤（如议题裁决），人工决策面板永远不出现。

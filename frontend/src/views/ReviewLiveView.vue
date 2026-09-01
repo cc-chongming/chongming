@@ -634,7 +634,7 @@ async function load(reviewId) {
 
 // [AIREVIEW-PLAN-073#1-fix2] 节奏层 watch 置于全部 computed 之后：watch 源创建即求值，提前会 TDZ。
 watch([activePhaseIndex, selectedPhase], syncPaced);
-// [AIREVIEW-PLAN-110#1] 手动钉住永久压制被动落位会把视图卡在早前步骤（如议题裁决），
+// [AIREVIEW-PLAN-111#1] 手动钉住永久压制被动落位会把视图卡在早前步骤（如议题裁决），
 // 评审进入待人工决策后人工决策面板永远不出现；目标进入人工决策区间且钉住在更早阶段时
 // 解除钉住，节奏层随即落位人工决策。到达后用户再手动回看不再触发（stage 不再跃迁）。
 watch(activePhaseIndex, (target) => {

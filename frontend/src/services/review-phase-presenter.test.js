@@ -86,7 +86,7 @@ describe('isScoutConcluded', () => {
 
 describe('shouldReleasePhasePin', () => {
     it('releases an earlier pin when the flow enters the human gate', () => {
-        // [AIREVIEW-PLAN-110#1] 钉在议题裁决(5)时进入待人工决策(6)：解除钉住落位人工决策。
+        // [AIREVIEW-PLAN-111#1] 钉在议题裁决(5)时进入待人工决策(6)：解除钉住落位人工决策。
         expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: 5 })).toBe(true);
         expect(shouldReleasePhasePin({ targetIndex: 6, pinnedIndex: 0 })).toBe(true);
     });
