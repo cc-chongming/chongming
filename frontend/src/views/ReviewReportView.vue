@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { formatApiError, reviewApi } from '../api/review-api';
-import { latestGateDecision, presentDebateJudgement } from '../services/review-conclusion-presenter';
+import { judgementReasonBlocks, latestGateDecision, presentDebateJudgement } from '../services/review-conclusion-presenter';
+import RoleAvatar from '../components/RoleAvatar.vue';
 import { formatChinaTime } from '../services/china-time';
 
 const props = defineProps({ reviewId: { type: String, required: true } });
@@ -22,7 +23,7 @@ const roleMeta = {
     SECURITY: { icon: '🔒', label: '安全' }, ARCHITECTURE: { icon: '🏗', label: '架构' },
     TESTING: { icon: '🧪', label: '测试' }, PERFORMANCE: { icon: '📊', label: '性能' },
     DIRECTOR: { icon: '🎯', label: '协调' }, JUDGE: { icon: '⚖', label: '裁决' },
-    CONTEXT_SCOUT: { icon: '🔍', label: 'Scout' }
+    CONTEXT_SCOUT: { icon: '🔍', label: '侦察' }
 };
 const positionMeta = { SUPPORT: { label: '支持', cls: 'pos-support' }, OPPOSE: { label: '反对', cls: 'pos-oppose' }, NEUTRAL: { label: '中性', cls: 'pos-neutral' } };
 const statusMeta = { SUBMITTED: { label: '维持', cls: 'st-keep' }, UNVERIFIED: { label: '待核', cls: 'st-check' }, WITHDRAWN: { label: '撤回', cls: 'st-drop' } };
@@ -32,7 +33,7 @@ const gateMeta = {
     BLOCK: { label: '驳回', icon: '⛔', tone: 'rd' }, HUMAN_REQUIRED: { label: '需人工裁决', icon: '🙋', tone: 'yl' },
     OVERRIDE: { label: '人工覆盖', icon: '✋', tone: 'pu' }
 };
-const debateStatusMap = { OPEN: '争议中', CLOSED: '已关闭', RESOLVED: '已收敛', CONVERGED: '已收敛', SETTLED: '已解决' };
+const debateStatusMap = { OPEN: '争议中', CLOSED: '已关闭', RESOLVED: '已收敛', CONVERGED: '已收敛', SETTLED: '已解决', ESCALATED: '升级裁决' };
 
 const shortId = computed(() => (props.reviewId || '').slice(0, 8));
 const latestVersion = computed(() => (versions.value.length ? Math.max(...versions.value.map((v) => Number(v.reportVersion))) : null));
@@ -80,9 +81,9 @@ const assessmentSections = computed(() => {
     ];
 });
 
-function roleLabel(role) {
+function roleText(role) {
     const meta = roleMeta[role];
-    return meta ? `${meta.icon} ${meta.label}` : (role ?? '—');
+    return meta ? meta.label : (role ?? '—');
 }
 function severityClass(severity) {
     return `b-${String(severity || 'P2').toLowerCase()}`;
@@ -179,7 +180,7 @@ onMounted(() => load(selectedVersion.value));
 
                 <div class="rpt-section"><h3>评审概览</h3>
                     <div class="rpt-grid">
-                        <div class="rpt-kpi"><div class="num" style="color:#2563eb">{{ claims.length }}</div><div class="lbl">Claim</div></div>
+                        <div class="rpt-kpi"><div class="num" style="color:#2563eb">{{ claims.length }}</div><div class="lbl">主张</div></div>
                         <div class="rpt-kpi"><div class="num" style="color:#dc2626">{{ opposeCount }}</div><div class="lbl">冲突</div></div>
                         <div class="rpt-kpi"><div class="num" style="color:#d97706">{{ totalRounds }}</div><div class="lbl">辩论轮次</div></div>
                         <div class="rpt-kpi"><div class="num" style="color:#059669">{{ consensus == null ? '—' : `${consensus}%` }}</div><div class="lbl">共识度</div></div>
@@ -206,7 +207,7 @@ onMounted(() => load(selectedVersion.value));
                             <p class="asmt-hint">{{ section.hint }}</p>
                             <ol v-if="section.entries.length">
                                 <li v-for="(entry, index) in section.entries" :key="`${entry.role}-${entry.checkpointKey}-${index}`">
-                                    <div class="asmt-entry-head"><strong>{{ roleLabel(entry.role) }}</strong><code>{{ entry.checkpointKey }}</code></div>
+                                    <div class="asmt-entry-head"><span class="rpt-role"><RoleAvatar :role="entry.role" /><i>{{ roleText(entry.role) }}</i></span><code>{{ entry.checkpointKey }}</code></div>
                                     <p v-if="entry.summary" class="asmt-summary">{{ entry.summary }}</p>
                                     <p v-if="entry.reasonSummary" class="asmt-reason">{{ entry.reasonSummary }}</p>
                                     <span v-if="entry.evidenceIds?.length" class="asmt-evidence">证据 {{ entry.evidenceIds.length }} 项</span>
@@ -217,14 +218,14 @@ onMounted(() => load(selectedVersion.value));
                     </div>
                 </div>
 
-                <div class="rpt-section"><h3>Claim 清单</h3>
+                <div class="rpt-section"><h3>主张清单</h3>
                     <div class="card">
                         <table v-if="claims.length" class="rpt-table">
                             <thead><tr><th>#</th><th>角色</th><th>严重度</th><th>立场</th><th>内容</th><th>辩论后</th></tr></thead>
                             <tbody>
                                 <tr v-for="(claim, index) in claims" :key="claim.claimId ?? index">
                                     <td class="rpt-mono">{{ index + 1 }}</td>
-                                    <td class="rpt-nowrap">{{ roleLabel(claim.role) }}</td>
+                                    <td class="rpt-nowrap"><span class="rpt-role"><RoleAvatar :role="claim.role" /><i>{{ roleText(claim.role) }}</i></span></td>
                                     <td><span class="badge" :class="severityClass(claim.severity)">{{ claim.severity }}</span></td>
                                     <td><span class="pos" :class="(positionMeta[claim.position] ?? {}).cls">{{ (positionMeta[claim.position] ?? { label: claim.position }).label }}</span></td>
                                     <td class="rpt-cell"><div class="rpt-statement">{{ claim.statement }}</div><div v-if="claim.subjectKey" class="rpt-subject">{{ claim.subjectKey }}</div></td>
@@ -236,11 +237,11 @@ onMounted(() => load(selectedVersion.value));
                     </div>
                 </div>
 
-                <div class="rpt-section"><h3>辩论与 Judge 裁决</h3>
+                <div class="rpt-section"><h3>辩论与议题裁决</h3>
                     <div class="card"><div class="card-bd">
                         <article v-for="entry in debateConclusions" :key="entry.debate.topicId ?? entry.debate.subjectKey" class="wcv-item report-debate">
                             <div class="wcv-row">
-                                <div class="wcv-lb">{{ entry.debate.subjectKey }}</div>
+                                <div class="wcv-lb"><span class="judge-topic-title">{{ entry.judgement?.title ?? entry.debate.title ?? entry.debate.subjectKey }}</span><code v-if="entry.judgement?.title ?? entry.debate.title" class="judge-topic-tech">{{ entry.debate.subjectKey }}</code></div>
                                 <div class="wcv-tr">
                                     <span v-for="round in maxRound" :key="round" class="wcv-dot" :class="{ done: round <= (Number(entry.debate.currentRound) || 0) }"></span>
                                     <span class="wcv-topic">{{ debateClaimCount(entry.debate) }} 个论点</span>
@@ -249,44 +250,44 @@ onMounted(() => load(selectedVersion.value));
                             </div>
                             <p v-if="entry.debate.resolution" class="wcv-res-line">{{ entry.debate.resolution }}</p>
 
-                            <section v-if="entry.judgement" class="report-judge-result" :aria-label="`${entry.debate.subjectKey} 的 Judge 裁决`">
+                            <section v-if="entry.judgement" class="report-judge-result" :aria-label="`${entry.judgement?.title ?? entry.debate.title ?? entry.debate.subjectKey} 的裁决结论`">
                                 <header>
-                                    <div><span class="judge-label">Judge 结论</span><strong>{{ entry.judgement.resultLabel }}</strong></div>
+                                    <div><span class="judge-label">裁决结论</span><strong>{{ entry.judgement.resultLabel }}</strong></div>
                                     <time v-if="entry.judgement.createdAt">{{ formatChinaTime(entry.judgement.createdAt) }}</time>
                                 </header>
-                                <p class="judge-reason"><strong>裁决理由：</strong>{{ entry.judgement.reason }}</p>
+                                <div class="judge-reason-blocks"><p v-for="(block, index) in judgementReasonBlocks(entry.judgement.reason)" :key="index"><strong v-if="block.label">{{ block.label }}</strong><span>{{ block.text }}</span></p></div>
                                 <div class="judge-claim-columns">
                                     <section class="judge-claim-group accepted">
                                         <h4>采信 {{ entry.judgement.accepted.length }} 项</h4>
                                         <ol v-if="entry.judgement.accepted.length">
                                             <li v-for="claim in entry.judgement.accepted" :key="claim.claimId">
                                                 <template v-if="!claim.missing">
-                                                    <strong>{{ claim.statement || '该 Claim 暂无公开正文' }}</strong>
+                                                    <strong>{{ claim.statement || '该主张暂无公开正文' }}</strong>
                                                     <p v-if="claim.reasonSummary">{{ claim.reasonSummary }}</p>
                                                     <code v-if="claim.subjectKey">{{ claim.subjectKey }}</code>
                                                 </template>
-                                                <span v-else>Claim {{ claim.claimId }}（当前报告未包含详情）</span>
+                                                <span v-else>主张 {{ claim.claimId }}（当前报告未包含详情）</span>
                                             </li>
                                         </ol>
-                                        <p v-else class="muted">Judge 未列出采信 Claim。</p>
+                                        <p v-else class="muted">裁决者未列出采信主张。</p>
                                     </section>
                                     <section class="judge-claim-group rejected">
                                         <h4>拒绝 {{ entry.judgement.rejected.length }} 项</h4>
                                         <ol v-if="entry.judgement.rejected.length">
                                             <li v-for="claim in entry.judgement.rejected" :key="claim.claimId">
                                                 <template v-if="!claim.missing">
-                                                    <strong>{{ claim.statement || '该 Claim 暂无公开正文' }}</strong>
+                                                    <strong>{{ claim.statement || '该主张暂无公开正文' }}</strong>
                                                     <p v-if="claim.reasonSummary">{{ claim.reasonSummary }}</p>
                                                     <code v-if="claim.subjectKey">{{ claim.subjectKey }}</code>
                                                 </template>
-                                                <span v-else>Claim {{ claim.claimId }}（当前报告未包含详情）</span>
+                                                <span v-else>主张 {{ claim.claimId }}（当前报告未包含详情）</span>
                                             </li>
                                         </ol>
-                                        <p v-else class="muted">Judge 未列出拒绝 Claim。</p>
+                                        <p v-else class="muted">裁决者未列出拒绝主张。</p>
                                     </section>
                                 </div>
                             </section>
-                            <p v-else class="report-judge-empty">该议题尚未形成 Judge 裁决。</p>
+                            <p v-else class="report-judge-empty">该议题尚未形成裁决结论。</p>
                         </article>
                         <p v-if="!debates.length" class="dash-empty">本次评审未产生公开辩论。</p>
                     </div></div>
@@ -344,12 +345,22 @@ onMounted(() => load(selectedVersion.value));
 <style scoped>
 .report-debate { display: grid; gap: 12px; padding: 14px 0; }
 .report-debate + .report-debate { border-top: 1px solid #e7e5e4; }
-.report-judge-result { padding: 14px; border: 1px solid #d6d3d1; border-radius: 10px; background: #fafaf9; }
+.report-judge-result { padding: 14px; background: #fff; border: 1px solid #e7e5e4; border-left: 3px solid #60a5fa; border-radius: 10px; }
 .report-judge-result > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .report-judge-result > header div { display: flex; align-items: center; gap: 8px; }
 .report-judge-result time { color: #78716c; font-size: 12px; }
 .judge-label { padding: 3px 7px; color: #1d4ed8; background: #dbeafe; border-radius: 999px; font-size: 11px; font-weight: 800; }
-.judge-reason { margin: 11px 0; line-height: 1.65; }
+.rpt-role { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.rpt-role .role-avatar-slot { width: 1.15rem; height: 1.15rem; border-radius: 6px; overflow: hidden; font-size: .6rem; color: #57534e; background: #f5f5f4; }
+.rpt-role .role-avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.rpt-role i { font-style: normal; }
+.report-debate .wcv-lb { max-width: 100%; white-space: normal; overflow: visible; }
+.judge-topic-title { color: #1c1917; font-size: .8rem; font-weight: 700; }
+.judge-topic-tech { margin-left: .4rem; color: #a8a29e; font-size: .62rem; }
+.rpt-kpi .lbl { color: #57534e; }
+.judge-reason-blocks { margin: 11px 0; display: block; }
+.judge-reason-blocks p { margin: 8px 0; line-height: 1.65; font-size: 13px; color: #44403c; overflow-wrap: anywhere; }
+.judge-reason-blocks p strong { display: block; margin-bottom: 2px; color: #1c1917; }
 .judge-claim-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .judge-claim-group { padding: 11px 12px; border: 1px solid #e7e5e4; border-radius: 8px; background: #fff; }
 .judge-claim-group.accepted { border-top: 3px solid #16a34a; }

@@ -62,6 +62,15 @@ function roleTitle(role) {
         TESTING: '测试工程师', PERFORMANCE: '性能工程师', JUDGE: '裁决者'
     }[role] ?? role ?? '智能体';
 }
+// [AIREVIEW-PLAN-106#1] 裁决卡左边条随结论着色：通过绿、条件/退回/人工琥珀、驳回红、覆盖紫。
+const RESULT_TONE = {
+    AI_PASS: 'gn', PASS: 'gn',
+    CONDITIONAL: 'yl', RETURN: 'yl', HUMAN_REQUIRED: 'yl',
+    BLOCK: 'rd', OVERRIDE: 'pu'
+};
+function resultTone(result) {
+    return RESULT_TONE[result] ?? 'gy';
+}
 // 仅当草案结论需要人工决策时，在引导里补充触发原因。
 const draftTriggerReason = computed(() => {
     if (!props.gateDraft || gateComparison.value.draftLabel !== '需要人工决策') {
@@ -133,7 +142,7 @@ async function finalizeDecision() {
             <article class="decision-stage">
                 <header><span class="decision-step">1</span><div><small>Judge 议题裁决</small><strong>{{ judgeSummaries.length ? `${judgeSummaries.length} 个议题已裁决` : '尚未形成裁决' }}</strong></div></header>
                 <ul v-if="judgeSummaries.length" class="judge-summary-list">
-                    <li v-for="judge in judgeSummaries" :key="judge.topicId">
+                    <li v-for="judge in judgeSummaries" :key="judge.topicId" :class="'tone-' + resultTone(judge.result)">
                         <!-- [AIREVIEW-PLAN-087#1] -->
                         <div class="judge-card-head"><strong>{{ judge.resultLabel }}</strong><span class="judge-topic-title">{{ judge.title ?? judge.subjectKey }}</span><code v-if="judge.title" class="judge-topic-tech">{{ judge.subjectKey }}</code></div>
                         <!-- [AIREVIEW-PLAN-102#2] 裁决理由分段分行、标签加粗。 -->
@@ -215,7 +224,12 @@ async function finalizeDecision() {
 .decision-stage > p { margin: 10px 0 0; line-height: 1.65; }
 .decision-step { display: grid; width: 28px; height: 28px; place-items: center; color: #1d4ed8; background: #dbeafe; border-radius: 50%; font-weight: 800; }
 .judge-summary-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
-.judge-summary-list li { padding: 10px 12px; border-left: 3px solid #60a5fa; background: #f8fafc; }
+.judge-summary-list li { padding: 10px 12px; border-left: 3px solid #a8a29e; background: #f8fafc; }
+/* [AIREVIEW-PLAN-106#1] 左边条颜色随裁决结论。 */
+.judge-summary-list li.tone-gn { border-left-color: #16a34a; }
+.judge-summary-list li.tone-yl { border-left-color: #d97706; }
+.judge-summary-list li.tone-rd { border-left-color: #dc2626; }
+.judge-summary-list li.tone-pu { border-left-color: #7c3aed; }
 .judge-summary-list li > .judge-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 /* [AIREVIEW-PLAN-104#1] 裁决理由竖排分段：理由容器恢复块级，标签独立成行，不再被标题行 flex 规则拉成并排。 */
 .judge-summary-list li > .judge-reason { display: block; }
