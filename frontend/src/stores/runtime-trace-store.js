@@ -38,8 +38,12 @@ export function createRuntimeTraceStore({ EventSourceImpl, setTimeoutImpl = glob
         state.events.push(...pendingEvents.splice(0));
         // Keep the reactive window bounded; the durable database copy stays authoritative.
         if (state.events.length > EVENT_RETENTION) {
-            const removed = state.events.splice(0, state.events.length - EVENT_RETENTION);
+            const overflow = state.events.length - EVENT_RETENTION;
+            const removed = state.events.slice(0, overflow);
             removed.forEach((event) => { if (event?.id) seenEventIds.delete(event.id); });
+            // [AIREVIEW-PLAN-098#1] 截断必须替换数组引用：原地 splice 会让对话投影的增量缓存
+            // 命中「同引用 + 长度不变」快路径，公开对话在达到保留上限后永久冻结。
+            state.events = state.events.slice(overflow);
         }
     }
 

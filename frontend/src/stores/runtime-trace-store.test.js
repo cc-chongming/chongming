@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createRuntimeTraceStore } from './runtime-trace-store';
+// [AIREVIEW-PLAN-098#2] 回归断言直接走公开对话投影，确保截断后投影不冻结。
+import { buildRuntimeConversation } from '../services/runtime-conversation-adapter';
 
 class FakeEventSource {
     constructor(url) {
@@ -98,6 +100,34 @@ describe('runtime trace store', () => {
         source.emit({ type: 'TEXT_MESSAGE_CONTENT', runId: 'runtime', delta: 'tail' }, '20301');
         timers.flush();
         expect(store.state.events.at(-1).delta).toBe('tail');
+        store.dispose();
+    });
+
+    // [AIREVIEW-PLAN-098#2] 保留上限截断后新事件仍必须进入公开对话投影：
+    // 旧实现原地 splice 使数组引用与长度都不变，增量缓存快路径永久命中，对话冻结。
+    it('keeps the public conversation live after the retention window saturates', () => {
+        const timers = createFakeTimers();
+        const store = createRuntimeTraceStore({
+            EventSourceImpl: FakeEventSource,
+            setTimeoutImpl: timers.setTimeout,
+            clearTimeoutImpl: timers.clearTimeout
+        });
+        store.start('review-1', 1);
+        const source = FakeEventSource.instances.at(-1);
+
+        for (let index = 1; index <= 20000; index += 1) {
+            source.emit({ type: 'TEXT_MESSAGE_CONTENT', runId: 'review-1-attempt-1-director', messageId: 'm1', delta: 'x' }, String(index));
+        }
+        timers.flush();
+        // 先消费一次投影，建立增量缓存的 consumed 基线（模拟线上长评审的既有对话）。
+        buildRuntimeConversation(store.state.events);
+
+        source.emit({ type: 'TEXT_MESSAGE_CONTENT', runId: 'review-1-attempt-1-judge', messageId: 'm2', delta: '裁决者新消息' }, '20001');
+        timers.flush();
+        expect(store.state.events).toHaveLength(20000);
+        const conversation = buildRuntimeConversation(store.state.events);
+        expect(conversation.some((item) => String(item.runId ?? '').includes('judge')
+            && item.content.includes('裁决者新消息'))).toBe(true);
         store.dispose();
     });
 
