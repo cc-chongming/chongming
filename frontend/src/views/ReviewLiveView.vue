@@ -505,7 +505,12 @@ function phaseState(index) {
     if (index === 1 && activePhaseIndex.value === 1 && !scoutComplete.value) return 'pending';
     if (index === activePhaseIndex.value && stage.value === 'FAILED') return 'failed';
     if (index < activePhaseIndex.value) return 'done';
-    if (index === activePhaseIndex.value) return 'running';
+    if (index === activePhaseIndex.value) {
+        // [AIREVIEW-PLAN-107#1] 人工决策是最后一阶：评审进入 NOTIFYING/COMPLETED 说明门禁已定稿，
+        // 徽章应显示完成，否则人工提交决策后仍永远“进行中”。
+        if (phases[index]?.id === 'human' && ['NOTIFYING', 'COMPLETED'].includes(stage.value)) return 'done';
+        return 'running';
+    }
     return 'pending';
 }
 
