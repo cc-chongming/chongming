@@ -679,6 +679,11 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 .flow-content > * { flex: 0 0 auto; }
 .flow-content > .flow-stream-live { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; }
 .flow-content > .flow-stream-capped { max-height: 55%; } /* [AIREVIEW-PLAN-065#1] 裁决阶段运行流面板封顶 55%，裁决卡至少 45% 主区免挤压 */
+/* [AIREVIEW-PLAN-099#1] 065 的封顶只限最高、不保最低：裁决卡出现后 basis 0 的流面板仍被压成一条。
+   裁决阶段裁决者对话框改为固定高度、内部滚动，面板整体退出 flex 伸缩。 */
+.flow-content > .flow-stream-live.flow-stream-capped { flex: 0 0 auto; max-height: none; }
+.flow-content > .flow-stream-live.flow-stream-capped .live-agent-conversation { flex: 0 0 auto; }
+.flow-content > .flow-stream-live.flow-stream-capped .live-agent-scroll { flex: 0 0 auto; height: min(22rem, 42vh); }
 .flow-content > .flow-stream-live .live-agent-conversation { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .flow-content > .flow-stream-live .live-agent-scroll { flex: 1 1 auto; max-height: none; min-height: 0; }
 /* [AIREVIEW-PLAN-043#1] 冲突检测 / 多轮辩论 / 裁决者裁决：议题区改为定高内滚（flex 拉伸 + 内部滚动），滚动条观感沿用页面既有体系。 */
