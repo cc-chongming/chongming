@@ -138,6 +138,9 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             if (command.objectHolder() != null) {
                 body.append("- 当前持有人: ").append(command.objectHolder()).append('\n');
             }
+            if (requirementUrl(command) != null) {
+                body.append("- 需求详情: ").append(requirementUrl(command)).append('\n');
+            }
             body.append("- 报告接口: ").append(command.reportUrl()).append('\n');
             body.append("- 幂等键: ").append(command.idempotencyKey()).append('\n');
             return body.toString();
@@ -248,6 +251,7 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
         String ctaHref = properties.publicBaseUrl() != null && !properties.publicBaseUrl().isBlank()
                 ? properties.publicBaseUrl() + "/#/reviews/" + command.reviewId().value() + "/report"
                 : command.reportUrl();
+        String requirementUrl = requirementUrl(command);
 
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html>\n");
@@ -280,6 +284,10 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
         html.append("        <tr>\n");
         html.append("          <td style=\"padding:24px;\">\n");
         html.append("            <a href=\"").append(escapeHtml(ctaHref)).append("\" style=\"display:inline-block;background-color:#2563eb;color:#ffffff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;\">查看评审报告</a>\n");
+        if (requirementUrl != null) {
+            // [AIREVIEW-PLAN-110#1] 次按钮：需求详情页哈希深链。
+            html.append("            <a href=\"").append(escapeHtml(requirementUrl)).append("\" style=\"display:inline-block;margin-left:10px;background-color:#ffffff;color:#2563eb;border:1px solid #2563eb;padding:9px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;\">查看需求详情</a>\n");
+        }
         html.append("          </td>\n");
         html.append("        </tr>\n");
         html.append("        <tr>\n");
@@ -304,6 +312,15 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
      * [AIREVIEW-PLAN-109] Chinese label for the task status shown in the mail card; unknown
      * statuses (e.g. statuses added later) fall through to the raw enum name.
      */
+    /** [AIREVIEW-PLAN-110#1] 需求详情页哈希深链；publicBaseUrl 或需求 id 缺失时为 null。 */
+    private String requirementUrl(NotificationCommand command) {
+        if (command.requirementId() == null
+                || properties.publicBaseUrl() == null || properties.publicBaseUrl().isBlank()) {
+            return null;
+        }
+        return properties.publicBaseUrl() + "/#/requirements/" + command.requirementId();
+    }
+
     private static String statusLabel(String status) {
         // [AIREVIEW-PLAN-109#3] 与 DevTaskTypes.DevTaskStatus 枚举一一对应的中文映射。
         return switch (status) {

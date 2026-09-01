@@ -165,7 +165,8 @@ class SmtpMailNotificationAdapterTests {
         NotificationCommand command = NotificationCommand.forEvent(
                 reviewId, "TASK_HANDOFF", 1L, "smtp-mail", "reviewer@qq.com", "wangli",
                 "task-handoff", "需求评审任务已交接给评审角色 A",
-                "订单列表联调任务", "订单列表查询需求", "DEVELOPING", "wangli");
+                "订单列表联调任务", "订单列表查询需求", "DEVELOPING", "wangli",
+                "8c7b69a1-ddb1-42a0-91c3-0148e1fb7840");
 
         adapter.deliver(command);
 
@@ -197,6 +198,9 @@ class SmtpMailNotificationAdapterTests {
         // [AIREVIEW-PLAN-109] Hash-history deep link: /review/#/reviews/{id}/report.
         assertTrue(html.contains("href=\"http://example.org/review/#/reviews/" + reviewId.value() + "/report\""));
         assertTrue(html.contains("查看评审报告"));
+        // [AIREVIEW-PLAN-110#1] 次按钮：需求详情哈希深链。
+        assertTrue(html.contains("href=\"http://example.org/review/#/requirements/8c7b69a1-ddb1-42a0-91c3-0148e1fb7840\""));
+        assertTrue(html.contains("查看需求详情"));
     }
 
     @Test
@@ -210,7 +214,7 @@ class SmtpMailNotificationAdapterTests {
         String malicious = "<script>alert(1)</script>";
         NotificationCommand command = NotificationCommand.forEvent(
                 new ReviewId(UUID.randomUUID()), "TASK_HANDOFF", 1L, "smtp-mail", "reviewer@qq.com", null,
-                "task-handoff", malicious, null, null, null, null);
+                "task-handoff", malicious, null, null, null, null, null);
 
         adapter.deliver(command);
 
