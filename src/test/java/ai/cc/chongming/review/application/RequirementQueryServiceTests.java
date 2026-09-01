@@ -112,15 +112,13 @@ class RequirementQueryServiceTests {
     @Test
     void findDocumentReturnsTheStoredRawMarkdown() throws Exception {
         InMemoryRequirementRepository repository = new InMemoryRequirementRepository();
-        InMemoryReviewRegistry reviewRegistry = new InMemoryReviewRegistry();
         ReviewId reviewId = new ReviewId(UUID.randomUUID());
-        reviewRegistry.register(Review.pending(reviewId));
         Requirement requirement = Requirement.restore(
                 new RequirementId(UUID.randomUUID()), "上传需求", "", "alice", null, "cx-ai", "P1",
                 RequirementStatus.PENDING_REVIEW, reviewId, Instant.now(), Instant.now(), 0L);
         repository.save(requirement);
         String rawMarkdown = "# 需求\n\n上传原文";
-        RequirementQueryService service = serviceWithStoredDocument(repository, reviewRegistry, reviewId, rawMarkdown);
+        RequirementQueryService service = serviceWithStoredDocument(repository, reviewId, rawMarkdown);
 
         RequirementQueryService.RequirementDocumentView document = service.findDocument(requirement.id(), null);
 
@@ -142,8 +140,7 @@ class RequirementQueryServiceTests {
         repository.save(requirement);
         RequirementQueryService service = new RequirementQueryService(
                 repository,
-                new RequirementSnapshotStore(new ReviewProperties(workspaceRoot.toString(), 8, 2)),
-                new InMemoryReviewRegistry());
+                new RequirementSnapshotStore(new ReviewProperties(workspaceRoot.toString(), 8, 2)));
 
         assertThatThrownBy(() -> service.findDocument(requirement.id(), null))
                 .isInstanceOfSatisfying(RequirementDomainException.class,
@@ -158,15 +155,13 @@ class RequirementQueryServiceTests {
     @Test
     void findDocumentHonoursTheViewerVisibility() throws Exception {
         InMemoryRequirementRepository repository = new InMemoryRequirementRepository();
-        InMemoryReviewRegistry reviewRegistry = new InMemoryReviewRegistry();
         ReviewId reviewId = new ReviewId(UUID.randomUUID());
-        reviewRegistry.register(Review.pending(reviewId));
         Requirement requirement = Requirement.restore(
                 new RequirementId(UUID.randomUUID()), "上传需求", "", "alice", null, "cx-ai", "P1",
                 RequirementStatus.PENDING_REVIEW, reviewId, Instant.now(), Instant.now(), 0L);
         repository.save(requirement);
         RequirementQueryService service = serviceWithStoredDocument(
-                repository, reviewRegistry, reviewId, "# 需求\n\n可见正文");
+                repository, reviewId, "# 需求\n\n可见正文");
 
         RequirementVisibility hiddenScope = new RequirementVisibility("mallory", Set.of());
         assertThatThrownBy(() -> service.findDocument(requirement.id(), hiddenScope))
@@ -179,13 +174,42 @@ class RequirementQueryServiceTests {
                 .isEqualTo("requirement.md");
     }
 
+    /**
+     * [AIREVIEW-PLAN-112#1] 重启后内存注册表不认识已完成评审：文档读取必须只依赖磁盘快照，
+     * 且多个 attempt 并存时取最新快照。
+     */
+    @Test
+    void findDocumentServesTheLatestStoredAttemptWithoutRegistryKnowledge() throws Exception {
+        InMemoryRequirementRepository repository = new InMemoryRequirementRepository();
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        Requirement requirement = Requirement.restore(
+                new RequirementId(UUID.randomUUID()), "上传需求", "", "alice", null, "cx-ai", "P1",
+                RequirementStatus.PENDING_REVIEW, reviewId, Instant.now(), Instant.now(), 0L);
+        repository.save(requirement);
+        RequirementSnapshotStore store = new RequirementSnapshotStore(
+                new ReviewProperties(workspaceRoot.toString(), 8, 2));
+        storeSnapshot(store, reviewId, 1, "# 旧版本");
+        storeSnapshot(store, reviewId, 2, "# 新版本");
+        RequirementQueryService service = new RequirementQueryService(repository, store);
+
+        RequirementQueryService.RequirementDocumentView document = service.findDocument(requirement.id(), null);
+
+        assertThat(document.attemptNo()).isEqualTo(2);
+        assertThat(document.markdown()).isEqualTo("# 新版本");
+    }
+
     private RequirementQueryService serviceWithStoredDocument(
             InMemoryRequirementRepository repository,
-            InMemoryReviewRegistry reviewRegistry,
             ReviewId reviewId,
             String rawMarkdown) throws Exception {
         RequirementSnapshotStore store = new RequirementSnapshotStore(
                 new ReviewProperties(workspaceRoot.toString(), 8, 2));
+        storeSnapshot(store, reviewId, 1, rawMarkdown);
+        return new RequirementQueryService(repository, store);
+    }
+
+    private void storeSnapshot(
+            RequirementSnapshotStore store, ReviewId reviewId, int attemptNo, String rawMarkdown) throws Exception {
         Path rawFile = Files.createTempFile(workspaceRoot, "requirement-raw-", ".md");
         Path normalizedFile = Files.createTempFile(workspaceRoot, "requirement-normalized-", ".md");
         Files.writeString(rawFile, rawMarkdown);
@@ -194,11 +218,10 @@ class RequirementQueryServiceTests {
                 "requirement.md", rawFile, normalizedFile, "a".repeat(64), "b".repeat(64),
                 rawMarkdown.getBytes(StandardCharsets.UTF_8).length);
         RequirementSnapshot snapshot = new RequirementSnapshot(
-                UUID.randomUUID(), reviewId, 1, "reviewer", "cx-ai", null, null,
+                UUID.randomUUID(), reviewId, attemptNo, "reviewer", "cx-ai", null, null,
                 "requirement.md", "a".repeat(64), "b".repeat(64), "test",
                 new RequirementSnapshot.RequirementDocument(List.of(), List.of(), 0, 0, false),
                 Instant.now());
         store.store(snapshot, markdown, IntakeCancellation.neverCancelled());
-        return new RequirementQueryService(repository, store, reviewRegistry);
     }
 }

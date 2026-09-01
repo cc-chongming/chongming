@@ -5,10 +5,8 @@ import ai.cc.chongming.review.domain.exception.RequirementErrorCode;
 import ai.cc.chongming.review.domain.model.Requirement;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
-import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RequirementRepository;
-import ai.cc.chongming.review.domain.repository.ReviewRegistry;
 import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
 import ai.cc.chongming.review.infrastructure.document.StoredRequirementSnapshot;
 import java.io.IOException;
@@ -30,20 +28,17 @@ public class RequirementQueryService {
 
     private final RequirementRepository requirementRepository;
     private final RequirementSnapshotStore snapshotStore;
-    private final ReviewRegistry reviewRegistry;
 
     public RequirementQueryService(RequirementRepository requirementRepository) {
-        this(requirementRepository, null, ReviewRegistry.noop());
+        this(requirementRepository, null);
     }
 
     @Autowired
     public RequirementQueryService(
             RequirementRepository requirementRepository,
-            RequirementSnapshotStore snapshotStore,
-            ReviewRegistry reviewRegistry) {
+            RequirementSnapshotStore snapshotStore) {
         this.requirementRepository = Objects.requireNonNull(requirementRepository, "requirementRepository must not be null");
         this.snapshotStore = snapshotStore;
-        this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
     }
 
     @Transactional(readOnly = true)
@@ -114,14 +109,10 @@ public class RequirementQueryService {
         if (snapshotStore == null) {
             throw new IllegalStateException("RequirementSnapshotStore is not configured");
         }
-        Review review = reviewRegistry.find(reviewId)
+        // [AIREVIEW-PLAN-112#1] 磁盘扫描最新快照 attempt，不依赖内存注册表（重启后已完成评审不在注册表）。
+        int attemptNo = snapshotStore.latestStoredAttempt(reviewId)
                 .orElseThrow(() -> new RequirementDomainException(
                         RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found"));
-        int attemptNo = review.attemptNo();
-        if (!snapshotStore.hasSnapshot(reviewId, attemptNo)) {
-            throw new RequirementDomainException(
-                    RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found");
-        }
         StoredRequirementSnapshot stored = snapshotStore.stored(reviewId, attemptNo);
         Path rawMarkdownPath = stored.rawMarkdownPath();
         Path markdownPath = Files.isRegularFile(rawMarkdownPath) ? rawMarkdownPath : stored.normalizedMarkdownPath();

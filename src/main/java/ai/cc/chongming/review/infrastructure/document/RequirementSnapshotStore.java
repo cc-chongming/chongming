@@ -164,6 +164,39 @@ public class RequirementSnapshotStore {
     }
 
     /**
+     * [AIREVIEW-PLAN-112#1] Highest attempt number carrying a stored snapshot, found by scanning the
+     * workspace directories so completed reviews keep serving their document even when the
+     * in-memory review registry no longer knows them (e.g. after a process restart).
+     */
+    public java.util.Optional<Integer> latestStoredAttempt(ReviewId reviewId) {
+        Objects.requireNonNull(reviewId, "reviewId must not be null");
+        Path reviewDirectory = workspaceRoot.resolve("reviews").resolve(reviewId.value().toString()).normalize();
+        verifyWorkspacePath(reviewDirectory);
+        if (!Files.isDirectory(reviewDirectory)) {
+            return java.util.Optional.empty();
+        }
+        try (java.util.stream.Stream<Path> attempts = Files.list(reviewDirectory)) {
+            return attempts
+                    .filter(Files::isDirectory)
+                    .map(path -> path.getFileName().toString())
+                    .filter(name -> name.startsWith("attempt-"))
+                    .map(name -> parseAttemptSegment(name.substring("attempt-".length())))
+                    .filter(attempt -> attempt != null && attempt > 0 && hasSnapshot(reviewId, attempt))
+                    .max(Integer::compare);
+        } catch (IOException exception) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    private static Integer parseAttemptSegment(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    /**
      * Returns the controlled file locations for an existing immutable snapshot.
      *
      * @author wangli
