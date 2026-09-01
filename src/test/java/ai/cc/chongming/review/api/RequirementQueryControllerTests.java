@@ -137,6 +137,46 @@ class RequirementQueryControllerTests {
                 .andExpect(jsonPath("$.creatorId").value("admin"));
     }
 
+    /**
+     * [AIREVIEW-PLAN-111] Administrators fetch the uploaded requirement document through the
+     * scoped document endpoint with the filename and Markdown body intact.
+     */
+    @Test
+    void documentEndpointServesTheUploadedMarkdown() throws Exception {
+        UUID requirementId = UUID.randomUUID();
+        UUID reviewId = UUID.randomUUID();
+        RequirementQueryService.RequirementDocumentView document =
+                new RequirementQueryService.RequirementDocumentView(reviewId, 1, "requirement.md", "# 需求\n\n正文");
+        when(queryService.findDocument(eq(new RequirementId(requirementId)), isNull()))
+                .thenReturn(document);
+
+        mockMvc.perform(get("/api/requirements/{requirementId}/document", requirementId)
+                        .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, new AuthPrincipal("admin", "管理员", "ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewId").value(reviewId.toString()))
+                .andExpect(jsonPath("$.attemptNo").value(1))
+                .andExpect(jsonPath("$.filename").value("requirement.md"))
+                .andExpect(jsonPath("$.markdown").value("# 需求\n\n正文"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-111] Hidden or missing requirement documents surface the same 404 contract
+     * as the detail read without leaking existence.
+     */
+    @Test
+    void hiddenDocumentSurfacesNotFoundWithoutLeakingExistence() throws Exception {
+        UUID requirementId = UUID.randomUUID();
+        when(devTaskRepository.findRequirementIdsByAssignee("dev-zhang")).thenReturn(Set.of());
+        when(queryService.findDocument(eq(new RequirementId(requirementId)), any(RequirementVisibility.class)))
+                .thenThrow(new RequirementDomainException(
+                        RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found"));
+
+        mockMvc.perform(get("/api/requirements/{requirementId}/document", requirementId)
+                        .requestAttr(AuthJwtFilter.PRINCIPAL_ATTRIBUTE, new AuthPrincipal("dev-zhang", "张开发", "DEVELOPER")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("REQUIREMENT_NOT_FOUND"));
+    }
+
     private RequirementPage emptyPage() {
         return new RequirementPage(List.of(), 1, 20, 0);
     }

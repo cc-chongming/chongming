@@ -5,9 +5,18 @@ import ai.cc.chongming.review.domain.exception.RequirementErrorCode;
 import ai.cc.chongming.review.domain.model.Requirement;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
+import ai.cc.chongming.review.domain.model.Review;
+import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
 import ai.cc.chongming.review.domain.repository.RequirementRepository;
+import ai.cc.chongming.review.domain.repository.ReviewRegistry;
+import ai.cc.chongming.review.infrastructure.document.RequirementSnapshotStore;
+import ai.cc.chongming.review.infrastructure.document.StoredRequirementSnapshot;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,9 +29,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class RequirementQueryService {
 
     private final RequirementRepository requirementRepository;
+    private final RequirementSnapshotStore snapshotStore;
+    private final ReviewRegistry reviewRegistry;
 
     public RequirementQueryService(RequirementRepository requirementRepository) {
+        this(requirementRepository, null, ReviewRegistry.noop());
+    }
+
+    @Autowired
+    public RequirementQueryService(
+            RequirementRepository requirementRepository,
+            RequirementSnapshotStore snapshotStore,
+            ReviewRegistry reviewRegistry) {
         this.requirementRepository = Objects.requireNonNull(requirementRepository, "requirementRepository must not be null");
+        this.snapshotStore = snapshotStore;
+        this.reviewRegistry = Objects.requireNonNull(reviewRegistry, "reviewRegistry must not be null");
     }
 
     @Transactional(readOnly = true)
@@ -57,6 +78,14 @@ public class RequirementQueryService {
      */
     @Transactional(readOnly = true)
     public RequirementView findById(RequirementId requirementId, RequirementRepository.RequirementVisibility visibility) {
+        return RequirementView.from(requireVisible(requirementId, visibility));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-111] Shared existence and visibility gate for detail and document reads;
+     * hidden requirements surface the same not-found error as missing ones.
+     */
+    private Requirement requireVisible(RequirementId requirementId, RequirementRepository.RequirementVisibility visibility) {
         Requirement requirement = requirementRepository
                 .findById(Objects.requireNonNull(requirementId, "requirementId must not be null"))
                 .orElseThrow(() -> new RequirementDomainException(
@@ -65,7 +94,45 @@ public class RequirementQueryService {
             throw new RequirementDomainException(
                     RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement was not found");
         }
-        return RequirementView.from(requirement);
+        return requirement;
+    }
+
+    /**
+     * [AIREVIEW-PLAN-111] Returns the raw Markdown uploaded for the requirement's active review
+     * attempt. Requirements without a bound review, an unregistered review or a missing snapshot
+     * surface the same {@code REQUIREMENT_NOT_FOUND} contract as missing requirements.
+     */
+    @Transactional(readOnly = true)
+    public RequirementDocumentView findDocument(
+            RequirementId requirementId, RequirementRepository.RequirementVisibility visibility) {
+        Requirement requirement = requireVisible(requirementId, visibility);
+        ReviewId reviewId = requirement.reviewId();
+        if (reviewId == null) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found");
+        }
+        if (snapshotStore == null) {
+            throw new IllegalStateException("RequirementSnapshotStore is not configured");
+        }
+        Review review = reviewRegistry.find(reviewId)
+                .orElseThrow(() -> new RequirementDomainException(
+                        RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found"));
+        int attemptNo = review.attemptNo();
+        if (!snapshotStore.hasSnapshot(reviewId, attemptNo)) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found");
+        }
+        StoredRequirementSnapshot stored = snapshotStore.stored(reviewId, attemptNo);
+        Path rawMarkdownPath = stored.rawMarkdownPath();
+        Path markdownPath = Files.isRegularFile(rawMarkdownPath) ? rawMarkdownPath : stored.normalizedMarkdownPath();
+        String markdown;
+        try {
+            markdown = Files.readString(markdownPath);
+        } catch (IOException exception) {
+            throw new RequirementDomainException(
+                    RequirementErrorCode.REQUIREMENT_NOT_FOUND, "requirement document was not found");
+        }
+        return new RequirementDocumentView(reviewId.value(), attemptNo, rawMarkdownPath.getFileName().toString(), markdown);
     }
 
     private boolean visibleTo(Requirement requirement, RequirementRepository.RequirementVisibility visibility) {
@@ -153,6 +220,18 @@ public class RequirementQueryService {
                     requirement.updatedAt().toString(),
                     remote);
         }
+    }
+
+    /**
+     * [AIREVIEW-PLAN-111] Uploaded Markdown requirement document for the active review attempt.
+     *
+     * @author wangli
+     */
+    public record RequirementDocumentView(
+            java.util.UUID reviewId,
+            int attemptNo,
+            String filename,
+            String markdown) {
     }
 
     /**

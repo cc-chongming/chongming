@@ -10,6 +10,7 @@ import { humanizeGateReason } from '../services/review-conclusion-presenter';
 import RepositorySelect from '../components/RepositorySelect.vue';
 import RepositorySourcePicker from '../components/RepositorySourcePicker.vue';
 import RequirementDocInput from '../components/RequirementDocInput.vue';
+import SafeMarkdown from '../components/SafeMarkdown.vue';
 
 // [AIREVIEW-PLAN-023#2] Draft repository edits use the configured repository selector.
 // [AIREVIEW-PLAN-023#3] Draft review launch is one idempotent multipart command.
@@ -18,6 +19,8 @@ import RequirementDocInput from '../components/RequirementDocInput.vue';
 const props = defineProps({ requirementId: { type: String, required: true } });
 const router = useRouter();
 const requirement = ref(null);
+// [AIREVIEW-PLAN-111] Uploaded Markdown document; null when the requirement has no snapshot.
+const requirementDocument = ref(null);
 const error = ref('');
 const loading = ref(true);
 const changing = ref(false);
@@ -290,6 +293,12 @@ async function load() {
     try {
         requirement.value = await reviewApi.getRequirement(props.requirementId);
         await loadRelatedTasks();
+        // [AIREVIEW-PLAN-111] The uploaded document is optional: a missing snapshot (404) or a
+        // transient failure degrades to null and the description fallback stays visible.
+        const [documentResult] = await Promise.allSettled([
+            reviewApi.getRequirementDocument(props.requirementId)
+        ]);
+        requirementDocument.value = documentResult.status === 'fulfilled' ? (documentResult.value ?? null) : null;
         if (requirement.value.reviewId) {
             const [summary, gates, claimItems] = await Promise.all([
                 reviewApi.getSummary(requirement.value.reviewId).catch(() => null),
@@ -518,8 +527,13 @@ onMounted(refreshRepositoryAvailability);
                     </div>
 
                     <div class="card" style="margin-bottom:16px">
-                        <div class="card-hd"><span class="card-ico">📄</span><div class="card-nm">需求文档</div></div>
-                        <div class="card-bd"><pre class="rd-doc">{{ requirement.description || '未填写需求描述。' }}</pre></div>
+                        <div class="card-hd"><span class="card-ico">📄</span><div class="card-nm">需求文档</div>
+                            <span v-if="requirementDocument?.markdown" class="card-hint">{{ requirementDocument.filename }}</span>
+                        </div>
+                        <div class="card-bd">
+                            <SafeMarkdown v-if="requirementDocument?.markdown" :content="requirementDocument.markdown" />
+                            <pre v-else class="rd-doc">{{ requirement.description || '未填写需求描述。' }}</pre>
+                        </div>
                     </div>
 
                     <div class="card">

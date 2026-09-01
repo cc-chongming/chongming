@@ -189,6 +189,18 @@ describe('requirement platform API', () => {
         expect(options.body.get('expectedVersion')).toBe('2');
     });
 
+    // [AIREVIEW-PLAN-111] The uploaded requirement document comes from the snapshot endpoint.
+    it('fetches the uploaded requirement document from the snapshot endpoint', async () => {
+        const payload = { reviewId, attemptNo: 1, filename: 'requirement.md', markdown: '# 需求\n正文' };
+        const fetchMock = vi.fn().mockResolvedValue(response(payload));
+        globalThis.fetch = fetchMock;
+
+        const document = await reviewApi.getRequirementDocument('requirement-001');
+
+        expect(fetchMock.mock.calls[0][0]).toBe('/api/requirements/requirement-001/document');
+        expect(document).toEqual(payload);
+    });
+
     // [AIREVIEW-PLAN-025] Typed Markdown travels as requirementText without a file part.
     it('sends typed Markdown as requirementText when no file is provided', async () => {
         const fetchMock = vi.fn().mockResolvedValue(response({

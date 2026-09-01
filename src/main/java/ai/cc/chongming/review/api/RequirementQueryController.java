@@ -53,4 +53,13 @@ public class RequirementQueryController {
             @PathVariable UUID requirementId, HttpServletRequest request) {
         return queryService.findById(new RequirementId(requirementId), visibilityResolver.visibilityFor(request));
     }
+
+    /**
+     * [AIREVIEW-PLAN-111] Serves the uploaded Markdown requirement document for the active review attempt.
+     */
+    @GetMapping("/{requirementId}/document")
+    public RequirementQueryService.RequirementDocumentView document(
+            @PathVariable UUID requirementId, HttpServletRequest request) {
+        return queryService.findDocument(new RequirementId(requirementId), visibilityResolver.visibilityFor(request));
+    }
 }

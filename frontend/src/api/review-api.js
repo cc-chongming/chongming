@@ -174,6 +174,11 @@ export const reviewApi = {
         return request(`/api/requirements/${requirementId}`);
     },
 
+    // [AIREVIEW-PLAN-111] Uploaded Markdown snapshot for the requirement's active review attempt.
+    getRequirementDocument(requirementId) {
+        return request(`/api/requirements/${requirementId}/document`);
+    },
+
     reviseRequirement(requirementId, draft) {
         return request(`/api/requirements/${requirementId}`, { method: 'PUT', ...jsonBody(draft) });
     },
