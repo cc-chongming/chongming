@@ -54,3 +54,20 @@ export function resolvePhaseLanding({ stage, runtimeItems = [], scoutConcluded =
     if (byStage === 4 && !debateStarted) return 3;
     return byStage;
 }
+
+// [AIREVIEW-PLAN-113#1] 人工决策在 phases 数组中的索引（与 PHASE_INDEX_BY_STAGE 对齐）。
+export const HUMAN_PHASE_INDEX = PHASE_INDEX_BY_STAGE.WAITING_HUMAN;
+
+/**
+ * [AIREVIEW-PLAN-113#1] 手动阶段钉住的解除时机。
+ *
+ * 手动点选阶段（selectedPhase）原本永久压制被动落位，导致评审进入待人工决策后
+ * 视图仍停留在早前点选的步骤（如议题裁决），人工决策面板永远不出现。
+ * 规则：仅当落位目标进入人工决策区间（target >= HUMAN_PHASE_INDEX）且钉住仍停在
+ * 更早阶段时解除钉住，交由节奏层落位人工决策；到达后用户再手动回看（stage 不再
+ * 跃迁）仍受尊重，不会被抢回。
+ */
+export function shouldReleasePhasePin({ targetIndex = -1, pinnedIndex = null } = {}) {
+    if (pinnedIndex == null || pinnedIndex < 0) return false;
+    return targetIndex >= HUMAN_PHASE_INDEX && pinnedIndex < targetIndex;
+}
