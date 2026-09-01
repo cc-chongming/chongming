@@ -393,6 +393,14 @@ dd { margin: .15rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
 /* [AIREVIEW-PLAN-102#3] 裁决理由结构化分段：段落间距 + 标签加粗可读性。 */
 .judge-reason p, .flow-judgement-reason p { margin: .3rem 0; line-height: 1.6; }
 .judge-reason p strong, .flow-judgement-reason p strong { margin-right: .25rem; }
+/* [AIREVIEW-PLAN-103#3] 决策依据各方主张：立场色条 + 小字列表。 */
+.judge-position-list { margin: .45rem 0 0; padding: 0; list-style: none; display: grid; gap: .3rem; }
+.judge-position-list li { display: grid; gap: .12rem; padding: .4rem .55rem; border: 1px solid var(--flow-border); border-radius: .45rem; background: #fff; }
+.judge-position-list li strong { font-size: .68rem; color: #44403c; }
+.judge-position-list li span { color: #57534e; font-size: .72rem; line-height: 1.55; }
+.judge-position-list li.oppose { border-left: 3px solid var(--flow-red); }
+.judge-position-list li.support { border-left: 3px solid var(--flow-green); }
+.judge-position-list li.neutral { border-left: 3px solid #a8a29e; }
 .flow-verdict-text { flex: 1; min-width: 12rem; color: #cfd6e6; font-size: .76rem; }
 .flow-verdict-btns { display: flex; flex-wrap: wrap; gap: .45rem; }
 .flow-verdict-btns a { padding: .35rem .75rem; border: 1px solid var(--flow-border); border-radius: .4rem; color: var(--flow-text); font-size: .7rem; font-weight: 700; text-decoration: none; }.flow-verdict-btns a:hover { filter: brightness(1.15); }

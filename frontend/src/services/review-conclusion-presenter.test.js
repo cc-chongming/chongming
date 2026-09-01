@@ -200,4 +200,20 @@ describe('judgement reason blocks [AIREVIEW-PLAN-102#1]', () => {
         expect(judgementReasonBlocks('自由文本没有标签')).toEqual([{ label: null, text: '自由文本没有标签' }]);
         expect(judgementReasonBlocks('')).toEqual([]);
     });
+
+    // [AIREVIEW-PLAN-103#1] 自冲突议题的反对原文必须进入决策依据：positions 质疑置前。
+    it('projects topic claim positions with oppose first', () => {
+        const result = presentDebateJudgement({
+            topicId: 'topic-2',
+            subjectKey: 'self-conflict',
+            claims: [
+                { role: 'PRODUCT', position: 'SUPPORT', severity: 'P2', statement: '支持陈述' },
+                { role: 'PRODUCT', position: 'OPPOSE', severity: 'P1', statement: '反对点' }
+            ],
+            judgement: { result: 'CONDITIONAL', reasonSummary: '理由', acceptedClaimIds: [], rejectedClaimIds: [] }
+        }, []);
+        expect(result.positions.map((position) => position.position)).toEqual(['OPPOSE', 'SUPPORT']);
+        expect(result.positions[0].statement).toBe('反对点');
+        expect(result.positions[0].role).toBe('PRODUCT');
+    });
 });

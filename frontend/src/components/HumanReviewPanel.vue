@@ -46,6 +46,22 @@ const judgeTallyText = computed(() => {
 });
 // [AIREVIEW-PLAN-023#6.3] AI 草案理由的中文人话版；解析失败时回退为机器原文。
 const draftHumanizedReason = computed(() => humanizeGateReason(props.gateDraft?.reasonSummary));
+// [AIREVIEW-PLAN-103#2] 决策依据「各方主张」列表的角色中文与立场徽标。
+const POSITION_META = {
+    OPPOSE: { label: '质疑', cls: 'oppose' },
+    SUPPORT: { label: '支持', cls: 'support' },
+    NEUTRAL: { label: '中立', cls: 'neutral' }
+};
+function positionMeta(position) {
+    return POSITION_META[position] ?? { label: position ?? '中立', cls: 'neutral' };
+}
+function roleTitle(role) {
+    return {
+        CONTEXT_SCOUT: '上下文侦察', DIRECTOR: '协调者', PRODUCT: '产品经理', PROJECT: '项目经理',
+        FRONTEND: '前端工程师', BACKEND: '后端工程师', ARCHITECTURE: '架构师', SECURITY: '安全工程师',
+        TESTING: '测试工程师', PERFORMANCE: '性能工程师', JUDGE: '裁决者'
+    }[role] ?? role ?? '智能体';
+}
 // 仅当草案结论需要人工决策时，在引导里补充触发原因。
 const draftTriggerReason = computed(() => {
     if (!props.gateDraft || gateComparison.value.draftLabel !== '需要人工决策') {
@@ -122,6 +138,13 @@ async function finalizeDecision() {
                         <div><strong>{{ judge.resultLabel }}</strong><span class="judge-topic-title">{{ judge.title ?? judge.subjectKey }}</span><code v-if="judge.title" class="judge-topic-tech">{{ judge.subjectKey }}</code></div>
                         <!-- [AIREVIEW-PLAN-102#2] 裁决理由分段分行、标签加粗。 -->
                         <div class="judge-reason"><p v-for="(block, index) in judgementReasonBlocks(judge.reason)" :key="index"><strong v-if="block.label">{{ block.label }}</strong><span>{{ block.text }}</span></p></div>
+                        <!-- [AIREVIEW-PLAN-103#2] 各方原始主张可见：自冲突议题无辩论过程，反对方原文仍须呈现给决策者。 -->
+                        <ul v-if="judge.positions && judge.positions.length" class="judge-position-list" aria-label="议题各方主张">
+                            <li v-for="(claim, claimIndex) in judge.positions" :key="claimIndex" :class="positionMeta(claim.position).cls">
+                                <strong>{{ positionMeta(claim.position).label }} · {{ roleTitle(claim.role) }}<template v-if="claim.severity"> · {{ claim.severity }}</template></strong>
+                                <span>{{ claim.statement || '该 Claim 暂无公开正文。' }}</span>
+                            </li>
+                        </ul>
                         <small>采信 {{ judge.accepted.length }} 项 · 拒绝 {{ judge.rejected.length }} 项</small>
                     </li>
                 </ul>

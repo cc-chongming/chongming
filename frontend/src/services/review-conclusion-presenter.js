@@ -18,9 +18,21 @@ function claimsForIds(ids = [], claims = []) {
     return ids.map((id) => byId.get(String(id)) ?? { claimId: id, missing: true });
 }
 
+// [AIREVIEW-PLAN-103#1] 决策依据要能看到各方原始主张：自冲突议题（反对者即支持者）没有
+// 辩论过程，人工决策者仍需看到反对方原文。质疑置前，其次支持、中立。
+const POSITION_ORDER = { OPPOSE: 0, SUPPORT: 1, NEUTRAL: 2 };
 export function presentDebateJudgement(debate, claims = []) {
     const judgement = debate?.judgement ?? null;
     if (!judgement) return null;
+    const positions = (Array.isArray(debate.claims) ? debate.claims : [])
+        .slice()
+        .sort((left, right) => (POSITION_ORDER[left.position] ?? 3) - (POSITION_ORDER[right.position] ?? 3))
+        .map((claim) => ({
+            role: claim.role ?? null,
+            position: claim.position ?? null,
+            severity: claim.severity ?? null,
+            statement: claim.statement ?? ''
+        }));
     return {
         topicId: debate.topicId ?? debate.subjectKey,
         subjectKey: debate.subjectKey ?? '未命名议题',
@@ -31,6 +43,7 @@ export function presentDebateJudgement(debate, claims = []) {
         reason: judgement.reasonSummary?.trim() || '未提供公开裁决理由。',
         accepted: claimsForIds(judgement.acceptedClaimIds, claims),
         rejected: claimsForIds(judgement.rejectedClaimIds, claims),
+        positions,
         createdAt: judgement.createdAt ?? null
     };
 }
