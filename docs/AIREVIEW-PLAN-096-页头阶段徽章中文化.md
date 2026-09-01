@@ -9,6 +9,8 @@
   - 连接态（review-flow-header-status）不再拼接 `· {{ stage }}`，仅保留「运行流已连接 / 正在连接运行流 / 运行已失败 …」；
   - 阶段徽章（flow-stage-chip）改用既有 `stageLabel` 映射（INITIAL_REVIEW→初审中、JUDGING→裁决中、WAITING_HUMAN→待人工决策 等），未知枚举回退原值。
 
+- [AIREVIEW-PLAN-096#2] 冲突检测空态文案去英文：「当支持方与质疑方同时提交 Claim 后，ConflictDetector 会在此汇总冲突组。」→「当支持方与质疑方同时提交主张后，冲突检测会在此汇总冲突组。」（类名与英文术语不再外露；Claim 作为领域术语在卡片/报告中保留既有用法）。
+
 ## 验收
 - 页头不再出现裸英文 stage；徽章与列表页中文标签一致；
 - vitest 全绿；vite build 同步至 static/review 与 target/classes。

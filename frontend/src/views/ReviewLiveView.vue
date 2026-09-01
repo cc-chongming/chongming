@@ -788,7 +788,8 @@ onUnmounted(() => loadQueue.dispose());
                             </template>
                         </article>
                     </section>
-                    <div v-else class="flow-empty"><strong>尚未检测到立场冲突</strong><p>当支持方与质疑方同时提交 Claim 后，ConflictDetector 会在此汇总冲突组。</p></div>
+                    <!-- [AIREVIEW-PLAN-096#2] 空态文案去英文：类名与术语不再外露。 -->
+                    <div v-else class="flow-empty"><strong>尚未检测到立场冲突</strong><p>当支持方与质疑方同时提交主张后，冲突检测会在此汇总冲突组。</p></div>
 
                     <section class="flow-stream-panel flow-conflict-director" aria-label="协调者冲突处置">
                         <!-- [AIREVIEW-PLAN-049#1] 协调者卡头像资产 -->
