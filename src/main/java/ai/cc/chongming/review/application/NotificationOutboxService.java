@@ -10,6 +10,7 @@ import ai.cc.chongming.review.domain.model.HumanGateDecision;
 import ai.cc.chongming.review.domain.model.NotificationCommand;
 import ai.cc.chongming.review.domain.model.NotificationDeliveryReceipt;
 import ai.cc.chongming.review.domain.model.NotificationOutboxEntry;
+import ai.cc.chongming.review.domain.model.Requirement;
 import ai.cc.chongming.review.domain.model.Review;
 import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
 import ai.cc.chongming.review.domain.model.ReviewTypes.ReviewId;
@@ -333,6 +334,18 @@ public class NotificationOutboxService implements ReviewEventListener {
         String objectHolder = payload.get("holder");
         // [AIREVIEW-PLAN-110#1] 需求详情按钮深链需要需求 id。
         String requirementId = payload.get("requirementId");
+        // [AIREVIEW-PLAN-115#1] 非任务事件（如待人工决策）payload 无需求 id：
+        // 按 reviewId 反查需求，邮件才能与流转邮件一样带「查看需求详情」按钮。
+        if (requirementId == null || requirementId.isBlank()) {
+            Requirement boundRequirement = requirementRepository == null
+                    ? null : requirementRepository.findByReviewId(event.reviewId()).orElse(null);
+            if (boundRequirement != null) {
+                requirementId = boundRequirement.id().value().toString();
+                if (objectSubtitle == null || objectSubtitle.isBlank()) {
+                    objectSubtitle = boundRequirement.title();
+                }
+            }
+        }
         for (String username : recipients) {
             User user = userRepository.findByUsername(username).orElse(null);
             if (user == null) {

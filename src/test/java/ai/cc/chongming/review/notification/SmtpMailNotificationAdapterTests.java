@@ -219,7 +219,7 @@ class SmtpMailNotificationAdapterTests {
         NotificationCommand command = NotificationCommand.forEvent(
                 reviewId, "HUMAN_REVIEW_REQUIRED", 7L, "smtp-mail", "reviewer@qq.com", "admin",
                 "ai-review-awaiting-decision", "AI 评审完成，待人工决策",
-                null, null, null, null, null);
+                null, "testv16", null, null, "8c7b69a1-ddb1-42a0-91c3-0148e1fb7840");
 
         adapter.deliver(command);
 
@@ -231,6 +231,10 @@ class SmtpMailNotificationAdapterTests {
         assertTrue(html.contains("href=\"http://example.org/review/#/reviews/" + reviewId.value() + "/live\""));
         assertTrue(html.contains("进入人工决策"));
         assertFalse(html.contains("查看评审报告"));
+        // [AIREVIEW-PLAN-115#1] 与流转邮件一致：待人工决策邮件同样带「查看需求详情」次按钮。
+        assertTrue(html.contains("href=\"http://example.org/review/#/requirements/8c7b69a1-ddb1-42a0-91c3-0148e1fb7840\""));
+        assertTrue(html.contains("查看需求详情"));
+        assertTrue(html.contains(">需求</td>"));
     }
 
     @Test

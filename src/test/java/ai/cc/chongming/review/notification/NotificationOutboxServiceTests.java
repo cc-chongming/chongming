@@ -11,6 +11,9 @@ import ai.cc.chongming.review.domain.event.ReviewEvent;
 import ai.cc.chongming.review.domain.event.ReviewEventCategory;
 import ai.cc.chongming.review.domain.event.ReviewEventType;
 import ai.cc.chongming.review.domain.model.HumanGateDecision;
+import ai.cc.chongming.review.domain.model.Requirement;
+import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementId;
+import ai.cc.chongming.review.domain.model.RequirementTypes.RequirementStatus;
 import ai.cc.chongming.review.domain.model.NotificationDeliveryReceipt;
 import ai.cc.chongming.review.domain.model.NotificationOutboxEntry;
 import ai.cc.chongming.review.domain.model.NotificationOutboxEntry.DeliveryStatus;
@@ -24,6 +27,7 @@ import ai.cc.chongming.review.infrastructure.event.InMemoryReviewEventStore;
 import ai.cc.chongming.review.infrastructure.human.InMemoryHumanGateDecisionStore;
 import ai.cc.chongming.review.infrastructure.notification.InMemoryNotificationOutboxStore;
 import ai.cc.chongming.review.infrastructure.notification.NotificationDeliveryRouter;
+import ai.cc.chongming.review.infrastructure.review.InMemoryRequirementRepository;
 import ai.cc.chongming.review.infrastructure.review.InMemoryReviewRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -186,6 +190,39 @@ class NotificationOutboxServiceTests {
         assertEquals(NotificationDeliveryRouter.MAIL_CHANNEL, queued.command().channel());
         assertEquals("dev@qq.com", queued.command().destination());
         assertEquals(DeliveryStatus.PENDING, queued.deliveryStatus());
+    }
+
+    /**
+     * [AIREVIEW-PLAN-115#1] 待人工决策事件自身不带需求 id：outbox 按 reviewId 反查需求，
+     * 使邮件与流转邮件一样携带「查看需求详情」按钮数据。
+     */
+    @Test
+    void humanReviewRequiredMatrixCommandIsEnrichedWithTheBoundRequirement() {
+        UserRepository userRepository = mock(UserRepository.class);
+        when(userRepository.findAll()).thenReturn(List.of(
+                new UserRepository.UserView("admin", "Admin", "ADMIN", null, "admin@qq.com")));
+        when(userRepository.findByUsername("admin")).thenReturn(Optional.of(
+                new User(9L, "admin", "hash", "Admin", "ADMIN", null, "admin@qq.com")));
+        InMemoryRequirementRepository requirementRepository = new InMemoryRequirementRepository();
+        RequirementId requirementId = new RequirementId(UUID.randomUUID());
+        requirementRepository.save(Requirement.restore(
+                requirementId, "testv16", "", "alice", null, "cx-ai", "P1",
+                RequirementStatus.PENDING_REVIEW, reviewId, now, now, 0L));
+        NotificationOutboxService matrixService = new NotificationOutboxService(
+                outboxStore, decisionStore, registry, new ReviewStateMachine(), events,
+                new NotificationOutboxProperties(false, false, "smtp-mail", "fallback@example.com",
+                        "MISSING_TEST_TOKEN", 3, Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                Clock.fixed(now, ZoneOffset.UTC), orchestrationService,
+                userRepository, requirementRepository, null);
+
+        ReviewEvent event = new ReviewEvent(UUID.randomUUID(), 11L, reviewId, 1,
+                ReviewEventType.HUMAN_REVIEW_REQUIRED, ReviewEventCategory.HUMAN, ReviewStage.WAITING_HUMAN,
+                RoleType.JUDGE, null, null, null, null, null, 90, now, 1, Map.of("reason", "await"));
+        matrixService.onCommitted(event);
+
+        NotificationOutboxEntry queued = service.findByReview(reviewId).getFirst();
+        assertEquals(requirementId.value().toString(), queued.command().requirementId());
+        assertEquals("testv16", queued.command().objectSubtitle());
     }
 
     @Test
