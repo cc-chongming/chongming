@@ -141,6 +141,11 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             if (requirementUrl(command) != null) {
                 body.append("- 需求详情: ").append(requirementUrl(command)).append('\n');
             }
+            // [AIREVIEW-PLAN-114#1] 纯文本兜底同步给出工作台深链。
+            if (properties.publicBaseUrl() != null && !properties.publicBaseUrl().isBlank()) {
+                body.append("- 工作台: ").append(properties.publicBaseUrl())
+                        .append("/#/reviews/").append(command.reviewId().value()).append("/live\n");
+            }
             body.append("- 报告接口: ").append(command.reportUrl()).append('\n');
             body.append("- 幂等键: ").append(command.idempotencyKey()).append('\n');
             return body.toString();
@@ -246,11 +251,21 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
             }
         }
 
-        // [AIREVIEW-PLAN-109] The workbench SPA uses hash history under /review/, so the deep
-        // link must be publicBaseUrl + "/#/reviews/{id}/report" instead of a server-path URL.
-        String ctaHref = properties.publicBaseUrl() != null && !properties.publicBaseUrl().isBlank()
-                ? properties.publicBaseUrl() + "/#/reviews/" + command.reviewId().value() + "/report"
-                : command.reportUrl();
+        // [AIREVIEW-PLAN-114#1] 报告仅在最终结论后生成：待人工决策/任务类邮件的 CTA 落实时
+        // 工作台（人工决策邮件落人工决策视图），避免点开「尚无报告」空页；Gate 邮件才落报告页。
+        boolean hasPublicBase = properties.publicBaseUrl() != null && !properties.publicBaseUrl().isBlank();
+        boolean gateMail = command.templateKey() == null;
+        String ctaHref;
+        String ctaText;
+        if (!gateMail && hasPublicBase) {
+            ctaHref = properties.publicBaseUrl() + "/#/reviews/" + command.reviewId().value() + "/live";
+            ctaText = "HUMAN_REVIEW_REQUIRED".equals(command.eventType()) ? "进入人工决策" : "查看评审工作台";
+        } else {
+            ctaHref = hasPublicBase
+                    ? properties.publicBaseUrl() + "/#/reviews/" + command.reviewId().value() + "/report"
+                    : command.reportUrl();
+            ctaText = "查看评审报告";
+        }
         String requirementUrl = requirementUrl(command);
 
         StringBuilder html = new StringBuilder();
@@ -283,7 +298,7 @@ public class SmtpMailNotificationAdapter implements NotificationDeliveryPort {
         html.append("        </tr>\n");
         html.append("        <tr>\n");
         html.append("          <td style=\"padding:24px;\">\n");
-        html.append("            <a href=\"").append(escapeHtml(ctaHref)).append("\" style=\"display:inline-block;background-color:#2563eb;color:#ffffff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;\">查看评审报告</a>\n");
+        html.append("            <a href=\"").append(escapeHtml(ctaHref)).append("\" style=\"display:inline-block;background-color:#2563eb;color:#ffffff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;\">").append(escapeHtml(ctaText)).append("</a>\n");
         if (requirementUrl != null) {
             // [AIREVIEW-PLAN-110#1] 次按钮：需求详情页哈希深链。
             html.append("            <a href=\"").append(escapeHtml(requirementUrl)).append("\" style=\"display:inline-block;margin-left:10px;background-color:#ffffff;color:#2563eb;border:1px solid #2563eb;padding:9px 22px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px;\">查看需求详情</a>\n");

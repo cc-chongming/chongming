@@ -195,12 +195,42 @@ class SmtpMailNotificationAdapterTests {
         assertTrue(html.contains(">开发中</td>"));
         assertTrue(html.contains(">当前持有人</td>"));
         assertTrue(html.contains(">wangli</td>"));
-        // [AIREVIEW-PLAN-109] Hash-history deep link: /review/#/reviews/{id}/report.
-        assertTrue(html.contains("href=\"http://example.org/review/#/reviews/" + reviewId.value() + "/report\""));
-        assertTrue(html.contains("查看评审报告"));
+        // [AIREVIEW-PLAN-114#1] 任务类邮件 CTA 落实时工作台（报告仅最终结论后生成）。
+        assertTrue(html.contains("href=\"http://example.org/review/#/reviews/" + reviewId.value() + "/live\""));
+        assertTrue(html.contains("查看评审工作台"));
         // [AIREVIEW-PLAN-110#1] 次按钮：需求详情哈希深链。
         assertTrue(html.contains("href=\"http://example.org/review/#/requirements/8c7b69a1-ddb1-42a0-91c3-0148e1fb7840\""));
         assertTrue(html.contains("查看需求详情"));
+    }
+
+    /**
+     * [AIREVIEW-PLAN-114#1] 待人工决策邮件的 CTA 直达人工决策视图，而非尚未生成的报告页。
+     */
+    @Test
+    void humanReviewRequiredMailLinksStraightToTheLiveWorkbench() throws Exception {
+        JavaMailSender mailSender = mock(JavaMailSender.class);
+        when(mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+        SmtpMailNotificationAdapter adapter = new SmtpMailNotificationAdapter(
+                new NotificationMailProperties("smtp.qq.com", 465, "sender@qq.com", AUTH_CODE_ENV,
+                        "【重明需求评审】", null, "http://example.org/review"),
+                mailSender,
+                env -> AUTH_CODE_ENV.equals(env) ? "test-auth-code" : null);
+        ReviewId reviewId = new ReviewId(UUID.randomUUID());
+        NotificationCommand command = NotificationCommand.forEvent(
+                reviewId, "HUMAN_REVIEW_REQUIRED", 7L, "smtp-mail", "reviewer@qq.com", "admin",
+                "ai-review-awaiting-decision", "AI 评审完成，待人工决策",
+                null, null, null, null, null);
+
+        adapter.deliver(command);
+
+        ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(captor.capture());
+        MimeMessage sent = captor.getValue();
+        sent.saveChanges();
+        String html = partBody(sent, "text/html");
+        assertTrue(html.contains("href=\"http://example.org/review/#/reviews/" + reviewId.value() + "/live\""));
+        assertTrue(html.contains("进入人工决策"));
+        assertFalse(html.contains("查看评审报告"));
     }
 
     @Test
